@@ -27,6 +27,8 @@ constexpr int CLR_TEXT_LIGHT = 15;
 constexpr int CLR_TEXT_DARK = 0;
 constexpr int CLR_MSG_BG = 243;
 constexpr int CLR_MSG_BAR = 244;
+constexpr int CLR_ACCENT = 247;
+constexpr int CLR_WINDOW_BORDER = 248;
 
 struct MDGUI_Window {
   std::string id;
@@ -923,11 +925,11 @@ int mdgui_begin_window(MDGUI_Context *ctx, const char *title, int x, int y, int 
                                            ctx->input.mouse_y) == idx) ||
                       (win.z == ctx->z_counter);
 
-  // Slim gray border around the whole window
-  mdgui_draw_hline_idx(nullptr, CLR_BUTTON_SURFACE, win.x - 1, win.y - 1, win.x + win.w + 1);
-  mdgui_draw_hline_idx(nullptr, CLR_BUTTON_SURFACE, win.x - 1, win.y + win.h + 1, win.x + win.w + 1);
-  mdgui_draw_vline_idx(nullptr, CLR_BUTTON_SURFACE, win.x - 1, win.y - 1, win.y + win.h + 1);
-  mdgui_draw_vline_idx(nullptr, CLR_BUTTON_SURFACE, win.x + win.w + 1, win.y - 1, win.y + win.h + 1);
+  // Slim border around the whole window using theme accent color
+  mdgui_draw_hline_idx(nullptr, CLR_WINDOW_BORDER, win.x - 1, win.y - 1, win.x + win.w + 1);
+  mdgui_draw_hline_idx(nullptr, CLR_WINDOW_BORDER, win.x - 1, win.y + win.h + 1, win.x + win.w + 1);
+  mdgui_draw_vline_idx(nullptr, CLR_WINDOW_BORDER, win.x - 1, win.y - 1, win.y + win.h + 1);
+  mdgui_draw_vline_idx(nullptr, CLR_WINDOW_BORDER, win.x + win.w + 1, win.y - 1, win.y + win.h + 1);
   mdgui_fill_rect_idx(nullptr, CLR_BOX_TITLE, win.x, win.y, win.w, title_h);
   mdgui_fill_rect_idx(nullptr, CLR_BOX_BODY, win.x, win.y + title_h, win.w,
            win.h - title_h - 2);
@@ -1231,13 +1233,16 @@ int mdgui_checkbox(MDGUI_Context *ctx, const char *text, bool *checked, int x,
 
   // 3D-drawn checkbox
   mdgui_fill_rect_idx(nullptr, CLR_BUTTON_SURFACE, ix, iy, box_size, box_size);
-  mdgui_draw_hline_idx(nullptr, CLR_BUTTON_DARK, ix, iy, ix + box_size);
-  mdgui_draw_vline_idx(nullptr, CLR_BUTTON_DARK, ix, iy, iy + box_size);
-  mdgui_draw_hline_idx(nullptr, CLR_BUTTON_LIGHT, ix, iy + box_size - 1, ix + box_size);
-  mdgui_draw_vline_idx(nullptr, CLR_BUTTON_LIGHT, ix + box_size - 1, iy, iy + box_size);
+  mdgui_draw_hline_idx(nullptr, CLR_ACCENT, ix, iy, ix + box_size);
+  mdgui_draw_hline_idx(nullptr, CLR_ACCENT, ix, iy + box_size - 1, ix + box_size);
+  mdgui_draw_vline_idx(nullptr, CLR_ACCENT, ix, iy, iy + box_size);
+  mdgui_draw_vline_idx(nullptr, CLR_ACCENT, ix + box_size - 1, iy, iy + box_size);
 
-  if (*checked && mdgui_fonts[1]) {
-    mdgui_fonts[1]->drawText("x", nullptr, ix + 2, iy + 0, CLR_TEXT_LIGHT);
+  if (*checked) {
+    mdgui_draw_line_idx(nullptr, CLR_TEXT_LIGHT, ix + 2, iy + 2,
+               ix + 7, iy + 7);
+    mdgui_draw_line_idx(nullptr, CLR_TEXT_LIGHT, ix + 7, iy + 2,
+               ix + 2, iy + 7);
   }
 
   if (text && mdgui_fonts[1]) {
@@ -1334,8 +1339,8 @@ void mdgui_separator(MDGUI_Context *ctx, int x, int y, int w) {
   const int ix = ctx->origin_x + x;
   const int logical_y = ctx->content_y + y;
   const int iy = logical_y - win.text_scroll;
-  mdgui_draw_hline_idx(nullptr, CLR_BUTTON_DARK, ix, iy, ix + w);
-  mdgui_draw_hline_idx(nullptr, CLR_BUTTON_LIGHT, ix, iy + 1, ix + w);
+  mdgui_draw_hline_idx(nullptr, CLR_ACCENT, ix, iy, ix + w);
+  mdgui_draw_hline_idx(nullptr, CLR_ACCENT, ix, iy + 1, ix + w);
   if (requested_w > 0)
     note_content_bounds(ctx, ix + w, logical_y + 2);
   ctx->content_y += 4;
@@ -1359,7 +1364,10 @@ int mdgui_listbox(MDGUI_Context *ctx, const char **items, int item_count,
   const int iy = logical_y - win.text_scroll;
   const int topmost = is_current_window_topmost(ctx);
 
-  mdgui_draw_frame_idx(nullptr, CLR_TEXT_DARK, ix - 1, iy - 1, ix + w + 1, iy + box_h + 1);
+  mdgui_draw_hline_idx(nullptr, CLR_WINDOW_BORDER, ix - 1, iy - 1, ix + w + 1);
+  mdgui_draw_hline_idx(nullptr, CLR_WINDOW_BORDER, ix - 1, iy + box_h + 1, ix + w + 1);
+  mdgui_draw_vline_idx(nullptr, CLR_WINDOW_BORDER, ix - 1, iy - 1, iy + box_h + 1);
+  mdgui_draw_vline_idx(nullptr, CLR_WINDOW_BORDER, ix + w + 1, iy - 1, iy + box_h + 1);
   mdgui_fill_rect_idx(nullptr, CLR_BOX_BODY, ix, iy, w, box_h);
 
   int clicked = 0;
@@ -1415,7 +1423,10 @@ int mdgui_combo(MDGUI_Context *ctx, const char *label, const char **items,
   const int combo_id = ((ix & 0xffff) << 16) ^ (iy & 0xffff) ^ (w << 2);
   const int open = (win.open_combo_id == combo_id);
 
-  mdgui_draw_frame_idx(nullptr, CLR_TEXT_DARK, ix - 1, iy - 1, ix + w + 1, iy + box_h + 1);
+  mdgui_draw_hline_idx(nullptr, CLR_WINDOW_BORDER, ix - 1, iy - 1, ix + w + 1);
+  mdgui_draw_hline_idx(nullptr, CLR_WINDOW_BORDER, ix - 1, iy + box_h + 1, ix + w + 1);
+  mdgui_draw_vline_idx(nullptr, CLR_WINDOW_BORDER, ix - 1, iy - 1, iy + box_h + 1);
+  mdgui_draw_vline_idx(nullptr, CLR_WINDOW_BORDER, ix + w + 1, iy - 1, iy + box_h + 1);
   mdgui_fill_rect_idx(nullptr, CLR_BOX_BODY, ix, iy, w, box_h);
   mdgui_draw_vline_idx(nullptr, CLR_BUTTON_DARK, ix + w - 12, iy, iy + box_h);
   if (mdgui_fonts[1] && items[*selected]) {
@@ -1509,7 +1520,10 @@ void mdgui_progress_bar(MDGUI_Context *ctx, float value, int x, int y, int w,
   const int iy = logical_y - win.text_scroll;
   const int fill_w = (int)((float)w * value);
 
-  mdgui_draw_frame_idx(nullptr, CLR_TEXT_DARK, ix - 1, iy - 1, ix + w + 1, iy + h + 1);
+  mdgui_draw_hline_idx(nullptr, CLR_WINDOW_BORDER, ix - 1, iy - 1, ix + w + 1);
+  mdgui_draw_hline_idx(nullptr, CLR_WINDOW_BORDER, ix - 1, iy + h + 1, ix + w + 1);
+  mdgui_draw_vline_idx(nullptr, CLR_WINDOW_BORDER, ix - 1, iy - 1, iy + h + 1);
+  mdgui_draw_vline_idx(nullptr, CLR_WINDOW_BORDER, ix + w + 1, iy - 1, iy + h + 1);
   mdgui_fill_rect_idx(nullptr, CLR_BOX_BODY, ix, iy, w, h);
   if (fill_w > 0)
     mdgui_fill_rect_idx(nullptr, CLR_MENU_SEL, ix, iy, fill_w, h);
