@@ -30,6 +30,7 @@ constexpr int CLR_MSG_BG = 243;
 constexpr int CLR_MSG_BAR = 244;
 constexpr int CLR_ACCENT = 247;
 constexpr int CLR_WINDOW_BORDER = 248;
+constexpr int MENU_POPUP_GAP_Y = 2;
 
 struct MDGUI_Window {
   std::string id;
@@ -789,8 +790,10 @@ static void draw_open_menu_overlay(MDGUI_Context *ctx) {
   if (total_h <= 0)
     return;
 
-  mdgui_draw_frame_idx(nullptr, 0, def.x - 1, def.y - 1, def.x + def.w + 1,
-          def.y + total_h + 1);
+  mdgui_draw_hline_idx(nullptr, CLR_WINDOW_BORDER, def.x - 1, def.y - 1, def.x + def.w + 1);
+  mdgui_draw_hline_idx(nullptr, CLR_WINDOW_BORDER, def.x - 1, def.y + total_h, def.x + def.w + 1);
+  mdgui_draw_vline_idx(nullptr, CLR_WINDOW_BORDER, def.x - 1, def.y - 1, def.y + total_h + 1);
+  mdgui_draw_vline_idx(nullptr, CLR_WINDOW_BORDER, def.x + def.w, def.y - 1, def.y + total_h + 1);
   mdgui_fill_rect_idx(nullptr, CLR_MENU_BG, def.x, def.y, def.w, total_h);
 
   for (int i = 0; i < (int)def.items.size(); ++i) {
@@ -971,8 +974,10 @@ static void draw_open_main_menu_overlay(MDGUI_Context *ctx) {
   if (total_h <= 0)
     return;
 
-  mdgui_draw_frame_idx(nullptr, 0, def.x - 1, def.y - 1, def.x + def.w + 1,
-          def.y + total_h + 1);
+  mdgui_draw_hline_idx(nullptr, CLR_WINDOW_BORDER, def.x - 1, def.y - 1, def.x + def.w + 1);
+  mdgui_draw_hline_idx(nullptr, CLR_WINDOW_BORDER, def.x - 1, def.y + total_h, def.x + def.w + 1);
+  mdgui_draw_vline_idx(nullptr, CLR_WINDOW_BORDER, def.x - 1, def.y - 1, def.y + total_h + 1);
+  mdgui_draw_vline_idx(nullptr, CLR_WINDOW_BORDER, def.x + def.w, def.y - 1, def.y + total_h + 1);
   mdgui_fill_rect_idx(nullptr, CLR_MENU_BG, def.x, def.y, def.w, total_h);
 
   for (int i = 0; i < (int)def.items.size(); ++i) {
@@ -2325,7 +2330,7 @@ int mdgui_begin_menu(MDGUI_Context *ctx, const char *text) {
   }
   auto &def = ctx->menu_defs[ctx->menu_index];
   def.x = x;
-  def.y = y + 10;
+  def.y = y + 10 + MENU_POPUP_GAP_Y;
   def.w = (tw + 40 < 120) ? 120 : (tw + 40);
   def.items.clear();
 
@@ -2436,7 +2441,7 @@ int mdgui_begin_main_menu(MDGUI_Context *ctx, const char *text) {
   }
   auto &def = ctx->main_menu_defs[ctx->main_menu_index];
   def.x = x;
-  def.y = y + ctx->main_menu_bar_h;
+  def.y = y + ctx->main_menu_bar_h + MENU_POPUP_GAP_Y;
   def.w = (tw + 40 < 120) ? 120 : (tw + 40);
   def.items.clear();
 
