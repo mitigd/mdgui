@@ -469,7 +469,41 @@ pub fn main() !void {
         input.mouse_x = @intFromFloat(mx / 2.0);
         input.mouse_y = @intFromFloat(my / 2.0);
 
-        _ = c.SDL_SetRenderDrawColor(renderer, 0x00, 0x00, 0x4c, 0xff);
+        // Set background color based on current theme
+        const theme = c.mdgui_get_theme();
+        var bg_r: u8 = 0x00;
+        var bg_g: u8 = 0x00;
+        var bg_b: u8 = 0x4c;
+        switch (theme) {
+            c.MDGUI_THEME_DARK => {
+                bg_r = 0x08;
+                bg_g = 0x0a;
+                bg_b = 0x0f;
+            }, // Dark blue-gray
+            c.MDGUI_THEME_AMBER => {
+                bg_r = 0x1f;
+                bg_g = 0x17;
+                bg_b = 0x0f;
+            }, // Dark brown
+            c.MDGUI_THEME_GRAPHITE => {
+                bg_r = 0x0d;
+                bg_g = 0x11;
+                bg_b = 0x18;
+            }, // Dark blue-gray
+            c.MDGUI_THEME_MIDNIGHT => {
+                bg_r = 0x04;
+                bg_g = 0x08;
+                bg_b = 0x12;
+            }, // Very dark blue
+            c.MDGUI_THEME_OLIVE => {
+                bg_r = 0x0f;
+                bg_g = 0x14;
+                bg_b = 0x0c;
+            }, // Very dark green
+            else => {}, // DEFAULT: already set above
+        }
+
+        _ = c.SDL_SetRenderDrawColor(renderer, bg_r, bg_g, bg_b, 0xff);
         _ = c.SDL_RenderClear(renderer);
 
         c.mdgui_begin_frame(ctx, &input);
