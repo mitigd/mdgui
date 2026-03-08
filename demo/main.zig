@@ -403,7 +403,7 @@ pub fn main() !void {
     var selected_rom_buf: [512]u8 = [_]u8{0} ** 512;
     var has_selected_rom = false;
     var analytics = Analytics{};
-    var pending_tile = startup_tile_windows;
+    c.mdgui_set_tile_manager_enabled(ctx, if (startup_tile_windows) 1 else 0);
     const perf_freq = c.SDL_GetPerformanceFrequency();
     var last_counter = c.SDL_GetPerformanceCounter();
 
@@ -417,7 +417,6 @@ pub fn main() !void {
         }
 
         var open_file_browser = false;
-        var request_tile = false;
         input.mouse_pressed = 0;
         input.mouse_wheel = 0;
         var event: c.SDL_Event = undefined;
@@ -447,7 +446,8 @@ pub fn main() !void {
                     c.mdgui_set_window_fullscreen(ctx, render_api_window_title, if (emu_view_fullscreen) 1 else 0);
                 }
                 if (event.key.scancode == c.SDL_SCANCODE_F2) {
-                    request_tile = true;
+                    const tiled_now = c.mdgui_is_tile_manager_enabled(ctx) != 0;
+                    c.mdgui_set_tile_manager_enabled(ctx, if (tiled_now) 0 else 1);
                 }
                 if (event.key.scancode == c.SDL_SCANCODE_F3) {
                     const lock_now = c.mdgui_is_windows_locked(ctx) != 0;
@@ -528,7 +528,15 @@ pub fn main() !void {
             c.mdgui_end_main_menu(ctx);
         }
         if (c.mdgui_begin_main_menu(ctx, "WINDOW") != 0) {
-            if (c.mdgui_main_menu_item(ctx, "TILE WINDOWS (F2)") != 0) request_tile = true;
+            if (c.mdgui_is_tile_manager_enabled(ctx) != 0) {
+                if (c.mdgui_main_menu_item(ctx, "[x] Tile Manager (F2)") != 0) {
+                    c.mdgui_set_tile_manager_enabled(ctx, 0);
+                }
+            } else {
+                if (c.mdgui_main_menu_item(ctx, "[ ] Tile Manager (F2)") != 0) {
+                    c.mdgui_set_tile_manager_enabled(ctx, 1);
+                }
+            }
             if (c.mdgui_is_windows_locked(ctx) != 0) {
                 if (c.mdgui_main_menu_item(ctx, "[x] Lock Tiled Windows (F3)") != 0) {
                     c.mdgui_set_windows_locked(ctx, 0);
@@ -595,11 +603,6 @@ pub fn main() !void {
                 .emu_view => drawWindowApiDemo(ctx, renderer, show_window_api_menu),
                 .perf_graph => drawPerfGraphWindow(ctx, &analytics),
             }
-        }
-
-        if (pending_tile or request_tile) {
-            tileDemoWindows(ctx, renderer, show_demo, analytics.show_graph);
-            pending_tile = false;
         }
 
         if (open_file_browser) {

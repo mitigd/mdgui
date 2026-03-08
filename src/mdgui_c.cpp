@@ -5,6 +5,7 @@
 #include <SDL3/SDL_mouse.h>
 #include <string.h>
 #include <algorithm>
+#include <cmath>
 #include <cctype>
 #include <filesystem>
 #include <string>
@@ -129,6 +130,7 @@ struct MDGUI_Context {
   int content_req_bottom;
   bool window_has_nonlabel_widget;
   bool windows_locked;
+  bool tile_manager_enabled;
 
   bool combo_overlay_pending;
   int combo_overlay_window;
@@ -227,6 +229,84 @@ static int top_window_at_point(const MDGUI_Context *ctx, int px, int py,
     }
   }
   return best;
+}
+
+static int get_logical_render_w(MDGUI_Context *ctx);
+static int get_logical_render_h(MDGUI_Context *ctx);
+
+static void tile_windows_internal(MDGUI_Context *ctx) {
+  if (!ctx)
+    return;
+
+  const int rw = get_logical_render_w(ctx);
+  const int rh = get_logical_render_h(ctx);
+
+  const int gap = 6;
+  int top = ctx->main_menu_bar_h + 6;
+  if (top < 18)
+    top = 18;
+  const int bottom = 6;
+  const int left = gap;
+  const int right = gap;
+
+  const int content_w = rw - left - right;
+  const int content_h = rh - top - bottom;
+  if (content_w <= 0 || content_h <= 0)
+    return;
+
+  std::vector<int> order;
+  order.reserve(ctx->windows.size());
+  for (int i = 0; i < (int)ctx->windows.size(); ++i) {
+    const auto &w = ctx->windows[i];
+    if (w.closed || w.is_maximized || w.disallow_maximize)
+      continue;
+    order.push_back(i);
+  }
+  if (order.empty())
+    return;
+
+  const int count = (int)order.size();
+  const float aspect =
+      (float)content_w / (float)((content_h > 0) ? content_h : 1);
+  int cols = (int)std::ceil(std::sqrt((float)count * aspect));
+  if (cols < 1)
+    cols = 1;
+  if (cols > count)
+    cols = count;
+  int rows = (count + cols - 1) / cols;
+  if (rows < 1)
+    rows = 1;
+
+  int y = top;
+  int idx = 0;
+  for (int row = 0; row < rows && idx < count; ++row) {
+    const int rows_left = rows - row;
+    const int remaining = count - idx;
+    const int cols_this_row = (remaining + rows_left - 1) / rows_left;
+    const int h_remaining = (top + content_h) - y - (rows_left - 1) * gap;
+    const int row_h = std::max(80, h_remaining / rows_left);
+
+    int x = left;
+    for (int col = 0; col < cols_this_row && idx < count; ++col) {
+      const int cols_left = cols_this_row - col;
+      const int w_remaining = (left + content_w) - x - (cols_left - 1) * gap;
+      const int cell_w = std::max(120, w_remaining / cols_left);
+      auto &w = ctx->windows[order[idx]];
+      w.x = x;
+      w.y = y;
+      w.w = cell_w;
+      w.h = row_h;
+      w.restored_x = x;
+      w.restored_y = y;
+      w.restored_w = cell_w;
+      w.restored_h = row_h;
+      w.is_maximized = false;
+      w.fixed_rect = true;
+      ++idx;
+      x += cell_w + gap;
+    }
+    y += row_h + gap;
+  }
 }
 
 static int find_or_create_window(MDGUI_Context *ctx, const char *title, int x,
@@ -559,6 +639,7 @@ MDGUI_Context *mdgui_create_with_backend(const MDGUI_RenderBackend *backend) {
   ctx->content_req_bottom = 0;
   ctx->window_has_nonlabel_widget = false;
   ctx->windows_locked = false;
+  ctx->tile_manager_enabled = false;
   ctx->combo_overlay_pending = false;
   ctx->combo_overlay_window = -1;
   ctx->combo_overlay_x = 0;
@@ -674,6 +755,10 @@ void mdgui_begin_frame(MDGUI_Context *ctx, const MDGUI_Input *input) {
   if (ctx->windows_locked) {
     ctx->dragging_window = -1;
     ctx->resizing_window = -1;
+  }
+
+  if (ctx->tile_manager_enabled) {
+    tile_windows_internal(ctx);
   }
 
   ctx->current_window = -1;
@@ -2106,6 +2191,23 @@ int mdgui_is_windows_locked(MDGUI_Context *ctx) {
     return 0;
   return ctx->windows_locked ? 1 : 0;
 }
+
+void mdgui_set_tile_manager_enabled(MDGUI_Context *ctx, int enabled) {
+  if (!ctx)
+    return;
+  ctx->tile_manager_enabled = (enabled != 0);
+  if (ctx->tile_manager_enabled) {
+    tile_windows_internal(ctx);
+  }
+}
+
+int mdgui_is_tile_manager_enabled(MDGUI_Context *ctx) {
+  if (!ctx)
+    return 0;
+  return ctx->tile_manager_enabled ? 1 : 0;
+}
+
+void mdgui_tile_windows(MDGUI_Context *ctx) { tile_windows_internal(ctx); }
 
 void mdgui_set_window_fullscreen(MDGUI_Context *ctx, const char *title,
                                 int fullscreen) {

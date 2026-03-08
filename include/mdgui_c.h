@@ -125,6 +125,9 @@ void mdgui_set_window_rect(MDGUI_Context *ctx, const char *title, int x, int y,
                           int w, int h);
 void mdgui_set_windows_locked(MDGUI_Context *ctx, int locked);
 int mdgui_is_windows_locked(MDGUI_Context *ctx);
+void mdgui_set_tile_manager_enabled(MDGUI_Context *ctx, int enabled);
+int mdgui_is_tile_manager_enabled(MDGUI_Context *ctx);
+void mdgui_tile_windows(MDGUI_Context *ctx);
 
 void mdgui_begin_menu_bar(MDGUI_Context *ctx);
 int mdgui_begin_menu(MDGUI_Context *ctx, const char *text);
