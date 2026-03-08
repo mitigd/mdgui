@@ -2,7 +2,6 @@
 
 #include "mdgui_font8x8.h"
 
-#include <cmath>
 #include <cstring>
 #include <new>
 #include <vector>
@@ -156,31 +155,31 @@ void vk_draw_line_rgba(void *user_data, unsigned char r, unsigned char g,
     return;
   }
 
-  const float fx1 = (float)x1;
-  const float fy1 = (float)y1;
-  const float fx2 = (float)x2;
-  const float fy2 = (float)y2;
-  const float dx = fx2 - fx1;
-  const float dy = fy2 - fy1;
-  const float len = std::sqrt(dx * dx + dy * dy);
-  if (len <= 0.0f) {
-    push_quad(backend, fx1, fy1, 1.0f, 1.0f, rgba, 0.0f, 0.0f, 0.0f, 0.0f, 0);
-    return;
+  // Pixel-step diagonal/angled lines so UI marks (checkbox, close button)
+  // look crisp and centered, matching SDL's aliased integer rasterization.
+  int cx = x1;
+  int cy = y1;
+  const int dx = (x2 >= x1) ? (x2 - x1) : (x1 - x2);
+  const int sx = (x1 < x2) ? 1 : -1;
+  const int dy_abs = (y2 >= y1) ? (y2 - y1) : (y1 - y2);
+  const int sy = (y1 < y2) ? 1 : -1;
+  int err = dx - dy_abs;
+
+  while (true) {
+    push_quad(backend, (float)cx, (float)cy, 1.0f, 1.0f, rgba, 0.0f, 0.0f, 0.0f,
+              0.0f, 0);
+    if (cx == x2 && cy == y2)
+      break;
+    const int e2 = err * 2;
+    if (e2 > -dy_abs) {
+      err -= dy_abs;
+      cx += sx;
+    }
+    if (e2 < dx) {
+      err += dx;
+      cy += sy;
+    }
   }
-
-  // Build a 1px thick quad around the segment.
-  const float nx = -dy / len;
-  const float ny = dx / len;
-  const float hw = 0.5f;
-
-  ensure_command(backend, 0);
-  const unsigned int base = (unsigned int)backend->vertices.size();
-  backend->vertices.push_back({fx1 - nx * hw, fy1 - ny * hw, 0.0f, 0.0f, rgba});
-  backend->vertices.push_back({fx2 - nx * hw, fy2 - ny * hw, 0.0f, 0.0f, rgba});
-  backend->vertices.push_back({fx2 + nx * hw, fy2 + ny * hw, 0.0f, 0.0f, rgba});
-  backend->vertices.push_back({fx1 + nx * hw, fy1 + ny * hw, 0.0f, 0.0f, rgba});
-  push_tri(backend, base + 0u, base + 1u, base + 2u);
-  push_tri(backend, base + 0u, base + 2u, base + 3u);
 }
 
 void vk_draw_point_rgba(void *user_data, unsigned char r, unsigned char g,
