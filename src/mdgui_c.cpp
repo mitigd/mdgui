@@ -817,8 +817,8 @@ int mdgui_begin_window(MDGUI_Context *ctx, const char *title, int x, int y, int 
   }
 
   // Handle Close and Maximize button interaction
-  const int btn_w = 10;
-  const int btn_h = 10;
+  const int btn_w = 9;
+  const int btn_h = 9;
   const int close_x = win.x + win.w - btn_w - 1;
   const int close_y = win.y + 1;
   const int max_x = close_x - btn_w - 2;
@@ -934,9 +934,9 @@ int mdgui_begin_window(MDGUI_Context *ctx, const char *title, int x, int y, int 
   mdgui_fill_rect_idx(nullptr, CLR_BUTTON_SURFACE, close_x, close_y, btn_w, btn_h);
   // Draw X as two diagonal lines with margin
   mdgui_draw_line_idx(nullptr, CLR_TEXT_LIGHT, close_x + 2, close_y + 2,
-             close_x + 7, close_y + 7);
-  mdgui_draw_line_idx(nullptr, CLR_TEXT_LIGHT, close_x + 7, close_y + 2,
-             close_x + 2, close_y + 7);
+             close_x + 6, close_y + 6);
+  mdgui_draw_line_idx(nullptr, CLR_TEXT_LIGHT, close_x + 6, close_y + 2,
+             close_x + 2, close_y + 6);
 
   // Draw 3D-style Maximize button (if not "MESSAGE")
   if (title && strcmp(title, "MESSAGE") != 0) {
@@ -948,7 +948,8 @@ int mdgui_begin_window(MDGUI_Context *ctx, const char *title, int x, int y, int 
   }
 
   if (title && mdgui_fonts[1]) {
-    mdgui_fonts[1]->drawText(title, nullptr, win.x + 5, win.y + 1, CLR_TEXT_LIGHT);
+    const int title_text_y = win.y + ((title_h - 8) / 2);
+    mdgui_fonts[1]->drawText(title, nullptr, win.x + 5, title_text_y, CLR_TEXT_LIGHT);
   }
 
   // Draw border after fills so it renders on top
