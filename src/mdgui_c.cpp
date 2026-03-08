@@ -1719,6 +1719,118 @@ void mdgui_label(MDGUI_Context *ctx, const char *text, int x, int y) {
   ctx->content_y += 12; // Advance content Y
 }
 
+void mdgui_label_wrapped(MDGUI_Context *ctx, const char *text, int x, int y,
+                         int w) {
+  if (!ctx || !text || !mdgui_fonts[1] || ctx->current_window < 0)
+    return;
+  const auto &win = ctx->windows[ctx->current_window];
+  const int top_margin = ((y > 0) ? y : 0) + 4;
+  const int abs_x = ctx->origin_x + x;
+  const int logical_y = ctx->content_y + top_margin;
+  const int wrap_w = resolve_dynamic_width(ctx, x, w, 20);
+  const int margin_l = 2;
+  const int margin_r = 2;
+  const int draw_x = abs_x + margin_l;
+  const int inner_wrap_w = std::max(10, wrap_w - (margin_l + margin_r));
+  const int line_h = 12;
+
+  int lines_drawn = 0;
+  int max_right = draw_x;
+
+  auto draw_line = [&](const std::string &line) {
+    const int abs_y = (logical_y + lines_drawn * line_h) - win.text_scroll;
+    mdgui_fonts[1]->drawText(line.c_str(), nullptr, draw_x, abs_y, CLR_TEXT_LIGHT);
+    const int line_w = mdgui_fonts[1]->measureTextWidth(line.c_str());
+    if (draw_x + line_w > max_right)
+      max_right = draw_x + line_w;
+    ++lines_drawn;
+  };
+
+  auto draw_word_wrapped = [&](const std::string &word) {
+    if (word.empty()) {
+      draw_line(std::string());
+      return;
+    }
+    size_t offset = 0;
+    while (offset < word.size()) {
+      size_t best = 1;
+      size_t limit = word.size() - offset;
+      for (size_t n = 1; n <= limit; ++n) {
+        const std::string candidate = word.substr(offset, n);
+        if (mdgui_fonts[1]->measureTextWidth(candidate.c_str()) <= inner_wrap_w) {
+          best = n;
+        } else {
+          break;
+        }
+      }
+      draw_line(word.substr(offset, best));
+      offset += best;
+    }
+  };
+
+  std::string all(text);
+  size_t para_start = 0;
+  while (para_start <= all.size()) {
+    size_t para_end = all.find('\n', para_start);
+    if (para_end == std::string::npos)
+      para_end = all.size();
+    const std::string paragraph = all.substr(para_start, para_end - para_start);
+
+    if (paragraph.empty()) {
+      draw_line(std::string());
+    } else {
+      size_t i = 0;
+      std::string current;
+      while (i < paragraph.size()) {
+        while (i < paragraph.size() &&
+               std::isspace((unsigned char)paragraph[i]) != 0) {
+          ++i;
+        }
+        if (i >= paragraph.size())
+          break;
+        const size_t word_start = i;
+        while (i < paragraph.size() &&
+               std::isspace((unsigned char)paragraph[i]) == 0) {
+          ++i;
+        }
+        const std::string word = paragraph.substr(word_start, i - word_start);
+        const std::string candidate =
+            current.empty() ? word : (current + " " + word);
+
+        if (mdgui_fonts[1]->measureTextWidth(candidate.c_str()) <= inner_wrap_w) {
+          current = candidate;
+          continue;
+        }
+
+        if (!current.empty()) {
+          draw_line(current);
+          current.clear();
+          if (mdgui_fonts[1]->measureTextWidth(word.c_str()) <= inner_wrap_w) {
+            current = word;
+          } else {
+            draw_word_wrapped(word);
+          }
+        } else {
+          draw_word_wrapped(word);
+        }
+      }
+      if (!current.empty())
+        draw_line(current);
+    }
+
+    if (para_end == all.size())
+      break;
+    para_start = para_end + 1;
+  }
+
+  if (lines_drawn < 1)
+    lines_drawn = 1;
+  const int bottom_margin = (lines_drawn > 1) ? 4 : 2;
+  note_content_bounds(ctx, max_right + margin_r,
+                      logical_y + lines_drawn * line_h + bottom_margin);
+  ctx->content_y += top_margin + lines_drawn * line_h + bottom_margin;
+}
+
 void mdgui_spacer(MDGUI_Context *ctx, int pixels) {
   if (!ctx || ctx->current_window < 0)
     return;

@@ -104,6 +104,8 @@ void mdgui_end_window(MDGUI_Context *ctx);
 int mdgui_button(MDGUI_Context *ctx, const char *text, int x, int y, int w,
                 int h);
 void mdgui_label(MDGUI_Context *ctx, const char *text, int x, int y);
+void mdgui_label_wrapped(MDGUI_Context *ctx, const char *text, int x, int y,
+                        int w);
 void mdgui_spacer(MDGUI_Context *ctx, int pixels);
 int mdgui_checkbox(MDGUI_Context *ctx, const char *text, bool *checked, int x,
                   int y);
