@@ -138,6 +138,24 @@ void vk_draw_line_rgba(void *user_data, unsigned char r, unsigned char g,
   if (!backend)
     return;
 
+  const unsigned int rgba = pack_rgba(r, g, b, a);
+
+  // Keep axis-aligned lines pixel-perfect to match software/SDL behavior.
+  if (y1 == y2) {
+    const int x_min = (x1 < x2) ? x1 : x2;
+    const int x_max = (x1 < x2) ? x2 : x1;
+    push_quad(backend, (float)x_min, (float)y1, (float)(x_max - x_min + 1), 1.0f,
+              rgba, 0.0f, 0.0f, 0.0f, 0.0f, 0);
+    return;
+  }
+  if (x1 == x2) {
+    const int y_min = (y1 < y2) ? y1 : y2;
+    const int y_max = (y1 < y2) ? y2 : y1;
+    push_quad(backend, (float)x1, (float)y_min, 1.0f, (float)(y_max - y_min + 1),
+              rgba, 0.0f, 0.0f, 0.0f, 0.0f, 0);
+    return;
+  }
+
   const float fx1 = (float)x1;
   const float fy1 = (float)y1;
   const float fx2 = (float)x2;
@@ -146,8 +164,7 @@ void vk_draw_line_rgba(void *user_data, unsigned char r, unsigned char g,
   const float dy = fy2 - fy1;
   const float len = std::sqrt(dx * dx + dy * dy);
   if (len <= 0.0f) {
-    push_quad(backend, fx1, fy1, 1.0f, 1.0f, pack_rgba(r, g, b, a), 0.0f,
-              0.0f, 0.0f, 0.0f, 0);
+    push_quad(backend, fx1, fy1, 1.0f, 1.0f, rgba, 0.0f, 0.0f, 0.0f, 0.0f, 0);
     return;
   }
 
@@ -155,7 +172,6 @@ void vk_draw_line_rgba(void *user_data, unsigned char r, unsigned char g,
   const float nx = -dy / len;
   const float ny = dx / len;
   const float hw = 0.5f;
-  const unsigned int rgba = pack_rgba(r, g, b, a);
 
   ensure_command(backend, 0);
   const unsigned int base = (unsigned int)backend->vertices.size();

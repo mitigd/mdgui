@@ -954,9 +954,9 @@ int mdgui_begin_window(MDGUI_Context *ctx, const char *title, int x, int y, int 
 
   // Draw border after fills so it renders on top
   mdgui_draw_hline_idx(nullptr, CLR_WINDOW_BORDER, win.x - 1, win.y - 1, win.x + win.w + 1);
-  mdgui_draw_hline_idx(nullptr, CLR_WINDOW_BORDER, win.x - 1, win.y + win.h - 2, win.x + win.w + 1);
-  mdgui_draw_vline_idx(nullptr, CLR_WINDOW_BORDER, win.x - 1, win.y - 1, win.y + win.h - 1);
-  mdgui_draw_vline_idx(nullptr, CLR_WINDOW_BORDER, win.x + win.w, win.y - 1, win.y + win.h - 1);
+  mdgui_draw_hline_idx(nullptr, CLR_WINDOW_BORDER, win.x - 1, win.y + win.h - 1, win.x + win.w + 1);
+  mdgui_draw_vline_idx(nullptr, CLR_WINDOW_BORDER, win.x - 1, win.y - 1, win.y + win.h);
+  mdgui_draw_vline_idx(nullptr, CLR_WINDOW_BORDER, win.x + win.w, win.y - 1, win.y + win.h);
 
   ctx->origin_x = win.x + 2;
   ctx->origin_y = win.y + title_h + 2;
