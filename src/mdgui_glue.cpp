@@ -311,6 +311,15 @@ void mdgui_draw_frame_idx(char *d, int idx, int x1, int y1, int x2, int y2) {
   mdgui_draw_vline_idx(d, 23, x2 - 2, y1 + 1, y2 - 1);
   mdgui_draw_hline_idx(d, 23, x1 + 1, y2 - 2, x2 - 1);
 }
+
+// Draw an arbitrary line using Bresenham-like approximation
+void mdgui_draw_line_idx(char *d, int idx, int x1, int y1, int x2, int y2) {
+  if (!backend_ready())
+    return;
+  const Color c = palette_color((unsigned char)idx);
+  g_backend.draw_line_rgba(g_backend.user_data, c.r, c.g, c.b, c.a, x1, y1,
+                           x2, y2);
+}
 }
 
 MDGuiFont *mdgui_fonts[10] = {nullptr};

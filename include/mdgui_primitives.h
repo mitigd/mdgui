@@ -28,5 +28,6 @@ void mdgui_fill_rect_idx(char *d, int idx, int x, int y, int w, int h);
 void mdgui_draw_hline_idx(char *d, int idx, int x1, int y, int x2);
 void mdgui_draw_vline_idx(char *d, int idx, int x, int y1, int y2);
 void mdgui_draw_frame_idx(char *d, int idx, int x1, int y1, int x2, int y2);
+void mdgui_draw_line_idx(char *d, int idx, int x1, int y1, int x2, int y2);
 }
 

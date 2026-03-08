@@ -939,8 +939,11 @@ int mdgui_begin_window(MDGUI_Context *ctx, const char *title, int x, int y, int 
             close_x + btn_w);
   mdgui_draw_vline_idx(nullptr, CLR_BUTTON_DARK, close_x + btn_w - 1, close_y,
             close_y + btn_h);
-  if (mdgui_fonts[1])
-    mdgui_fonts[1]->drawText("x", nullptr, close_x + 2, close_y + 1, CLR_TEXT_LIGHT);
+  // Draw X as two diagonal lines with margin
+  mdgui_draw_line_idx(nullptr, CLR_TEXT_LIGHT, close_x + 2, close_y + 2,
+             close_x + 7, close_y + 7);
+  mdgui_draw_line_idx(nullptr, CLR_TEXT_LIGHT, close_x + 7, close_y + 2,
+             close_x + 2, close_y + 7);
 
   // Draw 3D-style Maximize button (if not "MESSAGE")
   if (title && strcmp(title, "MESSAGE") != 0) {
