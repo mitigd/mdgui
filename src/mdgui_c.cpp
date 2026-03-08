@@ -296,7 +296,7 @@ static void draw_open_menu_overlay(MDGUI_Context *ctx) {
     const int hovered = point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y,
                                       def.x, iy, def.w, item_h);
     if (hovered) {
-      mdgui_fill_rect_idx(nullptr, CLR_MENU_SEL, def.x, iy, def.w, item_h);
+      mdgui_fill_rect_idx(nullptr, CLR_ACCENT, def.x, iy, def.w, item_h);
     }
     if (mdgui_fonts[1]) {
       mdgui_fonts[1]->drawText(def.items[i].c_str(), nullptr, def.x + 4, iy + 1,
@@ -478,7 +478,7 @@ static void draw_open_main_menu_overlay(MDGUI_Context *ctx) {
     const int hovered = point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y,
                                       def.x, iy, def.w, item_h);
     if (hovered)
-      mdgui_fill_rect_idx(nullptr, CLR_MENU_SEL, def.x, iy, def.w, item_h);
+      mdgui_fill_rect_idx(nullptr, CLR_ACCENT, def.x, iy, def.w, item_h);
     if (mdgui_fonts[1])
       mdgui_fonts[1]->drawText(def.items[i].c_str(), nullptr, def.x + 4, iy + 1,
                     CLR_MENU_TEXT);
@@ -1032,7 +1032,7 @@ void mdgui_end_window(MDGUI_Context *ctx) {
       const int row_hover = point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y,
                                           ix, ry, w, item_h);
       if (i == ctx->combo_overlay_selected || row_hover)
-        mdgui_fill_rect_idx(nullptr, CLR_MENU_SEL, ix, ry, w, item_h);
+        mdgui_fill_rect_idx(nullptr, CLR_ACCENT, ix, ry, w, item_h);
       if (mdgui_fonts[1] && ctx->combo_overlay_items[i]) {
         mdgui_fonts[1]->drawText(ctx->combo_overlay_items[i], nullptr, ix + 2, ry + 1,
                       CLR_MENU_TEXT);
@@ -1381,7 +1381,7 @@ int mdgui_listbox(MDGUI_Context *ctx, const char **items, int item_count,
     const int hovered = topmost && point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y,
                                                  ix, ry, w, row_h);
     if (item_idx == *selected)
-      mdgui_fill_rect_idx(nullptr, CLR_MENU_SEL, ix, ry, w, row_h);
+      mdgui_fill_rect_idx(nullptr, CLR_ACCENT, ix, ry, w, row_h);
     else if (hovered)
       mdgui_fill_rect_idx(nullptr, CLR_BUTTON_SURFACE, ix, ry, w, row_h);
     if (mdgui_fonts[1] && items[item_idx]) {
@@ -1722,7 +1722,7 @@ int mdgui_begin_menu(MDGUI_Context *ctx, const char *text) {
 
   const int open = (win.open_menu_index == ctx->menu_index);
   if (open || hovered) {
-    mdgui_fill_rect_idx(nullptr, CLR_MENU_SEL, x, y, item_w, 10);
+    mdgui_fill_rect_idx(nullptr, CLR_ACCENT, x, y, item_w, 10);
   }
   if (mdgui_fonts[1]) {
     mdgui_fonts[1]->drawText(text, nullptr, x + 3, y + 1, CLR_MENU_TEXT);
@@ -1832,7 +1832,7 @@ int mdgui_begin_main_menu(MDGUI_Context *ctx, const char *text) {
 
   const int open = (ctx->open_main_menu_index == ctx->main_menu_index);
   if (open || hovered) {
-    mdgui_fill_rect_idx(nullptr, CLR_MENU_SEL, x, y, item_w, ctx->main_menu_bar_h);
+    mdgui_fill_rect_idx(nullptr, CLR_ACCENT, x, y, item_w, ctx->main_menu_bar_h);
   }
   if (mdgui_fonts[1]) {
     mdgui_fonts[1]->drawText(text, nullptr, x + 3, y + 1, CLR_MENU_TEXT);
@@ -2338,7 +2338,7 @@ const char *mdgui_show_file_browser(MDGUI_Context *ctx) {
     const int hovered = point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y,
                                       list_x, ry, content_w, row_h);
     if (item_idx == ctx->file_browser_selected)
-      mdgui_fill_rect_idx(nullptr, CLR_MENU_SEL, list_x, ry, content_w, row_h);
+      mdgui_fill_rect_idx(nullptr, CLR_ACCENT, list_x, ry, content_w, row_h);
     else if (hovered)
       mdgui_fill_rect_idx(nullptr, CLR_BUTTON_SURFACE, list_x, ry, content_w, row_h);
     if (mdgui_fonts[1]) {
