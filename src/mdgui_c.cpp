@@ -1611,7 +1611,7 @@ void mdgui_frame_time_graph(MDGUI_Context *ctx, const float *frame_ms_samples,
     if (target_ratio > 1.0f)
       target_ratio = 1.0f;
     const int target_y = plot_y + plot_h - (int)(target_ratio * (float)plot_h);
-    mdgui_draw_hline_idx(nullptr, CLR_BUTTON_LIGHT, plot_x, target_y, plot_x + plot_w);
+    mdgui_draw_hline_idx(nullptr, CLR_ACCENT, plot_x, target_y, plot_x + plot_w);
 
     if (frame_ms_samples && sample_count > 0) {
       for (int px = 0; px < plot_w; ++px) {
