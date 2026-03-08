@@ -1,4 +1,5 @@
 #include "mgui_c.h"
+#include "mgui_backends.h"
 #include "mgui_primitives.h"
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_mouse.h>
@@ -9,7 +10,6 @@
 #include <string>
 #include <vector>
 
-extern void mgui_init_renderer(SDL_Renderer *r);
 extern MGuiFont *mgui_fonts[10];
 
 namespace {
@@ -58,7 +58,7 @@ struct FileBrowserEntry {
 } // namespace
 
 struct MGUI_Context {
-  SDL_Renderer *renderer;
+  MGUI_RenderBackend backend;
   MGUI_Input input;
 
   std::vector<MGUI_Window> windows;
@@ -160,7 +160,7 @@ static void note_content_bounds(MGUI_Context *ctx, int right, int bottom) {
 }
 
 static void set_content_clip(MGUI_Context *ctx) {
-  if (!ctx || !ctx->renderer || ctx->current_window < 0 ||
+  if (!ctx || ctx->current_window < 0 ||
       ctx->current_window >= (int)ctx->windows.size())
     return;
   const auto &win = ctx->windows[ctx->current_window];
@@ -170,8 +170,7 @@ static void set_content_clip(MGUI_Context *ctx) {
     clip_w = 1;
   if (clip_h < 1)
     clip_h = 1;
-  SDL_Rect content_clip = {win.x + 2, ctx->origin_y, clip_w, clip_h};
-  SDL_SetRenderClipRect(ctx->renderer, &content_clip);
+  mgui_backend_set_clip_rect(1, win.x + 2, ctx->origin_y, clip_w, clip_h);
 }
 
 static int resolve_dynamic_width(MGUI_Context *ctx, int local_x, int w,
@@ -195,11 +194,12 @@ static int resolve_dynamic_width(MGUI_Context *ctx, int local_x, int w,
 
 static void drawrect_rgb(MGUI_Context *ctx, uint8_t r, uint8_t g, uint8_t b,
                          int x, int y, int w, int h) {
-  if (!ctx || !ctx->renderer)
+  if (!ctx)
     return;
-  SDL_SetRenderDrawColor(ctx->renderer, r, g, b, 255);
-  SDL_FRect rect = {(float)x, (float)y, (float)w, (float)h};
-  SDL_RenderFillRect(ctx->renderer, &rect);
+  if (!ctx->backend.fill_rect_rgba)
+    return;
+  ctx->backend.fill_rect_rgba(ctx->backend.user_data, r, g, b, 255, x, y, w,
+                              h);
 }
 
 static int point_in_rect(int px, int py, int x, int y, int w, int h) {
@@ -306,32 +306,20 @@ static void draw_open_menu_overlay(MGUI_Context *ctx) {
 static int get_logical_render_w(MGUI_Context *ctx) {
   int rw = 320;
   int rh = 240;
-  if (ctx && ctx->renderer) {
-    SDL_GetRenderOutputSize(ctx->renderer, &rw, &rh);
-    float sx = 1.0f;
-    float sy = 1.0f;
-    SDL_GetRenderScale(ctx->renderer, &sx, &sy);
-    if (sx > 0.0f)
-      rw = (int)((float)rw / sx);
-    if (rw <= 0)
-      rw = 320;
-  }
+  if (ctx)
+    mgui_backend_get_render_size(&rw, &rh);
+  if (rw <= 0)
+    rw = 320;
   return rw;
 }
 
 static int get_logical_render_h(MGUI_Context *ctx) {
   int rw = 320;
   int rh = 240;
-  if (ctx && ctx->renderer) {
-    SDL_GetRenderOutputSize(ctx->renderer, &rw, &rh);
-    float sx = 1.0f;
-    float sy = 1.0f;
-    SDL_GetRenderScale(ctx->renderer, &sx, &sy);
-    if (sy > 0.0f)
-      rh = (int)((float)rh / sy);
-    if (rh <= 0)
-      rh = 240;
-  }
+  if (ctx)
+    mgui_backend_get_render_size(&rw, &rh);
+  if (rh <= 0)
+    rh = 240;
   return rh;
 }
 
@@ -497,8 +485,14 @@ static void draw_open_main_menu_overlay(MGUI_Context *ctx) {
 
 extern "C" {
 MGUI_Context *mgui_create(void *sdl_renderer) {
+  MGUI_RenderBackend backend = {};
+  mgui_make_sdl_backend(&backend, sdl_renderer);
+  return mgui_create_with_backend(&backend);
+}
+
+MGUI_Context *mgui_create_with_backend(const MGUI_RenderBackend *backend) {
   auto *ctx = new MGUI_Context{};
-  ctx->renderer = (SDL_Renderer *)sdl_renderer;
+  memset(&ctx->backend, 0, sizeof(ctx->backend));
   memset(&ctx->input, 0, sizeof(ctx->input));
   ctx->z_counter = 1;
   ctx->dragging_window = -1;
@@ -580,7 +574,7 @@ MGUI_Context *mgui_create(void *sdl_renderer) {
   ctx->file_browser_last_click_ticks = 0;
   ctx->file_browser_result.clear();
 
-  mgui_init_renderer(ctx->renderer);
+  mgui_set_backend(ctx, backend);
   for (int i = 0; i < 10; i++) {
     if (!mgui_fonts[i]) {
       mgui_fonts[i] = new MGuiFont();
@@ -602,20 +596,34 @@ void mgui_destroy(MGUI_Context *ctx) {
 }
 
 void mgui_set_renderer(MGUI_Context *ctx, void *sdl_renderer) {
+  MGUI_RenderBackend backend = {};
+  mgui_make_sdl_backend(&backend, sdl_renderer);
+  mgui_set_backend(ctx, &backend);
+}
+
+void mgui_set_backend(MGUI_Context *ctx, const MGUI_RenderBackend *backend) {
   if (!ctx)
     return;
-  ctx->renderer = (SDL_Renderer *)sdl_renderer;
-  mgui_init_renderer(ctx->renderer);
+  if (backend) {
+    ctx->backend = *backend;
+    mgui_bind_backend(&ctx->backend);
+  } else {
+    memset(&ctx->backend, 0, sizeof(ctx->backend));
+    mgui_bind_backend(nullptr);
+  }
 }
 
 void mgui_begin_frame(MGUI_Context *ctx, const MGUI_Input *input) {
   if (!ctx || !input)
     return;
+  mgui_bind_backend(&ctx->backend);
+  mgui_backend_begin_frame();
   ctx->input = *input;
   const bool main_menu_modal = (ctx->open_main_menu_index != -1);
   if (ctx->custom_cursor_enabled && ctx->cursor_anim_count > 1) {
-    const int anim_phase =
-        (int)((SDL_GetTicks() / 90) % (Uint64)ctx->cursor_anim_count);
+    const unsigned long long ticks = mgui_backend_get_ticks_ms();
+    const int anim_phase = (int)((ticks / 90ull) %
+                                 (unsigned long long)ctx->cursor_anim_count);
     ctx->cursor_request_idx = anim_phase;
   } else if (ctx->custom_cursor_enabled) {
     ctx->cursor_request_idx = 0;
@@ -692,6 +700,7 @@ void mgui_begin_frame(MGUI_Context *ctx, const MGUI_Input *input) {
 void mgui_end_frame(MGUI_Context *ctx) {
   if (!ctx)
     return;
+  mgui_bind_backend(&ctx->backend);
   if (ctx->open_main_menu_index != -1 && ctx->input.mouse_pressed) {
     bool in_bar = point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y,
                                 ctx->main_menu_bar_x, ctx->main_menu_bar_y,
@@ -729,6 +738,7 @@ void mgui_end_frame(MGUI_Context *ctx) {
     SDL_SetCursor(ctx->cursors[ctx->cursor_request_idx]);
     ctx->current_cursor_idx = ctx->cursor_request_idx;
   }
+  mgui_backend_end_frame();
 }
 
 int mgui_begin_window(MGUI_Context *ctx, const char *title, int x, int y, int w,
@@ -980,7 +990,7 @@ void mgui_end_window(MGUI_Context *ctx) {
   if (!ctx)
     return;
   auto &win = ctx->windows[ctx->current_window];
-  SDL_SetRenderClipRect(ctx->renderer, nullptr);
+  mgui_backend_set_clip_rect(0, 0, 0, 0, 0);
 
   if (win.open_menu_index != -1 && ctx->input.mouse_pressed &&
       win.z == ctx->z_counter) {
@@ -2159,8 +2169,7 @@ const char *mgui_show_file_browser(MGUI_Context *ctx) {
   mgui_fill_rect_idx(nullptr, CLR_BOX_BODY, list_x, list_y, list_w, list_h);
 
   // Clip row text to the virtual list viewport so long names can't bleed out.
-  SDL_Rect file_list_clip = {list_x, list_y, content_w, list_h};
-  SDL_SetRenderClipRect(ctx->renderer, &file_list_clip);
+  mgui_backend_set_clip_rect(1, list_x, list_y, content_w, list_h);
 
   int clicked = 0;
   for (int i = 0; i < rows; i++) {
@@ -2183,7 +2192,7 @@ const char *mgui_show_file_browser(MGUI_Context *ctx) {
       clicked = 1;
     }
   }
-  SDL_SetRenderClipRect(ctx->renderer, nullptr);
+  mgui_backend_set_clip_rect(0, 0, 0, 0, 0);
   set_content_clip(ctx);
 
   const int sb_x = list_x + content_w + 1;
@@ -2233,7 +2242,7 @@ const char *mgui_show_file_browser(MGUI_Context *ctx) {
   if (clicked && ctx->file_browser_selected >= 0 &&
       ctx->file_browser_selected < (int)ctx->file_browser_entries.size()) {
     const int idx = ctx->file_browser_selected;
-    const Uint64 now = SDL_GetTicks();
+    const unsigned long long now = mgui_backend_get_ticks_ms();
     if (ctx->file_browser_last_click_idx == idx &&
         (now - ctx->file_browser_last_click_ticks) <= 350) {
       trigger_open = true;

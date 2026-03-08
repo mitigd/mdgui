@@ -1,29 +1,39 @@
 #include "mgui_primitives.h"
 #include "mgui_c.h"
 #include "mgui_font8x8.h"
-#include <SDL3/SDL.h>
 #include <string.h>
-#include <vector>
 
-// Renderer/palette glue for the NGUI primitives.
+// Renderer/palette glue for MGUI primitives.
 
-static SDL_Renderer *g_renderer = nullptr;
-static SDL_Color g_palette[256];
-static SDL_Color g_custom_palette[256];
-static bool g_has_custom_palette[256];
-static int g_theme_id = MGUI_THEME_DEFAULT;
-static SDL_Texture *g_font_atlas = nullptr;
-static SDL_Renderer *g_font_atlas_renderer = nullptr;
-static int g_font_mod_r = -1;
-static int g_font_mod_g = -1;
-static int g_font_mod_b = -1;
+namespace {
+MGUI_RenderBackend g_backend = {};
+bool g_has_backend = false;
 
-static void set_theme_slot(int idx, uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
+struct Color {
+  unsigned char r;
+  unsigned char g;
+  unsigned char b;
+  unsigned char a;
+};
+
+Color g_palette[256];
+Color g_custom_palette[256];
+bool g_has_custom_palette[256];
+int g_theme_id = MGUI_THEME_DEFAULT;
+
+bool backend_ready() {
+  return g_has_backend && g_backend.set_clip_rect && g_backend.fill_rect_rgba &&
+         g_backend.draw_line_rgba && g_backend.draw_point_rgba &&
+         g_backend.get_render_size && g_backend.get_ticks_ms;
+}
+
+void set_theme_slot(int idx, unsigned char r, unsigned char g, unsigned char b,
+                    unsigned char a) {
   g_palette[idx] = {r, g, b, a};
 }
 
-static void fill_base_palette() {
-  static const uint8_t ega16[16][3] = {
+void fill_base_palette() {
+  static const unsigned char ega16[16][3] = {
       {0x00, 0x00, 0x00}, {0x00, 0x00, 0xaa}, {0x00, 0xaa, 0x00},
       {0x00, 0xaa, 0xaa}, {0xaa, 0x00, 0x00}, {0xaa, 0x00, 0xaa},
       {0xaa, 0x55, 0x00}, {0xaa, 0xaa, 0xaa}, {0x55, 0x55, 0x55},
@@ -31,7 +41,7 @@ static void fill_base_palette() {
       {0xff, 0x55, 0x55}, {0xff, 0x55, 0xff}, {0xff, 0xff, 0x55},
       {0xff, 0xff, 0xff},
   };
-  static const uint8_t cube6[6] = {0x00, 0x5f, 0x87, 0xaf, 0xd7, 0xff};
+  static const unsigned char cube6[6] = {0x00, 0x5f, 0x87, 0xaf, 0xd7, 0xff};
 
   for (int i = 0; i < 16; i++) {
     g_palette[i] = {ega16[i][0], ega16[i][1], ega16[i][2], 0xff};
@@ -44,12 +54,12 @@ static void fill_base_palette() {
     g_palette[i] = {cube6[r], cube6[g], cube6[b], 0xff};
   }
   for (int i = 232; i < 256; i++) {
-    const uint8_t v = (uint8_t)(8 + (i - 232) * 10);
+    const unsigned char v = (unsigned char)(8 + (i - 232) * 10);
     g_palette[i] = {v, v, v, 0xff};
   }
 }
 
-static void apply_theme_builtin(int theme_id) {
+void apply_theme_builtin(int theme_id) {
   switch (theme_id) {
   case MGUI_THEME_DARK:
     set_theme_slot(15, 0xdf, 0xdf, 0xdf, 0xff);
@@ -127,7 +137,7 @@ static void apply_theme_builtin(int theme_id) {
   }
 }
 
-static void rebuild_palette() {
+void rebuild_palette() {
   fill_base_palette();
   apply_theme_builtin(g_theme_id);
   for (int i = 0; i < 256; i++) {
@@ -136,27 +146,104 @@ static void rebuild_palette() {
   }
 }
 
-void mgui_init_renderer(SDL_Renderer *r) {
-  if (g_font_atlas && g_font_atlas_renderer != r) {
-    SDL_DestroyTexture(g_font_atlas);
-    g_font_atlas = nullptr;
-    g_font_atlas_renderer = nullptr;
-    g_font_mod_r = -1;
-    g_font_mod_g = -1;
-    g_font_mod_b = -1;
+Color palette_color(unsigned char idx) { return g_palette[idx]; }
+
+void draw_glyph_bits(const unsigned char *glyph, int x, int y,
+                    unsigned char color_idx) {
+  if (!backend_ready())
+    return;
+  const Color c = palette_color(color_idx);
+  for (int py = 0; py < 8; py++) {
+    const unsigned char row = glyph[py];
+    for (int px = 0; px < 8; px++) {
+      if (row & (1u << px)) {
+        g_backend.draw_point_rgba(g_backend.user_data, c.r, c.g, c.b, c.a,
+                                  x + px, y + py);
+      }
+    }
   }
-  g_renderer = r;
+}
+
+bool draw_glyph_fast(unsigned char glyph, int x, int y, unsigned char color_idx) {
+  if (!backend_ready() || !g_backend.draw_glyph_rgba)
+    return false;
+  const Color c = palette_color(color_idx);
+  return g_backend.draw_glyph_rgba(g_backend.user_data, glyph, x, y, c.r, c.g,
+                                   c.b, c.a) != 0;
+}
+
+const unsigned char *glyph_for_char(unsigned char c) {
+  if (c >= 128)
+    c = '?';
+  return (const unsigned char *)mgui_font8x8_basic[c];
+}
+
+int glyph_width(unsigned char c) {
+  if (c == ' ')
+    return 4;
+  const unsigned char *glyph = glyph_for_char(c);
+  int max_x = -1;
+  for (int py = 0; py < 8; py++) {
+    const unsigned char row = glyph[py];
+    for (int px = 0; px < 8; px++) {
+      if (row & (1u << px)) {
+        if (px > max_x)
+          max_x = px;
+      }
+    }
+  }
+  if (max_x < 0)
+    return 4;
+  return max_x + 2;
+}
+} // namespace
+
+extern "C" {
+void mgui_bind_backend(const MGUI_RenderBackend *backend) {
+  if (!backend) {
+    g_has_backend = false;
+    memset(&g_backend, 0, sizeof(g_backend));
+    rebuild_palette();
+    return;
+  }
+  g_backend = *backend;
+  g_has_backend = true;
   rebuild_palette();
 }
 
-static void set_color(uint8_t idx) {
-  if (!g_renderer)
-    return;
-  SDL_Color c = g_palette[idx];
-  SDL_SetRenderDrawColor(g_renderer, c.r, c.g, c.b, 255);
+void mgui_backend_begin_frame(void) {
+  if (g_has_backend && g_backend.begin_frame)
+    g_backend.begin_frame(g_backend.user_data);
 }
 
-extern "C" {
+void mgui_backend_end_frame(void) {
+  if (g_has_backend && g_backend.end_frame)
+    g_backend.end_frame(g_backend.user_data);
+}
+
+void mgui_backend_set_clip_rect(int enabled, int x, int y, int w, int h) {
+  if (!backend_ready())
+    return;
+  g_backend.set_clip_rect(g_backend.user_data, enabled, x, y, w, h);
+}
+
+int mgui_backend_get_render_size(int *out_w, int *out_h) {
+  if (!backend_ready()) {
+    if (out_w)
+      *out_w = 320;
+    if (out_h)
+      *out_h = 240;
+    return 0;
+  }
+  return g_backend.get_render_size(g_backend.user_data, out_w, out_h);
+}
+
+unsigned long long mgui_backend_get_ticks_ms(void) {
+  if (!backend_ready())
+    return 0;
+  return g_backend.get_ticks_ms(g_backend.user_data);
+}
+
 void mgui_set_theme(int theme_id) {
   if (theme_id < MGUI_THEME_DEFAULT || theme_id > MGUI_THEME_OLIVE)
     theme_id = MGUI_THEME_DEFAULT;
@@ -188,172 +275,66 @@ void mgui_clear_all_theme_colors(void) {
 }
 
 void mgui_fill_rect_idx(char *d, int idx, int x, int y, int w, int h) {
-  set_color((uint8_t)idx);
-  SDL_FRect r = {(float)x, (float)y, (float)w, (float)h};
-  SDL_RenderFillRect(g_renderer, &r);
+  if (!backend_ready())
+    return;
+  const Color c = palette_color((unsigned char)idx);
+  g_backend.fill_rect_rgba(g_backend.user_data, c.r, c.g, c.b, c.a, x, y, w,
+                           h);
 }
+
 void mgui_draw_hline_idx(char *d, int idx, int x1, int y, int x2) {
-  set_color((uint8_t)idx);
-  SDL_RenderLine(g_renderer, (float)x1, (float)y, (float)x2 - 1, (float)y);
+  if (!backend_ready())
+    return;
+  const Color c = palette_color((unsigned char)idx);
+  g_backend.draw_line_rgba(g_backend.user_data, c.r, c.g, c.b, c.a, x1, y,
+                           x2 - 1, y);
 }
+
 void mgui_draw_vline_idx(char *d, int idx, int x, int y1, int y2) {
-  set_color((uint8_t)idx);
-  SDL_RenderLine(g_renderer, (float)x, (float)y1, (float)x, (float)y2 - 1);
+  if (!backend_ready())
+    return;
+  const Color c = palette_color((unsigned char)idx);
+  g_backend.draw_line_rgba(g_backend.user_data, c.r, c.g, c.b, c.a, x, y1, x,
+                           y2 - 1);
 }
+
 // Draw a beveled frame using palette indices.
 void mgui_draw_frame_idx(char *d, int idx, int x1, int y1, int x2, int y2) {
-  // Outer black border
-  set_color(0);
-  SDL_FRect r = {(float)x1, (float)y1, (float)(x2 - x1), (float)(y2 - y1)};
-  SDL_RenderRect(g_renderer, &r);
+  mgui_draw_hline_idx(d, 0, x1, y1, x2);
+  mgui_draw_hline_idx(d, 0, x1, y2 - 1, x2);
+  mgui_draw_vline_idx(d, 0, x1, y1, y2);
+  mgui_draw_vline_idx(d, 0, x2 - 1, y1, y2);
 
-  // Inner highlights (Index 29)
-  set_color(29);
-  SDL_RenderLine(g_renderer, (float)x1 + 1, (float)y1 + 1, (float)x2 - 2,
-                 (float)y1 + 1);
-  SDL_RenderLine(g_renderer, (float)x1 + 1, (float)y1 + 1, (float)x1 + 1,
-                 (float)y2 - 2);
+  mgui_draw_hline_idx(d, 29, x1 + 1, y1 + 1, x2 - 1);
+  mgui_draw_vline_idx(d, 29, x1 + 1, y1 + 1, y2 - 1);
 
-  // Inner shadows (Index 23)
-  set_color(23);
-  SDL_RenderLine(g_renderer, (float)x2 - 2, (float)y1 + 1, (float)x2 - 2,
-                 (float)y2 - 2);
-  SDL_RenderLine(g_renderer, (float)x1 + 1, (float)y2 - 2, (float)x2 - 2,
-                 (float)y2 - 2);
+  mgui_draw_vline_idx(d, 23, x2 - 2, y1 + 1, y2 - 1);
+  mgui_draw_hline_idx(d, 23, x1 + 1, y2 - 2, x2 - 1);
 }
 }
-
-// Bitmap font implementation.
 
 MGuiFont *mgui_fonts[10] = {nullptr};
 
 MGuiFont::MGuiFont() { atlas_raw = nullptr; }
 
-static const uint8_t *glyph_for_char(unsigned char c) {
-  if (c >= 128) {
-    c = '?';
-  }
-  return (const uint8_t *)mgui_font8x8_basic[c];
-}
-
-static int glyph_width(unsigned char c) {
-  if (c == ' ')
-    return 4;
-  const uint8_t *glyph = glyph_for_char(c);
-  int max_x = -1;
-  for (int py = 0; py < 8; py++) {
-    const uint8_t row = glyph[py];
-    for (int px = 0; px < 8; px++) {
-      if (row & (1u << px)) {
-        if (px > max_x)
-          max_x = px;
-      }
-    }
-  }
-  if (max_x < 0)
-    return 4;
-  return max_x + 2; // one pixel of spacing for a readable bitmap style
-}
-
-static void draw_glyph_bits(const uint8_t *glyph, int x, int y, uint8_t color_idx) {
-  set_color(color_idx);
-  for (int py = 0; py < 8; py++) {
-    const uint8_t row = glyph[py];
-    for (int px = 0; px < 8; px++) {
-      if (row & (1u << px)) {
-        SDL_RenderPoint(g_renderer, (float)(x + px), (float)(y + py));
-      }
-    }
-  }
-}
-
-static bool ensure_font_atlas() {
-  if (!g_renderer)
-    return false;
-  if (g_font_atlas && g_font_atlas_renderer == g_renderer)
-    return true;
-
-  const int atlas_cols = 16;
-  const int atlas_rows = 8;
-  const int glyph_w = 8;
-  const int glyph_h = 8;
-  const int atlas_w = atlas_cols * glyph_w;
-  const int atlas_h = atlas_rows * glyph_h;
-
-  std::vector<uint32_t> pixels((size_t)atlas_w * (size_t)atlas_h, 0u);
-  for (int ch = 0; ch < 128; ++ch) {
-    const uint8_t *glyph = glyph_for_char((unsigned char)ch);
-    const int gx = (ch % atlas_cols) * glyph_w;
-    const int gy = (ch / atlas_cols) * glyph_h;
-    for (int py = 0; py < glyph_h; ++py) {
-      const uint8_t row = glyph[py];
-      for (int px = 0; px < glyph_w; ++px) {
-        if (row & (1u << px)) {
-          const int ax = gx + px;
-          const int ay = gy + py;
-          pixels[(size_t)ay * (size_t)atlas_w + (size_t)ax] = 0xffffffffu;
-        }
-      }
-    }
-  }
-
-  SDL_Texture *tex =
-      SDL_CreateTexture(g_renderer, SDL_PIXELFORMAT_RGBA8888,
-                        SDL_TEXTUREACCESS_STATIC, atlas_w, atlas_h);
-  if (!tex)
-    return false;
-  SDL_UpdateTexture(tex, nullptr, pixels.data(), atlas_w * (int)sizeof(uint32_t));
-  SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND);
-  SDL_SetTextureScaleMode(tex, SDL_SCALEMODE_NEAREST);
-
-  g_font_atlas = tex;
-  g_font_atlas_renderer = g_renderer;
-  g_font_mod_r = -1;
-  g_font_mod_g = -1;
-  g_font_mod_b = -1;
-  return true;
-}
-
-static bool draw_glyph_atlas(unsigned char c, int x, int y, uint8_t color_idx) {
-  if (!ensure_font_atlas())
-    return false;
-
-  const SDL_Color col = g_palette[color_idx];
-  if ((int)col.r != g_font_mod_r || (int)col.g != g_font_mod_g ||
-      (int)col.b != g_font_mod_b) {
-    SDL_SetTextureColorMod(g_font_atlas, col.r, col.g, col.b);
-    g_font_mod_r = col.r;
-    g_font_mod_g = col.g;
-    g_font_mod_b = col.b;
-  }
-
-  const float sx = (float)((c % 16) * 8);
-  const float sy = (float)((c / 16) * 8);
-  SDL_FRect src = {sx, sy, 8.0f, 8.0f};
-  SDL_FRect dst = {(float)x, (float)y, 8.0f, 8.0f};
-  SDL_RenderTexture(g_renderer, g_font_atlas, &src, &dst);
-  return true;
-}
-
 int MGuiFont::drawChar(unsigned char c, int x, int y, int colorIdx) {
-  if (!g_renderer)
+  if (!backend_ready())
     return 6;
 
-  const uint8_t *glyph = glyph_for_char(c);
+  const unsigned char *glyph = glyph_for_char(c);
   const int xw = glyph_width(c);
 
   if (colorIdx >= 0 && colorIdx <= 255) {
-    if (!draw_glyph_atlas(c, x + 1, y + 1, 0))
+    if (!draw_glyph_fast(c, x + 1, y + 1, 0))
       draw_glyph_bits(glyph, x + 1, y + 1, 0);
-    if (!draw_glyph_atlas(c, x, y, (uint8_t)colorIdx))
-      draw_glyph_bits(glyph, x, y, (uint8_t)colorIdx);
+    if (!draw_glyph_fast(c, x, y, (unsigned char)colorIdx))
+      draw_glyph_bits(glyph, x, y, (unsigned char)colorIdx);
     return xw;
   }
 
-  // Default style uses a simple two-tone treatment.
-  if (!draw_glyph_atlas(c, x + 1, y + 1, 0))
+  if (!draw_glyph_fast(c, x + 1, y + 1, 0))
     draw_glyph_bits(glyph, x + 1, y + 1, 0);
-  if (!draw_glyph_atlas(c, x, y, 15))
+  if (!draw_glyph_fast(c, x, y, 15))
     draw_glyph_bits(glyph, x, y, 15);
   return xw;
 }

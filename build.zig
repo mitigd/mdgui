@@ -25,7 +25,13 @@ pub fn build(b: *std.Build) void {
 
     exe.root_module.addIncludePath(b.path("include"));
     exe.root_module.addCSourceFiles(.{
-        .files = &.{ "src/mgui_c.cpp", "src/mgui_glue.cpp" },
+        .files = &.{
+            "src/mgui_c.cpp",
+            "src/mgui_glue.cpp",
+            "src/mgui_backend_sdl.cpp",
+            "src/mgui_backend_opengl.cpp",
+            "src/mgui_backend_vulkan.cpp",
+        },
         .flags = &.{ "-std=c++17", "-fpermissive" },
     });
 

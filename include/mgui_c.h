@@ -7,6 +7,35 @@ extern "C" {
 
 typedef struct MGUI_Context MGUI_Context;
 
+typedef struct MGUI_RenderBackend {
+  void *user_data;
+
+  // Optional frame hooks for explicit backend state setup/flush.
+  void (*begin_frame)(void *user_data);
+  void (*end_frame)(void *user_data);
+
+  // Required for rendering widgets.
+  void (*set_clip_rect)(void *user_data, int enabled, int x, int y, int w,
+                        int h);
+  void (*fill_rect_rgba)(void *user_data, unsigned char r, unsigned char g,
+                         unsigned char b, unsigned char a, int x, int y,
+                         int w, int h);
+  void (*draw_line_rgba)(void *user_data, unsigned char r, unsigned char g,
+                         unsigned char b, unsigned char a, int x1, int y1,
+                         int x2, int y2);
+  void (*draw_point_rgba)(void *user_data, unsigned char r, unsigned char g,
+                          unsigned char b, unsigned char a, int x, int y);
+
+  // Optional fast path for bitmap text glyph draws (returns non-zero if drawn).
+  int (*draw_glyph_rgba)(void *user_data, unsigned char glyph, int x, int y,
+                         unsigned char r, unsigned char g, unsigned char b,
+                         unsigned char a);
+
+  // Required for layout and timing behavior.
+  int (*get_render_size)(void *user_data, int *out_w, int *out_h);
+  unsigned long long (*get_ticks_ms)(void *user_data);
+} MGUI_RenderBackend;
+
 typedef struct MGUI_Input {
   int mouse_x;
   int mouse_y;
@@ -51,8 +80,10 @@ enum {
 };
 
 MGUI_Context *mgui_create(void *sdl_renderer);
+MGUI_Context *mgui_create_with_backend(const MGUI_RenderBackend *backend);
 void mgui_destroy(MGUI_Context *ctx);
 void mgui_set_renderer(MGUI_Context *ctx, void *sdl_renderer);
+void mgui_set_backend(MGUI_Context *ctx, const MGUI_RenderBackend *backend);
 
 void mgui_begin_frame(MGUI_Context *ctx, const MGUI_Input *input);
 void mgui_end_frame(MGUI_Context *ctx);

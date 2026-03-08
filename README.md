@@ -67,6 +67,36 @@ Artifacts:
 - Window identity is keyed by window title (`mgui_begin_window` title string).
 - For best behavior, keep titles stable across frames.
 
+## Render Backend Compatibility
+
+`mgui` now uses a pluggable render backend API instead of hard-wiring widget draw calls to SDL renderer APIs.
+
+- Backend-agnostic core primitives/font code: `src/mgui_glue.cpp`
+- SDL compatibility backend implementation: `src/mgui_backend_sdl.cpp`
+- OpenGL compatibility backend adapter: `src/mgui_backend_opengl.cpp`
+- Vulkan compatibility backend adapter: `src/mgui_backend_vulkan.cpp`
+- UI/window logic: `src/mgui_c.cpp`
+- Backend helper declarations: `include/mgui_backends.h`
+
+```c
+MGUI_Context *ctx = mgui_create(sdl_renderer);
+```
+
+For non-SDL renderers (Vulkan/OpenGL/etc), provide a `MGUI_RenderBackend` with callback functions and create with:
+
+```c
+#include "mgui_backends.h"
+
+MGUI_BackendCallbacks callbacks = { ... };
+MGUI_RenderBackend backend = { ... };
+
+// Or use per-backend adapter helpers:
+mgui_make_vulkan_backend(&backend, &callbacks);
+// mgui_make_opengl_backend(&backend, &callbacks);
+
+MGUI_Context *ctx = mgui_create_with_backend(&backend);
+```
+
 ## Credits
 
 **Heavily** inspired by the old Nes Emulator "NESticle" by: Icer Addis
