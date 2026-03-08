@@ -1089,7 +1089,7 @@ void mdgui_end_window(MDGUI_Context *ctx) {
       const int thumb_y = sb_y + ((travel > 0)
                                       ? ((win.text_scroll * travel) / max_scroll)
                                       : 0);
-      mdgui_fill_rect_idx(nullptr, CLR_MENU_SEL, sb_x + 1, thumb_y, sb_w - 2, thumb_h);
+      mdgui_fill_rect_idx(nullptr, CLR_ACCENT, sb_x + 1, thumb_y, sb_w - 2, thumb_h);
       const int over_scrollbar = point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y,
                                                sb_x, sb_y, sb_w, viewport_h);
       if (ctx->input.mouse_pressed && over_scrollbar &&
@@ -1526,7 +1526,7 @@ void mdgui_progress_bar(MDGUI_Context *ctx, float value, int x, int y, int w,
   mdgui_draw_vline_idx(nullptr, CLR_WINDOW_BORDER, ix + w + 1, iy - 1, iy + h + 1);
   mdgui_fill_rect_idx(nullptr, CLR_BOX_BODY, ix, iy, w, h);
   if (fill_w > 0)
-    mdgui_fill_rect_idx(nullptr, CLR_MENU_SEL, ix, iy, fill_w, h);
+    mdgui_fill_rect_idx(nullptr, CLR_ACCENT, ix, iy, fill_w, h);
 
   if (overlay_text && mdgui_fonts[1]) {
     const int tw = mdgui_fonts[1]->measureTextWidth(overlay_text);
@@ -2247,7 +2247,7 @@ const char *mdgui_show_file_browser(MDGUI_Context *ctx) {
     const int travel = list_h - thumb_h;
     const int thumb_y =
         list_y + ((ctx->file_browser_scroll * travel) / max_scroll);
-    mdgui_fill_rect_idx(nullptr, CLR_MENU_SEL, sb_x + 1, thumb_y, scrollbar_w - 2,
+    mdgui_fill_rect_idx(nullptr, CLR_ACCENT, sb_x + 1, thumb_y, scrollbar_w - 2,
              thumb_h);
     if (ctx->input.mouse_pressed && over_scrollbar) {
       if (ctx->input.mouse_y >= thumb_y && ctx->input.mouse_y <= thumb_y + thumb_h) {
