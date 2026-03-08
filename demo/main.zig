@@ -217,6 +217,21 @@ fn drawWindowApiDemo(ctx: ?*c.MDGUI_Context, renderer: ?*c.SDL_Renderer, emu_vie
         _ = c.SDL_SetRenderDrawColor(renderer, 0x12, 0x12, 0x12, 0xff);
         _ = c.SDL_RenderFillRect(renderer, &bg);
 
+        // Get accent color from current theme
+        var accent_r: u8 = 0x70;
+        var accent_g: u8 = 0xf0;
+        var accent_b: u8 = 0x70;
+        c.mdgui_get_accent_color(&accent_r, &accent_g, &accent_b);
+
+        // Create light and dark variants for checkerboard (cast to avoid overflow)
+        const light_r: u8 = @intCast(@min(255, @as(u16, accent_r) + 80));
+        const light_g: u8 = @intCast(@min(255, @as(u16, accent_g) + 40));
+        const light_b: u8 = @intCast(@min(255, @as(u16, accent_b) + 80));
+
+        const dark_r: u8 = if (accent_r > 30) accent_r - 30 else 0;
+        const dark_g: u8 = if (accent_g > 30) accent_g - 30 else 0;
+        const dark_b: u8 = if (accent_b > 30) accent_b - 30 else 0;
+
         const tile_w: c_int = 8;
         const tile_h: c_int = 8;
         var ty: c_int = 0;
@@ -224,9 +239,9 @@ fn drawWindowApiDemo(ctx: ?*c.MDGUI_Context, renderer: ?*c.SDL_Renderer, emu_vie
             var tx: c_int = 0;
             while (tx < view_w) : (tx += tile_w) {
                 if (@mod(@divTrunc(tx, tile_w) + @divTrunc(ty, tile_h), @as(c_int, 2)) == 0) {
-                    _ = c.SDL_SetRenderDrawColor(renderer, 0x70, 0xf0, 0x70, 0xff);
+                    _ = c.SDL_SetRenderDrawColor(renderer, light_r, light_g, light_b, 0xff);
                 } else {
-                    _ = c.SDL_SetRenderDrawColor(renderer, 0x24, 0x54, 0x24, 0xff);
+                    _ = c.SDL_SetRenderDrawColor(renderer, dark_r, dark_g, dark_b, 0xff);
                 }
                 const cw: c_int = @min(tile_w, view_w - tx);
                 const ch: c_int = @min(tile_h, view_h - ty);

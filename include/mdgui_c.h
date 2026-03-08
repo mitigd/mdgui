@@ -149,6 +149,8 @@ int mdgui_message_box_ex(MDGUI_Context *ctx, const char *id, const char *title,
 int mdgui_get_window_z(MDGUI_Context *ctx, const char *title);
 void mdgui_set_theme(int theme_id);
 int mdgui_get_theme(void);
+void mdgui_get_accent_color(unsigned char *out_r, unsigned char *out_g,
+                            unsigned char *out_b);
 void mdgui_set_theme_color(int palette_index, unsigned char r, unsigned char g,
                           unsigned char b, unsigned char a);
 void mdgui_clear_theme_color(int palette_index);

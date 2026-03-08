@@ -277,6 +277,16 @@ void mdgui_set_theme(int theme_id) {
 
 int mdgui_get_theme(void) { return g_theme_id; }
 
+void mdgui_get_accent_color(unsigned char *out_r, unsigned char *out_g,
+                            unsigned char *out_b) {
+  if (!out_r || !out_g || !out_b)
+    return;
+  const Color c = palette_color(247); // CLR_ACCENT palette index
+  *out_r = c.r;
+  *out_g = c.g;
+  *out_b = c.b;
+}
+
 void mdgui_set_theme_color(int palette_index, unsigned char r, unsigned char g,
                           unsigned char b, unsigned char a) {
   if (palette_index < 0 || palette_index >= 256)
