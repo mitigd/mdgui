@@ -1,6 +1,6 @@
-#include "mgui_c.h"
-#include "mgui_backends.h"
-#include "mgui_primitives.h"
+#include "mdgui_c.h"
+#include "mdgui_backends.h"
+#include "mdgui_primitives.h"
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_mouse.h>
 #include <string.h>
@@ -10,7 +10,7 @@
 #include <string>
 #include <vector>
 
-extern MGuiFont *mgui_fonts[10];
+extern MDGuiFont *mdgui_fonts[10];
 
 namespace {
 constexpr int CLR_BUTTON_SURFACE = 25;
@@ -28,7 +28,7 @@ constexpr int CLR_TEXT_DARK = 0;
 constexpr int CLR_MSG_BG = 243;
 constexpr int CLR_MSG_BAR = 244;
 
-struct MGUI_Window {
+struct MDGUI_Window {
   std::string id;
   std::string title;
   int x;
@@ -57,11 +57,11 @@ struct FileBrowserEntry {
 };
 } // namespace
 
-struct MGUI_Context {
-  MGUI_RenderBackend backend;
-  MGUI_Input input;
+struct MDGUI_Context {
+  MDGUI_RenderBackend backend;
+  MDGUI_Input input;
 
-  std::vector<MGUI_Window> windows;
+  std::vector<MDGUI_Window> windows;
   int z_counter;
   int dragging_window;
   int drag_off_x;
@@ -150,7 +150,7 @@ struct MGUI_Context {
   std::vector<std::string> file_browser_ext_filters;
 };
 
-static void note_content_bounds(MGUI_Context *ctx, int right, int bottom) {
+static void note_content_bounds(MDGUI_Context *ctx, int right, int bottom) {
   if (!ctx || ctx->current_window < 0)
     return;
   if (right > ctx->content_req_right)
@@ -159,7 +159,7 @@ static void note_content_bounds(MGUI_Context *ctx, int right, int bottom) {
     ctx->content_req_bottom = bottom;
 }
 
-static void set_content_clip(MGUI_Context *ctx) {
+static void set_content_clip(MDGUI_Context *ctx) {
   if (!ctx || ctx->current_window < 0 ||
       ctx->current_window >= (int)ctx->windows.size())
     return;
@@ -170,10 +170,10 @@ static void set_content_clip(MGUI_Context *ctx) {
     clip_w = 1;
   if (clip_h < 1)
     clip_h = 1;
-  mgui_backend_set_clip_rect(1, win.x + 2, ctx->origin_y, clip_w, clip_h);
+  mdgui_backend_set_clip_rect(1, win.x + 2, ctx->origin_y, clip_w, clip_h);
 }
 
-static int resolve_dynamic_width(MGUI_Context *ctx, int local_x, int w,
+static int resolve_dynamic_width(MDGUI_Context *ctx, int local_x, int w,
                                  int min_w = 1) {
   if (!ctx || ctx->current_window < 0)
     return (w > 0) ? w : min_w;
@@ -192,7 +192,7 @@ static int resolve_dynamic_width(MGUI_Context *ctx, int local_x, int w,
   return w;
 }
 
-static void drawrect_rgb(MGUI_Context *ctx, uint8_t r, uint8_t g, uint8_t b,
+static void drawrect_rgb(MDGUI_Context *ctx, uint8_t r, uint8_t g, uint8_t b,
                          int x, int y, int w, int h) {
   if (!ctx)
     return;
@@ -206,7 +206,7 @@ static int point_in_rect(int px, int py, int x, int y, int w, int h) {
   return px >= x && py >= y && px < (x + w) && py < (y + h);
 }
 
-static int top_window_at_point(const MGUI_Context *ctx, int px, int py,
+static int top_window_at_point(const MDGUI_Context *ctx, int px, int py,
                                int margin = 0) {
   int best = -1;
   int best_z = -2147483647;
@@ -226,7 +226,7 @@ static int top_window_at_point(const MGUI_Context *ctx, int px, int py,
   return best;
 }
 
-static int find_or_create_window(MGUI_Context *ctx, const char *title, int x,
+static int find_or_create_window(MDGUI_Context *ctx, const char *title, int x,
                                  int y, int w, int h) {
   const char *key = title ? title : "window";
   for (int i = 0; i < (int)ctx->windows.size(); ++i) {
@@ -235,7 +235,7 @@ static int find_or_create_window(MGUI_Context *ctx, const char *title, int x,
       return i;
     }
   }
-  MGUI_Window nw{};
+  MDGUI_Window nw{};
   nw.id = key;
   nw.title = key;
   nw.x = x;
@@ -262,7 +262,7 @@ static int find_or_create_window(MGUI_Context *ctx, const char *title, int x,
   return (int)ctx->windows.size() - 1;
 }
 
-static int is_current_window_topmost(MGUI_Context *ctx, int margin = 0) {
+static int is_current_window_topmost(MDGUI_Context *ctx, int margin = 0) {
   if (ctx->current_window < 0)
     return 0;
   const auto &w = ctx->windows[ctx->current_window];
@@ -271,7 +271,7 @@ static int is_current_window_topmost(MGUI_Context *ctx, int margin = 0) {
          w.z >= ctx->z_counter;
 }
 
-static void draw_open_menu_overlay(MGUI_Context *ctx) {
+static void draw_open_menu_overlay(MDGUI_Context *ctx) {
   if (!ctx || ctx->current_window < 0)
     return;
   auto &win = ctx->windows[ctx->current_window];
@@ -285,39 +285,39 @@ static void draw_open_menu_overlay(MGUI_Context *ctx) {
   if (total_h <= 0)
     return;
 
-  mgui_draw_frame_idx(nullptr, 0, def.x - 1, def.y - 1, def.x + def.w + 1,
+  mdgui_draw_frame_idx(nullptr, 0, def.x - 1, def.y - 1, def.x + def.w + 1,
           def.y + total_h + 1);
-  mgui_fill_rect_idx(nullptr, CLR_MENU_BG, def.x, def.y, def.w, total_h);
+  mdgui_fill_rect_idx(nullptr, CLR_MENU_BG, def.x, def.y, def.w, total_h);
 
   for (int i = 0; i < (int)def.items.size(); ++i) {
     const int iy = def.y + (i * item_h);
     const int hovered = point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y,
                                       def.x, iy, def.w, item_h);
     if (hovered) {
-      mgui_fill_rect_idx(nullptr, CLR_MENU_SEL, def.x, iy, def.w, item_h);
+      mdgui_fill_rect_idx(nullptr, CLR_MENU_SEL, def.x, iy, def.w, item_h);
     }
-    if (mgui_fonts[1]) {
-      mgui_fonts[1]->drawText(def.items[i].c_str(), nullptr, def.x + 4, iy + 1,
+    if (mdgui_fonts[1]) {
+      mdgui_fonts[1]->drawText(def.items[i].c_str(), nullptr, def.x + 4, iy + 1,
                     CLR_MENU_TEXT);
     }
   }
 }
 
-static int get_logical_render_w(MGUI_Context *ctx) {
+static int get_logical_render_w(MDGUI_Context *ctx) {
   int rw = 320;
   int rh = 240;
   if (ctx)
-    mgui_backend_get_render_size(&rw, &rh);
+    mdgui_backend_get_render_size(&rw, &rh);
   if (rw <= 0)
     rw = 320;
   return rw;
 }
 
-static int get_logical_render_h(MGUI_Context *ctx) {
+static int get_logical_render_h(MDGUI_Context *ctx) {
   int rw = 320;
   int rh = 240;
   if (ctx)
-    mgui_backend_get_render_size(&rw, &rh);
+    mdgui_backend_get_render_size(&rw, &rh);
   if (rh <= 0)
     rh = 240;
   return rh;
@@ -362,7 +362,7 @@ static std::string path_extension_lower(const std::filesystem::path &p) {
   return ext;
 }
 
-static bool file_matches_filters(const MGUI_Context *ctx,
+static bool file_matches_filters(const MDGUI_Context *ctx,
                                  const std::filesystem::path &p) {
   if (!ctx || ctx->file_browser_ext_filters.empty())
     return true; // default: show all regular files
@@ -376,7 +376,7 @@ static bool file_matches_filters(const MGUI_Context *ctx,
   return false;
 }
 
-static void file_browser_open_path(MGUI_Context *ctx, const char *path) {
+static void file_browser_open_path(MDGUI_Context *ctx, const char *path) {
   if (!ctx)
     return;
   namespace fs = std::filesystem;
@@ -454,7 +454,7 @@ static void file_browser_open_path(MGUI_Context *ctx, const char *path) {
     ctx->file_browser_selected = 0;
 }
 
-static void draw_open_main_menu_overlay(MGUI_Context *ctx) {
+static void draw_open_main_menu_overlay(MDGUI_Context *ctx) {
   if (!ctx)
     return;
   if (ctx->open_main_menu_index < 0 ||
@@ -467,31 +467,31 @@ static void draw_open_main_menu_overlay(MGUI_Context *ctx) {
   if (total_h <= 0)
     return;
 
-  mgui_draw_frame_idx(nullptr, 0, def.x - 1, def.y - 1, def.x + def.w + 1,
+  mdgui_draw_frame_idx(nullptr, 0, def.x - 1, def.y - 1, def.x + def.w + 1,
           def.y + total_h + 1);
-  mgui_fill_rect_idx(nullptr, CLR_MENU_BG, def.x, def.y, def.w, total_h);
+  mdgui_fill_rect_idx(nullptr, CLR_MENU_BG, def.x, def.y, def.w, total_h);
 
   for (int i = 0; i < (int)def.items.size(); ++i) {
     const int iy = def.y + (i * item_h);
     const int hovered = point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y,
                                       def.x, iy, def.w, item_h);
     if (hovered)
-      mgui_fill_rect_idx(nullptr, CLR_MENU_SEL, def.x, iy, def.w, item_h);
-    if (mgui_fonts[1])
-      mgui_fonts[1]->drawText(def.items[i].c_str(), nullptr, def.x + 4, iy + 1,
+      mdgui_fill_rect_idx(nullptr, CLR_MENU_SEL, def.x, iy, def.w, item_h);
+    if (mdgui_fonts[1])
+      mdgui_fonts[1]->drawText(def.items[i].c_str(), nullptr, def.x + 4, iy + 1,
                     CLR_MENU_TEXT);
   }
 }
 
 extern "C" {
-MGUI_Context *mgui_create(void *sdl_renderer) {
-  MGUI_RenderBackend backend = {};
-  mgui_make_sdl_backend(&backend, sdl_renderer);
-  return mgui_create_with_backend(&backend);
+MDGUI_Context *mdgui_create(void *sdl_renderer) {
+  MDGUI_RenderBackend backend = {};
+  mdgui_make_sdl_backend(&backend, sdl_renderer);
+  return mdgui_create_with_backend(&backend);
 }
 
-MGUI_Context *mgui_create_with_backend(const MGUI_RenderBackend *backend) {
-  auto *ctx = new MGUI_Context{};
+MDGUI_Context *mdgui_create_with_backend(const MDGUI_RenderBackend *backend) {
+  auto *ctx = new MDGUI_Context{};
   memset(&ctx->backend, 0, sizeof(ctx->backend));
   memset(&ctx->input, 0, sizeof(ctx->input));
   ctx->z_counter = 1;
@@ -574,16 +574,16 @@ MGUI_Context *mgui_create_with_backend(const MGUI_RenderBackend *backend) {
   ctx->file_browser_last_click_ticks = 0;
   ctx->file_browser_result.clear();
 
-  mgui_set_backend(ctx, backend);
+  mdgui_set_backend(ctx, backend);
   for (int i = 0; i < 10; i++) {
-    if (!mgui_fonts[i]) {
-      mgui_fonts[i] = new MGuiFont();
+    if (!mdgui_fonts[i]) {
+      mdgui_fonts[i] = new MDGuiFont();
     }
   }
   return ctx;
 }
 
-void mgui_destroy(MGUI_Context *ctx) {
+void mdgui_destroy(MDGUI_Context *ctx) {
   if (!ctx)
     return;
   for (int i = 0; i < 16; i++) {
@@ -595,33 +595,33 @@ void mgui_destroy(MGUI_Context *ctx) {
   delete ctx;
 }
 
-void mgui_set_renderer(MGUI_Context *ctx, void *sdl_renderer) {
-  MGUI_RenderBackend backend = {};
-  mgui_make_sdl_backend(&backend, sdl_renderer);
-  mgui_set_backend(ctx, &backend);
+void mdgui_set_renderer(MDGUI_Context *ctx, void *sdl_renderer) {
+  MDGUI_RenderBackend backend = {};
+  mdgui_make_sdl_backend(&backend, sdl_renderer);
+  mdgui_set_backend(ctx, &backend);
 }
 
-void mgui_set_backend(MGUI_Context *ctx, const MGUI_RenderBackend *backend) {
+void mdgui_set_backend(MDGUI_Context *ctx, const MDGUI_RenderBackend *backend) {
   if (!ctx)
     return;
   if (backend) {
     ctx->backend = *backend;
-    mgui_bind_backend(&ctx->backend);
+    mdgui_bind_backend(&ctx->backend);
   } else {
     memset(&ctx->backend, 0, sizeof(ctx->backend));
-    mgui_bind_backend(nullptr);
+    mdgui_bind_backend(nullptr);
   }
 }
 
-void mgui_begin_frame(MGUI_Context *ctx, const MGUI_Input *input) {
+void mdgui_begin_frame(MDGUI_Context *ctx, const MDGUI_Input *input) {
   if (!ctx || !input)
     return;
-  mgui_bind_backend(&ctx->backend);
-  mgui_backend_begin_frame();
+  mdgui_bind_backend(&ctx->backend);
+  mdgui_backend_begin_frame();
   ctx->input = *input;
   const bool main_menu_modal = (ctx->open_main_menu_index != -1);
   if (ctx->custom_cursor_enabled && ctx->cursor_anim_count > 1) {
-    const unsigned long long ticks = mgui_backend_get_ticks_ms();
+    const unsigned long long ticks = mdgui_backend_get_ticks_ms();
     const int anim_phase = (int)((ticks / 90ull) %
                                  (unsigned long long)ctx->cursor_anim_count);
     ctx->cursor_request_idx = anim_phase;
@@ -697,10 +697,10 @@ void mgui_begin_frame(MGUI_Context *ctx, const MGUI_Input *input) {
   ctx->combo_overlay_items = nullptr;
 }
 
-void mgui_end_frame(MGUI_Context *ctx) {
+void mdgui_end_frame(MDGUI_Context *ctx) {
   if (!ctx)
     return;
-  mgui_bind_backend(&ctx->backend);
+  mdgui_bind_backend(&ctx->backend);
   if (ctx->open_main_menu_index != -1 && ctx->input.mouse_pressed) {
     bool in_bar = point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y,
                                 ctx->main_menu_bar_x, ctx->main_menu_bar_y,
@@ -738,10 +738,10 @@ void mgui_end_frame(MGUI_Context *ctx) {
     SDL_SetCursor(ctx->cursors[ctx->cursor_request_idx]);
     ctx->current_cursor_idx = ctx->cursor_request_idx;
   }
-  mgui_backend_end_frame();
+  mdgui_backend_end_frame();
 }
 
-int mgui_begin_window(MGUI_Context *ctx, const char *title, int x, int y, int w,
+int mdgui_begin_window(MDGUI_Context *ctx, const char *title, int x, int y, int w,
                       int h) {
   if (!ctx)
     return 0;
@@ -821,7 +821,7 @@ int mgui_begin_window(MGUI_Context *ctx, const char *title, int x, int y, int w,
   const int close_y = win.y + 1;
   const int max_x = close_x - btn_w - 2;
   const int max_y = win.y + 1;
-  const int title_text_w = (title && mgui_fonts[1]) ? mgui_fonts[1]->measureTextWidth(title) : 0;
+  const int title_text_w = (title && mdgui_fonts[1]) ? mdgui_fonts[1]->measureTextWidth(title) : 0;
   int chrome_min_w = 26;
   if (title_text_w > 0) {
     const int title_need = 5 + title_text_w + 6 + btn_w + 2 + btn_w + 2;
@@ -924,41 +924,41 @@ int mgui_begin_window(MGUI_Context *ctx, const char *title, int x, int y, int w,
                       (win.z == ctx->z_counter);
 
   // Slim gray border around the whole window
-  mgui_draw_frame_idx(nullptr, CLR_TEXT_LIGHT, win.x - 1, win.y - 1, win.x + win.w + 1,
+  mdgui_draw_frame_idx(nullptr, CLR_TEXT_LIGHT, win.x - 1, win.y - 1, win.x + win.w + 1,
           win.y + win.h + 1);
-  mgui_fill_rect_idx(nullptr, CLR_BOX_TITLE, win.x, win.y, win.w, title_h);
-  mgui_fill_rect_idx(nullptr, CLR_BOX_BODY, win.x, win.y + title_h, win.w,
+  mdgui_fill_rect_idx(nullptr, CLR_BOX_TITLE, win.x, win.y, win.w, title_h);
+  mdgui_fill_rect_idx(nullptr, CLR_BOX_BODY, win.x, win.y + title_h, win.w,
            win.h - title_h - 2);
-  mgui_fill_rect_idx(nullptr, CLR_BOX_TITLE, win.x, win.y + win.h - 2, win.w, 2);
+  mdgui_fill_rect_idx(nullptr, CLR_BOX_TITLE, win.x, win.y + win.h - 2, win.w, 2);
 
   // Draw 3D-style Close button
-  mgui_fill_rect_idx(nullptr, CLR_BUTTON_SURFACE, close_x, close_y, btn_w, btn_h);
-  mgui_draw_hline_idx(nullptr, CLR_BUTTON_LIGHT, close_x, close_y, close_x + btn_w);
-  mgui_draw_vline_idx(nullptr, CLR_BUTTON_LIGHT, close_x, close_y, close_y + btn_h);
-  mgui_draw_hline_idx(nullptr, CLR_BUTTON_DARK, close_x, close_y + btn_h - 1,
+  mdgui_fill_rect_idx(nullptr, CLR_BUTTON_SURFACE, close_x, close_y, btn_w, btn_h);
+  mdgui_draw_hline_idx(nullptr, CLR_BUTTON_LIGHT, close_x, close_y, close_x + btn_w);
+  mdgui_draw_vline_idx(nullptr, CLR_BUTTON_LIGHT, close_x, close_y, close_y + btn_h);
+  mdgui_draw_hline_idx(nullptr, CLR_BUTTON_DARK, close_x, close_y + btn_h - 1,
             close_x + btn_w);
-  mgui_draw_vline_idx(nullptr, CLR_BUTTON_DARK, close_x + btn_w - 1, close_y,
+  mdgui_draw_vline_idx(nullptr, CLR_BUTTON_DARK, close_x + btn_w - 1, close_y,
             close_y + btn_h);
-  if (mgui_fonts[1])
-    mgui_fonts[1]->drawText("x", nullptr, close_x + 2, close_y + 1, CLR_TEXT_LIGHT);
+  if (mdgui_fonts[1])
+    mdgui_fonts[1]->drawText("x", nullptr, close_x + 2, close_y + 1, CLR_TEXT_LIGHT);
 
   // Draw 3D-style Maximize button (if not "MESSAGE")
   if (title && strcmp(title, "MESSAGE") != 0) {
-    mgui_fill_rect_idx(nullptr, CLR_BUTTON_SURFACE, max_x, max_y, btn_w, btn_h);
-    mgui_draw_hline_idx(nullptr, CLR_BUTTON_LIGHT, max_x, max_y, max_x + btn_w);
-    mgui_draw_vline_idx(nullptr, CLR_BUTTON_LIGHT, max_x, max_y, max_y + btn_h);
-    mgui_draw_hline_idx(nullptr, CLR_BUTTON_DARK, max_x, max_y + btn_h - 1,
+    mdgui_fill_rect_idx(nullptr, CLR_BUTTON_SURFACE, max_x, max_y, btn_w, btn_h);
+    mdgui_draw_hline_idx(nullptr, CLR_BUTTON_LIGHT, max_x, max_y, max_x + btn_w);
+    mdgui_draw_vline_idx(nullptr, CLR_BUTTON_LIGHT, max_x, max_y, max_y + btn_h);
+    mdgui_draw_hline_idx(nullptr, CLR_BUTTON_DARK, max_x, max_y + btn_h - 1,
               max_x + btn_w);
-    mgui_draw_vline_idx(nullptr, CLR_BUTTON_DARK, max_x + btn_w - 1, max_y,
+    mdgui_draw_vline_idx(nullptr, CLR_BUTTON_DARK, max_x + btn_w - 1, max_y,
               max_y + btn_h);
-    mgui_fill_rect_idx(nullptr, CLR_TEXT_LIGHT, max_x + 2, max_y + 2, btn_w - 4,
+    mdgui_fill_rect_idx(nullptr, CLR_TEXT_LIGHT, max_x + 2, max_y + 2, btn_w - 4,
              btn_h - 4);
-    mgui_fill_rect_idx(nullptr, CLR_BUTTON_SURFACE, max_x + 3, max_y + 4, btn_w - 6,
+    mdgui_fill_rect_idx(nullptr, CLR_BUTTON_SURFACE, max_x + 3, max_y + 4, btn_w - 6,
              btn_h - 7);
   }
 
-  if (title && mgui_fonts[1]) {
-    mgui_fonts[1]->drawText(title, nullptr, win.x + 5, win.y + 1, CLR_TEXT_LIGHT);
+  if (title && mdgui_fonts[1]) {
+    mdgui_fonts[1]->drawText(title, nullptr, win.x + 5, win.y + 1, CLR_TEXT_LIGHT);
   }
 
   ctx->origin_x = win.x + 2;
@@ -986,11 +986,11 @@ int mgui_begin_window(MGUI_Context *ctx, const char *title, int x, int y, int w,
   return 1;
 }
 
-void mgui_end_window(MGUI_Context *ctx) {
+void mdgui_end_window(MDGUI_Context *ctx) {
   if (!ctx)
     return;
   auto &win = ctx->windows[ctx->current_window];
-  mgui_backend_set_clip_rect(0, 0, 0, 0, 0);
+  mdgui_backend_set_clip_rect(0, 0, 0, 0, 0);
 
   if (win.open_menu_index != -1 && ctx->input.mouse_pressed &&
       win.z == ctx->z_counter) {
@@ -1027,17 +1027,17 @@ void mgui_end_window(MGUI_Context *ctx) {
     const int item_h = ctx->combo_overlay_item_h;
     const int item_count = ctx->combo_overlay_item_count;
     const int popup_h = item_count * item_h;
-    mgui_draw_frame_idx(nullptr, CLR_TEXT_DARK, ix - 1, popup_y - 1, ix + w + 1,
+    mdgui_draw_frame_idx(nullptr, CLR_TEXT_DARK, ix - 1, popup_y - 1, ix + w + 1,
             popup_y + popup_h + 1);
-    mgui_fill_rect_idx(nullptr, CLR_MENU_BG, ix, popup_y, w, popup_h);
+    mdgui_fill_rect_idx(nullptr, CLR_MENU_BG, ix, popup_y, w, popup_h);
     for (int i = 0; i < item_count; i++) {
       const int ry = popup_y + (i * item_h);
       const int row_hover = point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y,
                                           ix, ry, w, item_h);
       if (i == ctx->combo_overlay_selected || row_hover)
-        mgui_fill_rect_idx(nullptr, CLR_MENU_SEL, ix, ry, w, item_h);
-      if (mgui_fonts[1] && ctx->combo_overlay_items[i]) {
-        mgui_fonts[1]->drawText(ctx->combo_overlay_items[i], nullptr, ix + 2, ry + 1,
+        mdgui_fill_rect_idx(nullptr, CLR_MENU_SEL, ix, ry, w, item_h);
+      if (mdgui_fonts[1] && ctx->combo_overlay_items[i]) {
+        mdgui_fonts[1]->drawText(ctx->combo_overlay_items[i], nullptr, ix + 2, ry + 1,
                       CLR_MENU_TEXT);
       }
     }
@@ -1084,7 +1084,7 @@ void mgui_end_window(MGUI_Context *ctx) {
       const int sb_w = 8;
       const int sb_x = win.x + win.w - sb_w - 2;
       const int sb_y = viewport_top;
-      mgui_fill_rect_idx(nullptr, CLR_BUTTON_SURFACE, sb_x, sb_y, sb_w, viewport_h);
+      mdgui_fill_rect_idx(nullptr, CLR_BUTTON_SURFACE, sb_x, sb_y, sb_w, viewport_h);
       int thumb_h = (viewport_h * viewport_h) / (total_h > 0 ? total_h : 1);
       if (thumb_h < 10)
         thumb_h = 10;
@@ -1094,7 +1094,7 @@ void mgui_end_window(MGUI_Context *ctx) {
       const int thumb_y = sb_y + ((travel > 0)
                                       ? ((win.text_scroll * travel) / max_scroll)
                                       : 0);
-      mgui_fill_rect_idx(nullptr, CLR_MENU_SEL, sb_x + 1, thumb_y, sb_w - 2, thumb_h);
+      mdgui_fill_rect_idx(nullptr, CLR_MENU_SEL, sb_x + 1, thumb_y, sb_w - 2, thumb_h);
       const int over_scrollbar = point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y,
                                                sb_x, sb_y, sb_w, viewport_h);
       if (ctx->input.mouse_pressed && over_scrollbar &&
@@ -1150,7 +1150,7 @@ void mgui_end_window(MGUI_Context *ctx) {
   ctx->menu_defs.clear();
 }
 
-int mgui_button(MGUI_Context *ctx, const char *text, int x, int y, int w,
+int mdgui_button(MDGUI_Context *ctx, const char *text, int x, int y, int w,
                 int h) {
   if (!ctx || ctx->current_window < 0)
     return 0;
@@ -1169,29 +1169,29 @@ int mgui_button(MGUI_Context *ctx, const char *text, int x, int y, int w,
   const int depressed = hovered && ctx->input.mouse_down;
 
   if (depressed) {
-    mgui_fill_rect_idx(nullptr, CLR_BUTTON_PRESSED, abs_x, abs_y, w, h);
-    mgui_draw_hline_idx(nullptr, 29, abs_x, abs_y, abs_x + w);
-    mgui_draw_vline_idx(nullptr, 29, abs_x + w - 1, abs_y, abs_y + h);
-    mgui_draw_vline_idx(nullptr, 23, abs_x, abs_y, abs_y + h);
-    mgui_draw_hline_idx(nullptr, 23, abs_x, abs_y + h - 1, abs_x + w);
+    mdgui_fill_rect_idx(nullptr, CLR_BUTTON_PRESSED, abs_x, abs_y, w, h);
+    mdgui_draw_hline_idx(nullptr, 29, abs_x, abs_y, abs_x + w);
+    mdgui_draw_vline_idx(nullptr, 29, abs_x + w - 1, abs_y, abs_y + h);
+    mdgui_draw_vline_idx(nullptr, 23, abs_x, abs_y, abs_y + h);
+    mdgui_draw_hline_idx(nullptr, 23, abs_x, abs_y + h - 1, abs_x + w);
   } else {
-    mgui_fill_rect_idx(nullptr, CLR_BUTTON_SURFACE, abs_x, abs_y, w, h);
-    mgui_draw_hline_idx(nullptr, CLR_BUTTON_LIGHT, abs_x, abs_y, abs_x + w);
-    mgui_draw_vline_idx(nullptr, CLR_BUTTON_LIGHT, abs_x + w - 1, abs_y, abs_y + h);
-    mgui_draw_vline_idx(nullptr, CLR_BUTTON_DARK, abs_x, abs_y, abs_y + h);
-    mgui_draw_hline_idx(nullptr, CLR_BUTTON_DARK, abs_x, abs_y + h - 1, abs_x + w);
+    mdgui_fill_rect_idx(nullptr, CLR_BUTTON_SURFACE, abs_x, abs_y, w, h);
+    mdgui_draw_hline_idx(nullptr, CLR_BUTTON_LIGHT, abs_x, abs_y, abs_x + w);
+    mdgui_draw_vline_idx(nullptr, CLR_BUTTON_LIGHT, abs_x + w - 1, abs_y, abs_y + h);
+    mdgui_draw_vline_idx(nullptr, CLR_BUTTON_DARK, abs_x, abs_y, abs_y + h);
+    mdgui_draw_hline_idx(nullptr, CLR_BUTTON_DARK, abs_x, abs_y + h - 1, abs_x + w);
   }
 
-  if (text && mgui_fonts[1]) {
-    const int tx = abs_x + (w - mgui_fonts[1]->measureTextWidth(text)) / 2;
+  if (text && mdgui_fonts[1]) {
+    const int tx = abs_x + (w - mdgui_fonts[1]->measureTextWidth(text)) / 2;
     const int ty = abs_y + (h - 8) / 2;
-    mgui_fonts[1]->drawText(text, nullptr, tx, ty, CLR_TEXT_LIGHT);
+    mdgui_fonts[1]->drawText(text, nullptr, tx, ty, CLR_TEXT_LIGHT);
   }
   int intrinsic_w = w;
   if (requested_w <= 0) {
     intrinsic_w = 12;
-    if (text && mgui_fonts[1]) {
-      int tw = mgui_fonts[1]->measureTextWidth(text) + 8;
+    if (text && mdgui_fonts[1]) {
+      int tw = mdgui_fonts[1]->measureTextWidth(text) + 8;
       if (tw > intrinsic_w)
         intrinsic_w = tw;
     }
@@ -1201,19 +1201,19 @@ int mgui_button(MGUI_Context *ctx, const char *text, int x, int y, int w,
   return hovered && ctx->input.mouse_pressed && win.z == ctx->z_counter;
 }
 
-void mgui_label(MGUI_Context *ctx, const char *text, int x, int y) {
-  if (!ctx || !text || !mgui_fonts[1] || ctx->current_window < 0)
+void mdgui_label(MDGUI_Context *ctx, const char *text, int x, int y) {
+  if (!ctx || !text || !mdgui_fonts[1] || ctx->current_window < 0)
     return;
   const auto &win = ctx->windows[ctx->current_window];
   const int abs_x = ctx->origin_x + x;
   const int logical_y = ctx->content_y + y;
   const int abs_y = logical_y - win.text_scroll;
-  mgui_fonts[1]->drawText(text, nullptr, abs_x, abs_y, CLR_TEXT_LIGHT);
-  note_content_bounds(ctx, abs_x + mgui_fonts[1]->measureTextWidth(text), logical_y + 12);
+  mdgui_fonts[1]->drawText(text, nullptr, abs_x, abs_y, CLR_TEXT_LIGHT);
+  note_content_bounds(ctx, abs_x + mdgui_fonts[1]->measureTextWidth(text), logical_y + 12);
   ctx->content_y += 12; // Advance content Y
 }
 
-void mgui_spacer(MGUI_Context *ctx, int pixels) {
+void mdgui_spacer(MDGUI_Context *ctx, int pixels) {
   if (!ctx || ctx->current_window < 0)
     return;
   if (pixels < 0)
@@ -1224,7 +1224,7 @@ void mgui_spacer(MGUI_Context *ctx, int pixels) {
   ctx->content_y = bottom;
 }
 
-int mgui_checkbox(MGUI_Context *ctx, const char *text, bool *checked, int x,
+int mdgui_checkbox(MDGUI_Context *ctx, const char *text, bool *checked, int x,
                   int y) {
   if (!ctx || !checked || ctx->current_window < 0)
     return 0;
@@ -1236,20 +1236,20 @@ int mgui_checkbox(MGUI_Context *ctx, const char *text, bool *checked, int x,
   const int box_size = 10;
 
   // 3D-drawn checkbox
-  mgui_fill_rect_idx(nullptr, CLR_BUTTON_SURFACE, ix, iy, box_size, box_size);
-  mgui_draw_hline_idx(nullptr, CLR_BUTTON_DARK, ix, iy, ix + box_size);
-  mgui_draw_vline_idx(nullptr, CLR_BUTTON_DARK, ix, iy, iy + box_size);
-  mgui_draw_hline_idx(nullptr, CLR_BUTTON_LIGHT, ix, iy + box_size - 1, ix + box_size);
-  mgui_draw_vline_idx(nullptr, CLR_BUTTON_LIGHT, ix + box_size - 1, iy, iy + box_size);
+  mdgui_fill_rect_idx(nullptr, CLR_BUTTON_SURFACE, ix, iy, box_size, box_size);
+  mdgui_draw_hline_idx(nullptr, CLR_BUTTON_DARK, ix, iy, ix + box_size);
+  mdgui_draw_vline_idx(nullptr, CLR_BUTTON_DARK, ix, iy, iy + box_size);
+  mdgui_draw_hline_idx(nullptr, CLR_BUTTON_LIGHT, ix, iy + box_size - 1, ix + box_size);
+  mdgui_draw_vline_idx(nullptr, CLR_BUTTON_LIGHT, ix + box_size - 1, iy, iy + box_size);
 
-  if (*checked && mgui_fonts[1]) {
-    mgui_fonts[1]->drawText("x", nullptr, ix + 2, iy + 0, CLR_TEXT_LIGHT);
+  if (*checked && mdgui_fonts[1]) {
+    mdgui_fonts[1]->drawText("x", nullptr, ix + 2, iy + 0, CLR_TEXT_LIGHT);
   }
 
-  if (text && mgui_fonts[1]) {
-    mgui_fonts[1]->drawText(text, nullptr, ix + box_size + 4, iy + 1, CLR_TEXT_LIGHT);
+  if (text && mdgui_fonts[1]) {
+    mdgui_fonts[1]->drawText(text, nullptr, ix + box_size + 4, iy + 1, CLR_TEXT_LIGHT);
   }
-  const int label_w = (text && mgui_fonts[1]) ? mgui_fonts[1]->measureTextWidth(text) : 0;
+  const int label_w = (text && mdgui_fonts[1]) ? mdgui_fonts[1]->measureTextWidth(text) : 0;
   note_content_bounds(ctx, ix + box_size + 4 + label_w, logical_y + box_size);
 
   int result = 0;
@@ -1264,7 +1264,7 @@ int mgui_checkbox(MGUI_Context *ctx, const char *text, bool *checked, int x,
   return result;
 }
 
-int mgui_slider(MGUI_Context *ctx, const char *text, float *val, float min,
+int mdgui_slider(MDGUI_Context *ctx, const char *text, float *val, float min,
                 float max, int x, int y, int w) {
   if (!ctx || !val || ctx->current_window < 0)
     return 0;
@@ -1280,11 +1280,11 @@ int mgui_slider(MGUI_Context *ctx, const char *text, float *val, float min,
   const int thumb_h = 10;
 
   // Track (inset 3D)
-  mgui_fill_rect_idx(nullptr, CLR_BUTTON_SURFACE, ix, iy + 3, w, track_h);
-  mgui_draw_hline_idx(nullptr, CLR_BUTTON_DARK, ix, iy + 3, ix + w);
-  mgui_draw_vline_idx(nullptr, CLR_BUTTON_DARK, ix, iy + 3, iy + 3 + track_h);
-  mgui_draw_hline_idx(nullptr, CLR_BUTTON_LIGHT, ix, iy + 3 + track_h - 1, ix + w);
-  mgui_draw_vline_idx(nullptr, CLR_BUTTON_LIGHT, ix + w - 1, iy + 3, iy + 3 + track_h);
+  mdgui_fill_rect_idx(nullptr, CLR_BUTTON_SURFACE, ix, iy + 3, w, track_h);
+  mdgui_draw_hline_idx(nullptr, CLR_BUTTON_DARK, ix, iy + 3, ix + w);
+  mdgui_draw_vline_idx(nullptr, CLR_BUTTON_DARK, ix, iy + 3, iy + 3 + track_h);
+  mdgui_draw_hline_idx(nullptr, CLR_BUTTON_LIGHT, ix, iy + 3 + track_h - 1, ix + w);
+  mdgui_draw_vline_idx(nullptr, CLR_BUTTON_LIGHT, ix + w - 1, iy + 3, iy + 3 + track_h);
 
   float ratio = (*val - min) / (max - min);
   if (ratio < 0)
@@ -1295,11 +1295,11 @@ int mgui_slider(MGUI_Context *ctx, const char *text, float *val, float min,
   int tx = ix + (int)(ratio * (float)(w - thumb_w));
 
   // Thumb (outset 3D)
-  mgui_fill_rect_idx(nullptr, CLR_BUTTON_SURFACE, tx, iy, thumb_w, thumb_h);
-  mgui_draw_hline_idx(nullptr, CLR_BUTTON_LIGHT, tx, iy, tx + thumb_w);
-  mgui_draw_vline_idx(nullptr, CLR_BUTTON_LIGHT, tx, iy, iy + thumb_h);
-  mgui_draw_hline_idx(nullptr, CLR_BUTTON_DARK, tx, iy + thumb_h - 1, tx + thumb_w);
-  mgui_draw_vline_idx(nullptr, CLR_BUTTON_DARK, tx + thumb_w - 1, iy, iy + thumb_h);
+  mdgui_fill_rect_idx(nullptr, CLR_BUTTON_SURFACE, tx, iy, thumb_w, thumb_h);
+  mdgui_draw_hline_idx(nullptr, CLR_BUTTON_LIGHT, tx, iy, tx + thumb_w);
+  mdgui_draw_vline_idx(nullptr, CLR_BUTTON_LIGHT, tx, iy, iy + thumb_h);
+  mdgui_draw_hline_idx(nullptr, CLR_BUTTON_DARK, tx, iy + thumb_h - 1, tx + thumb_w);
+  mdgui_draw_vline_idx(nullptr, CLR_BUTTON_DARK, tx + thumb_w - 1, iy, iy + thumb_h);
 
   int result = 0;
   if (ctx->input.mouse_down && is_current_window_topmost(ctx) &&
@@ -1314,10 +1314,10 @@ int mgui_slider(MGUI_Context *ctx, const char *text, float *val, float min,
     result = 1;
   }
 
-  if (text && mgui_fonts[1]) {
-    mgui_fonts[1]->drawText(text, nullptr, ix + w + 4, iy + 1, CLR_TEXT_LIGHT);
+  if (text && mdgui_fonts[1]) {
+    mdgui_fonts[1]->drawText(text, nullptr, ix + w + 4, iy + 1, CLR_TEXT_LIGHT);
   }
-  const int text_w = (text && mgui_fonts[1]) ? mgui_fonts[1]->measureTextWidth(text) : 0;
+  const int text_w = (text && mdgui_fonts[1]) ? mdgui_fonts[1]->measureTextWidth(text) : 0;
   int intrinsic_slider_w = w;
   if (requested_w <= 0)
     intrinsic_slider_w = 24;
@@ -1328,7 +1328,7 @@ int mgui_slider(MGUI_Context *ctx, const char *text, float *val, float min,
   return result;
 }
 
-void mgui_separator(MGUI_Context *ctx, int x, int y, int w) {
+void mdgui_separator(MDGUI_Context *ctx, int x, int y, int w) {
   if (!ctx || ctx->current_window < 0)
     return;
   ctx->window_has_nonlabel_widget = true;
@@ -1338,14 +1338,14 @@ void mgui_separator(MGUI_Context *ctx, int x, int y, int w) {
   const int ix = ctx->origin_x + x;
   const int logical_y = ctx->content_y + y;
   const int iy = logical_y - win.text_scroll;
-  mgui_draw_hline_idx(nullptr, CLR_BUTTON_DARK, ix, iy, ix + w);
-  mgui_draw_hline_idx(nullptr, CLR_BUTTON_LIGHT, ix, iy + 1, ix + w);
+  mdgui_draw_hline_idx(nullptr, CLR_BUTTON_DARK, ix, iy, ix + w);
+  mdgui_draw_hline_idx(nullptr, CLR_BUTTON_LIGHT, ix, iy + 1, ix + w);
   if (requested_w > 0)
     note_content_bounds(ctx, ix + w, logical_y + 2);
   ctx->content_y += 4;
 }
 
-int mgui_listbox(MGUI_Context *ctx, const char **items, int item_count,
+int mdgui_listbox(MDGUI_Context *ctx, const char **items, int item_count,
                  int *selected, int x, int y, int w, int rows) {
   if (!ctx || !selected || !items || item_count <= 0)
     return 0;
@@ -1361,8 +1361,8 @@ int mgui_listbox(MGUI_Context *ctx, const char **items, int item_count,
   const int iy = logical_y - win.text_scroll;
   const int topmost = is_current_window_topmost(ctx);
 
-  mgui_draw_frame_idx(nullptr, CLR_TEXT_DARK, ix - 1, iy - 1, ix + w + 1, iy + box_h + 1);
-  mgui_fill_rect_idx(nullptr, CLR_BOX_BODY, ix, iy, w, box_h);
+  mdgui_draw_frame_idx(nullptr, CLR_TEXT_DARK, ix - 1, iy - 1, ix + w + 1, iy + box_h + 1);
+  mdgui_fill_rect_idx(nullptr, CLR_BOX_BODY, ix, iy, w, box_h);
 
   int clicked = 0;
   for (int i = 0; i < rows; i++) {
@@ -1373,11 +1373,11 @@ int mgui_listbox(MGUI_Context *ctx, const char **items, int item_count,
     const int hovered = topmost && point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y,
                                                  ix, ry, w, row_h);
     if (item_idx == *selected)
-      mgui_fill_rect_idx(nullptr, CLR_MENU_SEL, ix, ry, w, row_h);
+      mdgui_fill_rect_idx(nullptr, CLR_MENU_SEL, ix, ry, w, row_h);
     else if (hovered)
-      mgui_fill_rect_idx(nullptr, CLR_BUTTON_SURFACE, ix, ry, w, row_h);
-    if (mgui_fonts[1] && items[item_idx]) {
-      mgui_fonts[1]->drawText(items[item_idx], nullptr, ix + 2, ry + 1, CLR_MENU_TEXT);
+      mdgui_fill_rect_idx(nullptr, CLR_BUTTON_SURFACE, ix, ry, w, row_h);
+    if (mdgui_fonts[1] && items[item_idx]) {
+      mdgui_fonts[1]->drawText(items[item_idx], nullptr, ix + 2, ry + 1, CLR_MENU_TEXT);
     }
     if (hovered && ctx->input.mouse_pressed) {
       *selected = item_idx;
@@ -1390,7 +1390,7 @@ int mgui_listbox(MGUI_Context *ctx, const char **items, int item_count,
   return clicked;
 }
 
-int mgui_combo(MGUI_Context *ctx, const char *label, const char **items,
+int mdgui_combo(MDGUI_Context *ctx, const char *label, const char **items,
                int item_count, int *selected, int x, int y, int w) {
   if (!ctx || !selected || !items || item_count <= 0 || ctx->current_window < 0)
     return 0;
@@ -1411,15 +1411,15 @@ int mgui_combo(MGUI_Context *ctx, const char *label, const char **items,
   const int combo_id = ((ix & 0xffff) << 16) ^ (iy & 0xffff) ^ (w << 2);
   const int open = (win.open_combo_id == combo_id);
 
-  mgui_draw_frame_idx(nullptr, CLR_TEXT_DARK, ix - 1, iy - 1, ix + w + 1, iy + box_h + 1);
-  mgui_fill_rect_idx(nullptr, CLR_BOX_BODY, ix, iy, w, box_h);
-  mgui_draw_vline_idx(nullptr, CLR_BUTTON_DARK, ix + w - 12, iy, iy + box_h);
-  if (mgui_fonts[1] && items[*selected]) {
-    mgui_fonts[1]->drawText(items[*selected], nullptr, ix + 2, iy + 2, CLR_MENU_TEXT);
-    mgui_fonts[1]->drawText("v", nullptr, ix + w - 9, iy + 2, CLR_MENU_TEXT);
+  mdgui_draw_frame_idx(nullptr, CLR_TEXT_DARK, ix - 1, iy - 1, ix + w + 1, iy + box_h + 1);
+  mdgui_fill_rect_idx(nullptr, CLR_BOX_BODY, ix, iy, w, box_h);
+  mdgui_draw_vline_idx(nullptr, CLR_BUTTON_DARK, ix + w - 12, iy, iy + box_h);
+  if (mdgui_fonts[1] && items[*selected]) {
+    mdgui_fonts[1]->drawText(items[*selected], nullptr, ix + 2, iy + 2, CLR_MENU_TEXT);
+    mdgui_fonts[1]->drawText("v", nullptr, ix + w - 9, iy + 2, CLR_MENU_TEXT);
   }
-  if (label && mgui_fonts[1]) {
-    mgui_fonts[1]->drawText(label, nullptr, ix, iy - 10, CLR_TEXT_LIGHT);
+  if (label && mdgui_fonts[1]) {
+    mdgui_fonts[1]->drawText(label, nullptr, ix, iy - 10, CLR_TEXT_LIGHT);
   }
 
   const int hovered = topmost &&
@@ -1473,7 +1473,7 @@ int mgui_combo(MGUI_Context *ctx, const char *label, const char **items,
   return changed;
 }
 
-void mgui_progress_bar(MGUI_Context *ctx, float value, int x, int y, int w,
+void mdgui_progress_bar(MDGUI_Context *ctx, float value, int x, int y, int w,
                        int h, const char *overlay_text) {
   if (!ctx || ctx->current_window < 0)
     return;
@@ -1492,21 +1492,21 @@ void mgui_progress_bar(MGUI_Context *ctx, float value, int x, int y, int w,
   const int iy = logical_y - win.text_scroll;
   const int fill_w = (int)((float)w * value);
 
-  mgui_draw_frame_idx(nullptr, CLR_TEXT_DARK, ix - 1, iy - 1, ix + w + 1, iy + h + 1);
-  mgui_fill_rect_idx(nullptr, CLR_BOX_BODY, ix, iy, w, h);
+  mdgui_draw_frame_idx(nullptr, CLR_TEXT_DARK, ix - 1, iy - 1, ix + w + 1, iy + h + 1);
+  mdgui_fill_rect_idx(nullptr, CLR_BOX_BODY, ix, iy, w, h);
   if (fill_w > 0)
-    mgui_fill_rect_idx(nullptr, CLR_MENU_SEL, ix, iy, fill_w, h);
+    mdgui_fill_rect_idx(nullptr, CLR_MENU_SEL, ix, iy, fill_w, h);
 
-  if (overlay_text && mgui_fonts[1]) {
-    const int tw = mgui_fonts[1]->measureTextWidth(overlay_text);
-    mgui_fonts[1]->drawText(overlay_text, nullptr, ix + (w - tw) / 2, iy + 1,
+  if (overlay_text && mdgui_fonts[1]) {
+    const int tw = mdgui_fonts[1]->measureTextWidth(overlay_text);
+    mdgui_fonts[1]->drawText(overlay_text, nullptr, ix + (w - tw) / 2, iy + 1,
                   CLR_TEXT_LIGHT);
   }
   note_content_bounds(ctx, ix + w, logical_y + h);
   ctx->content_y += h + 4;
 }
 
-void mgui_begin_menu_bar(MGUI_Context *ctx) {
+void mdgui_begin_menu_bar(MDGUI_Context *ctx) {
   if (!ctx || ctx->current_window < 0)
     return;
   ctx->window_has_nonlabel_widget = true;
@@ -1515,7 +1515,7 @@ void mgui_begin_menu_bar(MGUI_Context *ctx) {
   const int bar_y = ctx->content_y;
   const int bar_w = win.w - 2;
   const int bar_h = 10;
-  mgui_fill_rect_idx(nullptr, CLR_MENU_BG, bar_x, bar_y, bar_w, bar_h);
+  mdgui_fill_rect_idx(nullptr, CLR_MENU_BG, bar_x, bar_y, bar_w, bar_h);
   ctx->menu_index = 0;
   ctx->menu_next_x = win.x + 4;
   ctx->in_menu_bar = true;
@@ -1530,12 +1530,12 @@ void mgui_begin_menu_bar(MGUI_Context *ctx) {
   ctx->content_y += 12;
 }
 
-int mgui_begin_menu(MGUI_Context *ctx, const char *text) {
+int mdgui_begin_menu(MDGUI_Context *ctx, const char *text) {
   if (!ctx || !ctx->in_menu_bar || ctx->current_window < 0 || !text)
     return 0;
   auto &win = ctx->windows[ctx->current_window];
 
-  const int tw = mgui_fonts[1] ? mgui_fonts[1]->measureTextWidth(text) : 40;
+  const int tw = mdgui_fonts[1] ? mdgui_fonts[1]->measureTextWidth(text) : 40;
   const int item_w = tw + 10;
   const int x = ctx->menu_next_x;
   const int y = ctx->content_y - 12;
@@ -1564,10 +1564,10 @@ int mgui_begin_menu(MGUI_Context *ctx, const char *text) {
 
   const int open = (win.open_menu_index == ctx->menu_index);
   if (open || hovered) {
-    mgui_fill_rect_idx(nullptr, CLR_MENU_SEL, x, y, item_w, 10);
+    mdgui_fill_rect_idx(nullptr, CLR_MENU_SEL, x, y, item_w, 10);
   }
-  if (mgui_fonts[1]) {
-    mgui_fonts[1]->drawText(text, nullptr, x + 3, y + 1, CLR_MENU_TEXT);
+  if (mdgui_fonts[1]) {
+    mdgui_fonts[1]->drawText(text, nullptr, x + 3, y + 1, CLR_MENU_TEXT);
   }
 
   if (open) {
@@ -1586,12 +1586,12 @@ int mgui_begin_menu(MGUI_Context *ctx, const char *text) {
   return open;
 }
 
-int mgui_menu_item(MGUI_Context *ctx, const char *text) {
+int mdgui_menu_item(MDGUI_Context *ctx, const char *text) {
   if (!ctx || !ctx->in_menu || !text || ctx->building_menu_index < 0)
     return 0;
   auto &win = ctx->windows[ctx->current_window];
   auto &def = ctx->menu_defs[ctx->building_menu_index];
-  const int item_text_w = mgui_fonts[1] ? mgui_fonts[1]->measureTextWidth(text) : 40;
+  const int item_text_w = mdgui_fonts[1] ? mdgui_fonts[1]->measureTextWidth(text) : 40;
   const int item_needed_w = item_text_w + 12;
   if (item_needed_w > def.w)
     def.w = item_needed_w;
@@ -1608,21 +1608,21 @@ int mgui_menu_item(MGUI_Context *ctx, const char *text) {
   return 0;
 }
 
-void mgui_end_menu(MGUI_Context *ctx) {
+void mdgui_end_menu(MDGUI_Context *ctx) {
   if (!ctx)
     return;
   ctx->in_menu = false;
   ctx->building_menu_index = -1;
 }
 
-void mgui_end_menu_bar(MGUI_Context *ctx) {
+void mdgui_end_menu_bar(MDGUI_Context *ctx) {
   if (!ctx)
     return;
   ctx->in_menu_bar = false;
   ctx->in_menu = false;
 }
 
-void mgui_begin_main_menu_bar(MGUI_Context *ctx) {
+void mdgui_begin_main_menu_bar(MDGUI_Context *ctx) {
   if (!ctx)
     return;
   const int rw = get_logical_render_w(ctx);
@@ -1631,7 +1631,7 @@ void mgui_begin_main_menu_bar(MGUI_Context *ctx) {
   ctx->main_menu_bar_w = rw;
   ctx->main_menu_bar_h = 10;
 
-  mgui_fill_rect_idx(nullptr, CLR_MENU_BG, ctx->main_menu_bar_x, ctx->main_menu_bar_y,
+  mdgui_fill_rect_idx(nullptr, CLR_MENU_BG, ctx->main_menu_bar_x, ctx->main_menu_bar_y,
            ctx->main_menu_bar_w, ctx->main_menu_bar_h);
   ctx->main_menu_index = 0;
   ctx->main_menu_next_x = 3;
@@ -1642,11 +1642,11 @@ void mgui_begin_main_menu_bar(MGUI_Context *ctx) {
 
 }
 
-int mgui_begin_main_menu(MGUI_Context *ctx, const char *text) {
+int mdgui_begin_main_menu(MDGUI_Context *ctx, const char *text) {
   if (!ctx || !ctx->in_main_menu_bar || !text)
     return 0;
 
-  const int tw = mgui_fonts[1] ? mgui_fonts[1]->measureTextWidth(text) : 40;
+  const int tw = mdgui_fonts[1] ? mdgui_fonts[1]->measureTextWidth(text) : 40;
   const int item_w = tw + 10;
   const int x = ctx->main_menu_next_x;
   const int y = ctx->main_menu_bar_y;
@@ -1674,10 +1674,10 @@ int mgui_begin_main_menu(MGUI_Context *ctx, const char *text) {
 
   const int open = (ctx->open_main_menu_index == ctx->main_menu_index);
   if (open || hovered) {
-    mgui_fill_rect_idx(nullptr, CLR_MENU_SEL, x, y, item_w, ctx->main_menu_bar_h);
+    mdgui_fill_rect_idx(nullptr, CLR_MENU_SEL, x, y, item_w, ctx->main_menu_bar_h);
   }
-  if (mgui_fonts[1]) {
-    mgui_fonts[1]->drawText(text, nullptr, x + 3, y + 1, CLR_MENU_TEXT);
+  if (mdgui_fonts[1]) {
+    mdgui_fonts[1]->drawText(text, nullptr, x + 3, y + 1, CLR_MENU_TEXT);
   }
 
   if (open) {
@@ -1690,12 +1690,12 @@ int mgui_begin_main_menu(MGUI_Context *ctx, const char *text) {
   return open;
 }
 
-int mgui_main_menu_item(MGUI_Context *ctx, const char *text) {
+int mdgui_main_menu_item(MDGUI_Context *ctx, const char *text) {
   if (!ctx || !ctx->in_main_menu || !text || ctx->building_main_menu_index < 0)
     return 0;
 
   auto &def = ctx->main_menu_defs[ctx->building_main_menu_index];
-  const int item_text_w = mgui_fonts[1] ? mgui_fonts[1]->measureTextWidth(text) : 40;
+  const int item_text_w = mdgui_fonts[1] ? mdgui_fonts[1]->measureTextWidth(text) : 40;
   const int item_needed_w = item_text_w + 12;
   if (item_needed_w > def.w)
     def.w = item_needed_w;
@@ -1712,21 +1712,21 @@ int mgui_main_menu_item(MGUI_Context *ctx, const char *text) {
   return 0;
 }
 
-void mgui_end_main_menu(MGUI_Context *ctx) {
+void mdgui_end_main_menu(MDGUI_Context *ctx) {
   if (!ctx)
     return;
   ctx->in_main_menu = false;
   ctx->building_main_menu_index = -1;
 }
 
-void mgui_end_main_menu_bar(MGUI_Context *ctx) {
+void mdgui_end_main_menu_bar(MDGUI_Context *ctx) {
   if (!ctx)
     return;
   ctx->in_main_menu_bar = false;
   ctx->in_main_menu = false;
 }
 
-int mgui_message_box_ex(MGUI_Context *ctx, const char *id, const char *title,
+int mdgui_message_box_ex(MDGUI_Context *ctx, const char *id, const char *title,
                         const char *text, int style, const char *button1,
                         const char *button2, int text_align) {
   if (!ctx)
@@ -1760,10 +1760,10 @@ int mgui_message_box_ex(MGUI_Context *ctx, const char *id, const char *title,
   }
 
   int text_w = 80;
-  if (mgui_fonts[1]) {
+  if (mdgui_fonts[1]) {
     text_w = 0;
     for (const auto &ln : lines) {
-      const int lw = mgui_fonts[1]->measureTextWidth(ln.c_str());
+      const int lw = mdgui_fonts[1]->measureTextWidth(ln.c_str());
       if (lw > text_w)
         text_w = lw;
     }
@@ -1783,7 +1783,7 @@ int mgui_message_box_ex(MGUI_Context *ctx, const char *id, const char *title,
   const int y = (get_logical_render_h(ctx) - box_h) / 2;
 
   (void)id;
-  if (!mgui_begin_window(ctx, title, x, y, box_w, box_h)) {
+  if (!mdgui_begin_window(ctx, title, x, y, box_w, box_h)) {
     return 2; // Return "Cancel" if closed via X
   }
   if (ctx->current_window >= 0) {
@@ -1791,49 +1791,49 @@ int mgui_message_box_ex(MGUI_Context *ctx, const char *id, const char *title,
   }
 
   const auto &win = ctx->windows[ctx->current_window];
-  mgui_fill_rect_idx(nullptr, CLR_MSG_BG, win.x, win.y + 12, win.w, win.h - 24);
-  mgui_fill_rect_idx(nullptr, CLR_MSG_BAR, win.x, win.y, win.w, 12);
-  mgui_fill_rect_idx(nullptr, CLR_MSG_BAR, win.x, win.y + win.h - 12, win.w, 12);
+  mdgui_fill_rect_idx(nullptr, CLR_MSG_BG, win.x, win.y + 12, win.w, win.h - 24);
+  mdgui_fill_rect_idx(nullptr, CLR_MSG_BAR, win.x, win.y, win.w, 12);
+  mdgui_fill_rect_idx(nullptr, CLR_MSG_BAR, win.x, win.y + win.h - 12, win.w, 12);
   const int text_y0 = win.y + top_pad;
   for (size_t i = 0; i < lines.size(); ++i) {
     const char *ln = lines[i].c_str();
     int tx = win.x + 8;
-    if (text_align == MGUI_TEXT_ALIGN_CENTER && mgui_fonts[1]) {
-      const int tw = mgui_fonts[1]->measureTextWidth(ln);
+    if (text_align == MDGUI_TEXT_ALIGN_CENTER && mdgui_fonts[1]) {
+      const int tw = mdgui_fonts[1]->measureTextWidth(ln);
       tx = win.x + (win.w - tw) / 2;
     }
     const int ty = text_y0 + (int)i * line_h;
-    if (mgui_fonts[1]) {
-      mgui_fonts[1]->drawText(ln, nullptr, tx, ty, CLR_TEXT_LIGHT);
+    if (mdgui_fonts[1]) {
+      mdgui_fonts[1]->drawText(ln, nullptr, tx, ty, CLR_TEXT_LIGHT);
     }
   }
 
   int result = 0;
-  if (style == MGUI_MSGBOX_TWO_BUTTON) {
+  if (style == MDGUI_MSGBOX_TWO_BUTTON) {
     const int b1x = box_w / 4 - 35;
     const int b2x = (box_w * 3) / 4 - 35;
-    if (mgui_button(ctx, button1, b1x, box_h - 24, 70, 12))
+    if (mdgui_button(ctx, button1, b1x, box_h - 24, 70, 12))
       result = 1;
-    if (mgui_button(ctx, button2, b2x, box_h - 24, 70, 12))
+    if (mdgui_button(ctx, button2, b2x, box_h - 24, 70, 12))
       result = 2;
   } else {
     const int bx = box_w / 2 - 35;
-    if (mgui_button(ctx, button1, bx, box_h - 24, 70, 12))
+    if (mdgui_button(ctx, button1, bx, box_h - 24, 70, 12))
       result = 1;
   }
 
-  mgui_end_window(ctx);
+  mdgui_end_window(ctx);
   return result;
 }
 
-int mgui_message_box(MGUI_Context *ctx, const char *id, const char *title,
+int mdgui_message_box(MDGUI_Context *ctx, const char *id, const char *title,
                      const char *text, int style, const char *button1,
                      const char *button2) {
-  return mgui_message_box_ex(ctx, id, title, text, style, button1, button2,
-                             MGUI_TEXT_ALIGN_LEFT);
+  return mdgui_message_box_ex(ctx, id, title, text, style, button1, button2,
+                             MDGUI_TEXT_ALIGN_LEFT);
 }
 
-int mgui_get_window_z(MGUI_Context *ctx, const char *title) {
+int mdgui_get_window_z(MDGUI_Context *ctx, const char *title) {
   if (!ctx || !title)
     return -1;
   for (int i = 0; i < (int)ctx->windows.size(); ++i) {
@@ -1843,7 +1843,7 @@ int mgui_get_window_z(MGUI_Context *ctx, const char *title) {
   return -1;
 }
 
-void mgui_set_window_open(MGUI_Context *ctx, const char *title, int open) {
+void mdgui_set_window_open(MDGUI_Context *ctx, const char *title, int open) {
   if (!ctx || !title)
     return;
   for (int i = 0; i < (int)ctx->windows.size(); ++i) {
@@ -1857,7 +1857,7 @@ void mgui_set_window_open(MGUI_Context *ctx, const char *title, int open) {
   }
 }
 
-int mgui_is_window_open(MGUI_Context *ctx, const char *title) {
+int mdgui_is_window_open(MDGUI_Context *ctx, const char *title) {
   if (!ctx || !title)
     return 0;
   for (int i = 0; i < (int)ctx->windows.size(); ++i) {
@@ -1867,7 +1867,7 @@ int mgui_is_window_open(MGUI_Context *ctx, const char *title) {
   return 0;
 }
 
-void mgui_focus_window(MGUI_Context *ctx, const char *title) {
+void mdgui_focus_window(MDGUI_Context *ctx, const char *title) {
   if (!ctx || !title)
     return;
   for (int i = 0; i < (int)ctx->windows.size(); ++i) {
@@ -1878,7 +1878,7 @@ void mgui_focus_window(MGUI_Context *ctx, const char *title) {
   }
 }
 
-void mgui_set_window_rect(MGUI_Context *ctx, const char *title, int x, int y,
+void mdgui_set_window_rect(MDGUI_Context *ctx, const char *title, int x, int y,
                           int w, int h) {
   if (!ctx || !title)
     return;
@@ -1904,7 +1904,7 @@ void mgui_set_window_rect(MGUI_Context *ctx, const char *title, int x, int y,
   }
 }
 
-void mgui_set_windows_locked(MGUI_Context *ctx, int locked) {
+void mdgui_set_windows_locked(MDGUI_Context *ctx, int locked) {
   if (!ctx)
     return;
   ctx->windows_locked = (locked != 0);
@@ -1914,13 +1914,13 @@ void mgui_set_windows_locked(MGUI_Context *ctx, int locked) {
   }
 }
 
-int mgui_is_windows_locked(MGUI_Context *ctx) {
+int mdgui_is_windows_locked(MDGUI_Context *ctx) {
   if (!ctx)
     return 0;
   return ctx->windows_locked ? 1 : 0;
 }
 
-void mgui_set_window_fullscreen(MGUI_Context *ctx, const char *title,
+void mdgui_set_window_fullscreen(MDGUI_Context *ctx, const char *title,
                                 int fullscreen) {
   if (!ctx || !title)
     return;
@@ -1951,7 +1951,7 @@ void mgui_set_window_fullscreen(MGUI_Context *ctx, const char *title,
   }
 }
 
-int mgui_is_window_fullscreen(MGUI_Context *ctx, const char *title) {
+int mdgui_is_window_fullscreen(MDGUI_Context *ctx, const char *title) {
   if (!ctx || !title)
     return 0;
   for (int i = 0; i < (int)ctx->windows.size(); ++i) {
@@ -1961,28 +1961,28 @@ int mgui_is_window_fullscreen(MGUI_Context *ctx, const char *title) {
   return 0;
 }
 
-void mgui_set_custom_cursor_enabled(MGUI_Context *ctx, int enabled) {
+void mdgui_set_custom_cursor_enabled(MDGUI_Context *ctx, int enabled) {
   if (!ctx)
     return;
   ctx->custom_cursor_enabled = (enabled != 0);
 }
 
-int mgui_is_custom_cursor_enabled(MGUI_Context *ctx) {
+int mdgui_is_custom_cursor_enabled(MDGUI_Context *ctx) {
   if (!ctx)
     return 0;
   return ctx->custom_cursor_enabled ? 1 : 0;
 }
 
-int mgui_begin_render_window(MGUI_Context *ctx, const char *title, int x, int y,
+int mdgui_begin_render_window(MDGUI_Context *ctx, const char *title, int x, int y,
                              int w, int h, int show_menu, int *out_x,
                              int *out_y, int *out_w, int *out_h) {
   if (!ctx)
     return 0;
-  if (!mgui_begin_window(ctx, title, x, y, w, h))
+  if (!mdgui_begin_window(ctx, title, x, y, w, h))
     return 0;
   if (show_menu) {
-    mgui_begin_menu_bar(ctx);
-    mgui_end_menu_bar(ctx);
+    mdgui_begin_menu_bar(ctx);
+    mdgui_end_menu_bar(ctx);
   }
   if (ctx->current_window < 0)
     return 0;
@@ -2006,7 +2006,7 @@ int mgui_begin_render_window(MGUI_Context *ctx, const char *title, int x, int y,
   return 1;
 }
 
-void mgui_run_window_pass(MGUI_Context *ctx, const MGUI_WindowPassItem *items,
+void mdgui_run_window_pass(MDGUI_Context *ctx, const MDGUI_WindowPassItem *items,
                           int item_count) {
   if (!ctx || !items || item_count <= 0)
     return;
@@ -2037,14 +2037,14 @@ void mgui_run_window_pass(MGUI_Context *ctx, const MGUI_WindowPassItem *items,
     const auto &it = items[entry.item_index];
     if (it.use_render_window) {
       int cx = 0, cy = 0, cw = 0, ch = 0;
-      if (mgui_begin_render_window(ctx, it.title, it.x, it.y, it.w, it.h,
+      if (mdgui_begin_render_window(ctx, it.title, it.x, it.y, it.w, it.h,
                                    it.show_menu, &cx, &cy, &cw, &ch)) {
         if (it.draw_fn)
           it.draw_fn(ctx, cx, cy, cw, ch, it.user_data);
-        mgui_end_window(ctx);
+        mdgui_end_window(ctx);
       }
     } else {
-      if (mgui_begin_window(ctx, it.title, it.x, it.y, it.w, it.h)) {
+      if (mdgui_begin_window(ctx, it.title, it.x, it.y, it.w, it.h)) {
         int cx = 0, cy = 0, cw = 1, ch = 1;
         if (ctx->current_window >= 0 &&
             ctx->current_window < (int)ctx->windows.size()) {
@@ -2060,13 +2060,13 @@ void mgui_run_window_pass(MGUI_Context *ctx, const MGUI_WindowPassItem *items,
         }
         if (it.draw_fn)
           it.draw_fn(ctx, cx, cy, cw, ch, it.user_data);
-        mgui_end_window(ctx);
+        mdgui_end_window(ctx);
       }
     }
   }
 }
 
-void mgui_open_file_browser(MGUI_Context *ctx) {
+void mdgui_open_file_browser(MDGUI_Context *ctx) {
   if (!ctx)
     return;
   // Prevent same-frame click-through from the opener button/menu item.
@@ -2085,7 +2085,7 @@ void mgui_open_file_browser(MGUI_Context *ctx) {
   file_browser_open_path(ctx, ctx->file_browser_cwd.c_str());
 }
 
-void mgui_set_file_browser_filters(MGUI_Context *ctx, const char **extensions,
+void mdgui_set_file_browser_filters(MDGUI_Context *ctx, const char **extensions,
                                    int extension_count) {
   if (!ctx)
     return;
@@ -2109,12 +2109,12 @@ void mgui_set_file_browser_filters(MGUI_Context *ctx, const char **extensions,
   }
 }
 
-const char *mgui_show_file_browser(MGUI_Context *ctx) {
+const char *mdgui_show_file_browser(MDGUI_Context *ctx) {
   if (!ctx || !ctx->file_browser_open)
     return nullptr;
   ctx->file_browser_result.clear();
 
-  if (!mgui_begin_window(ctx, "File Browser", 28, 20, 280, 180)) {
+  if (!mdgui_begin_window(ctx, "File Browser", 28, 20, 280, 180)) {
     ctx->file_browser_open = false;
     return nullptr;
   }
@@ -2124,8 +2124,8 @@ const char *mgui_show_file_browser(MGUI_Context *ctx) {
   if (win.min_h < 130)
     win.min_h = 130;
 
-  mgui_label(ctx, "Directory:", 8, 2);
-  mgui_label(ctx, ctx->file_browser_cwd.c_str(), 8, 0);
+  mdgui_label(ctx, "Directory:", 8, 2);
+  mdgui_label(ctx, ctx->file_browser_cwd.c_str(), 8, 0);
 
   const int row_h = 10;
   const int button_h = 12;
@@ -2164,12 +2164,12 @@ const char *mgui_show_file_browser(MGUI_Context *ctx) {
       ctx->file_browser_scroll = max_scroll;
   }
 
-  mgui_draw_frame_idx(nullptr, CLR_TEXT_DARK, list_x - 1, list_y - 1, list_x + list_w + 1,
+  mdgui_draw_frame_idx(nullptr, CLR_TEXT_DARK, list_x - 1, list_y - 1, list_x + list_w + 1,
           list_y + list_h + 1);
-  mgui_fill_rect_idx(nullptr, CLR_BOX_BODY, list_x, list_y, list_w, list_h);
+  mdgui_fill_rect_idx(nullptr, CLR_BOX_BODY, list_x, list_y, list_w, list_h);
 
   // Clip row text to the virtual list viewport so long names can't bleed out.
-  mgui_backend_set_clip_rect(1, list_x, list_y, content_w, list_h);
+  mdgui_backend_set_clip_rect(1, list_x, list_y, content_w, list_h);
 
   int clicked = 0;
   for (int i = 0; i < rows; i++) {
@@ -2180,11 +2180,11 @@ const char *mgui_show_file_browser(MGUI_Context *ctx) {
     const int hovered = point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y,
                                       list_x, ry, content_w, row_h);
     if (item_idx == ctx->file_browser_selected)
-      mgui_fill_rect_idx(nullptr, CLR_MENU_SEL, list_x, ry, content_w, row_h);
+      mdgui_fill_rect_idx(nullptr, CLR_MENU_SEL, list_x, ry, content_w, row_h);
     else if (hovered)
-      mgui_fill_rect_idx(nullptr, CLR_BUTTON_SURFACE, list_x, ry, content_w, row_h);
-    if (mgui_fonts[1]) {
-      mgui_fonts[1]->drawText(ctx->file_browser_entries[item_idx].label.c_str(), nullptr,
+      mdgui_fill_rect_idx(nullptr, CLR_BUTTON_SURFACE, list_x, ry, content_w, row_h);
+    if (mdgui_fonts[1]) {
+      mdgui_fonts[1]->drawText(ctx->file_browser_entries[item_idx].label.c_str(), nullptr,
                     list_x + 2, ry + 1, CLR_MENU_TEXT);
     }
     if (hovered && ctx->input.mouse_pressed) {
@@ -2192,11 +2192,11 @@ const char *mgui_show_file_browser(MGUI_Context *ctx) {
       clicked = 1;
     }
   }
-  mgui_backend_set_clip_rect(0, 0, 0, 0, 0);
+  mdgui_backend_set_clip_rect(0, 0, 0, 0, 0);
   set_content_clip(ctx);
 
   const int sb_x = list_x + content_w + 1;
-  mgui_fill_rect_idx(nullptr, CLR_BUTTON_SURFACE, sb_x, list_y, scrollbar_w, list_h);
+  mdgui_fill_rect_idx(nullptr, CLR_BUTTON_SURFACE, sb_x, list_y, scrollbar_w, list_h);
   if (max_scroll > 0) {
     int thumb_h = (rows * list_h) / total;
     if (thumb_h < 10)
@@ -2206,7 +2206,7 @@ const char *mgui_show_file_browser(MGUI_Context *ctx) {
     const int travel = list_h - thumb_h;
     const int thumb_y =
         list_y + ((ctx->file_browser_scroll * travel) / max_scroll);
-    mgui_fill_rect_idx(nullptr, CLR_MENU_SEL, sb_x + 1, thumb_y, scrollbar_w - 2,
+    mdgui_fill_rect_idx(nullptr, CLR_MENU_SEL, sb_x + 1, thumb_y, scrollbar_w - 2,
              thumb_h);
     if (ctx->input.mouse_pressed && over_scrollbar) {
       if (ctx->input.mouse_y >= thumb_y && ctx->input.mouse_y <= thumb_y + thumb_h) {
@@ -2242,7 +2242,7 @@ const char *mgui_show_file_browser(MGUI_Context *ctx) {
   if (clicked && ctx->file_browser_selected >= 0 &&
       ctx->file_browser_selected < (int)ctx->file_browser_entries.size()) {
     const int idx = ctx->file_browser_selected;
-    const unsigned long long now = mgui_backend_get_ticks_ms();
+    const unsigned long long now = mdgui_backend_get_ticks_ms();
     if (ctx->file_browser_last_click_idx == idx &&
         (now - ctx->file_browser_last_click_ticks) <= 350) {
       trigger_open = true;
@@ -2252,13 +2252,13 @@ const char *mgui_show_file_browser(MGUI_Context *ctx) {
   }
 
   const int button_local_y = bottom_buttons_y - ctx->content_y;
-  if (mgui_button(ctx, "Up", 8, button_local_y, 48, button_h)) {
+  if (mdgui_button(ctx, "Up", 8, button_local_y, 48, button_h)) {
     file_browser_open_path(ctx, "..");
   }
-  if (mgui_button(ctx, "Open", 60, button_local_y, 60, button_h)) {
+  if (mdgui_button(ctx, "Open", 60, button_local_y, 60, button_h)) {
     trigger_open = true;
   }
-  if (mgui_button(ctx, "Cancel", 124, button_local_y, 60, button_h)) {
+  if (mdgui_button(ctx, "Cancel", 124, button_local_y, 60, button_h)) {
     ctx->file_browser_open = false;
     if (ctx->current_window >= 0 &&
         ctx->current_window < (int)ctx->windows.size()) {
@@ -2281,59 +2281,59 @@ const char *mgui_show_file_browser(MGUI_Context *ctx) {
     }
   }
 
-  mgui_end_window(ctx);
+  mdgui_end_window(ctx);
   if (!ctx->file_browser_result.empty())
     return ctx->file_browser_result.c_str();
   return nullptr;
 }
 
-void mgui_show_demo_window(MGUI_Context *ctx) {
+void mdgui_show_demo_window(MDGUI_Context *ctx) {
   static bool show_demo = true;
   static float progress = 0.35f;
   static int quality_idx = 0;
-  static int theme_idx = MGUI_THEME_DEFAULT;
+  static int theme_idx = MDGUI_THEME_DEFAULT;
   static const char *quality_items[] = {"Nearest", "Bilinear", "CRT Mask"};
   static const char *theme_items[] = {"Default", "Dark", "Amber", "Graphite",
                                       "Midnight", "Olive"};
   if (!show_demo)
     return;
 
-  if (mgui_begin_window(ctx, "MGUI Demo Window", 20, 20, 220, 220)) {
-    mgui_label(ctx, "Aesthetics & Widgets", 10, 5);
-    mgui_separator(ctx, 10, 0, 0);
+  if (mdgui_begin_window(ctx, "MDGUI Demo Window", 20, 20, 220, 220)) {
+    mdgui_label(ctx, "Aesthetics & Widgets", 10, 5);
+    mdgui_separator(ctx, 10, 0, 0);
 
     static bool check1 = true;
     static bool check2 = false;
-    mgui_checkbox(ctx, "Enable Sound", &check1, 10, 5);
-    mgui_checkbox(ctx, "Turbo Mode", &check2, 10, 5);
+    mdgui_checkbox(ctx, "Enable Sound", &check1, 10, 5);
+    mdgui_checkbox(ctx, "Turbo Mode", &check2, 10, 5);
 
-    mgui_separator(ctx, 10, 5, 0);
-    mgui_label(ctx, "Volumes", 10, 5);
+    mdgui_separator(ctx, 10, 5, 0);
+    mdgui_label(ctx, "Volumes", 10, 5);
 
     static float vol1 = 0.5f;
     static float vol2 = 0.8f;
-    mgui_slider(ctx, "Master", &vol1, 0.0f, 1.0f, 10, 5, -54);
-    mgui_slider(ctx, "Music", &vol2, 0.0f, 1.0f, 10, 5, -46);
+    mdgui_slider(ctx, "Master", &vol1, 0.0f, 1.0f, 10, 5, -54);
+    mdgui_slider(ctx, "Music", &vol2, 0.0f, 1.0f, 10, 5, -46);
 
-    mgui_separator(ctx, 10, 5, 0);
-    mgui_label(ctx, "Renderer", 10, 5);
-    mgui_listbox(ctx, quality_items, 3, &quality_idx, 10, 3, -16, 3);
+    mdgui_separator(ctx, 10, 5, 0);
+    mdgui_label(ctx, "Renderer", 10, 5);
+    mdgui_listbox(ctx, quality_items, 3, &quality_idx, 10, 3, -16, 3);
 
-    mgui_separator(ctx, 10, 5, 0);
+    mdgui_separator(ctx, 10, 5, 0);
     ctx->content_y += 8; // hard spacer: keep combo clear of renderer listbox
-    mgui_label(ctx, "Filter Combo", 10, 0);
-    mgui_combo(ctx, nullptr, quality_items, 3, &quality_idx, 10, 2, -16);
+    mdgui_label(ctx, "Filter Combo", 10, 0);
+    mdgui_combo(ctx, nullptr, quality_items, 3, &quality_idx, 10, 2, -16);
 
-    mgui_separator(ctx, 10, 5, 0);
-    mgui_label(ctx, "Theme", 10, 5);
-    theme_idx = mgui_get_theme();
-    if (mgui_combo(ctx, nullptr, theme_items, 6, &theme_idx, 10, 2, -16)) {
-      mgui_set_theme(theme_idx);
+    mdgui_separator(ctx, 10, 5, 0);
+    mdgui_label(ctx, "Theme", 10, 5);
+    theme_idx = mdgui_get_theme();
+    if (mdgui_combo(ctx, nullptr, theme_items, 6, &theme_idx, 10, 2, -16)) {
+      mdgui_set_theme(theme_idx);
     }
 
-    mgui_label(ctx, "Frame Progress", 10, 5);
-    mgui_progress_bar(ctx, progress, 10, 3, -16, 10, nullptr);
-    if (mgui_button(ctx, "Step", 10, 5, 56, 12)) {
+    mdgui_label(ctx, "Frame Progress", 10, 5);
+    mdgui_progress_bar(ctx, progress, 10, 3, -16, 10, nullptr);
+    if (mdgui_button(ctx, "Step", 10, 5, 56, 12)) {
       progress += 0.1f;
       if (progress > 1.0f)
         progress = 0.0f;
@@ -2355,15 +2355,15 @@ void mgui_show_demo_window(MGUI_Context *ctx) {
         (win.text_scroll >= (max_scroll_with_footer - 2));
 
     const int footer_start_y = ctx->content_y;
-    mgui_spacer(ctx, footer_h);
+    mdgui_spacer(ctx, footer_h);
     if (show_close) {
       const int button_local_y = (footer_start_y + 6) - ctx->content_y;
-      if (mgui_button(ctx, "Close Demo", 10, button_local_y, -12, 12)) {
+      if (mdgui_button(ctx, "Close Demo", 10, button_local_y, -12, 12)) {
         ctx->windows[ctx->current_window].closed = true;
       }
     }
 
-    mgui_end_window(ctx);
+    mdgui_end_window(ctx);
   }
 }
 }

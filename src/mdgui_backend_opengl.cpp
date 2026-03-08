@@ -1,10 +1,10 @@
-#include "mgui_backends.h"
+#include "mdgui_backends.h"
 
 #include <string.h>
 
 extern "C" {
-void mgui_make_opengl_backend(MGUI_RenderBackend *out_backend,
-                              const MGUI_BackendCallbacks *callbacks) {
+void mdgui_make_opengl_backend(MDGUI_RenderBackend *out_backend,
+                              const MDGUI_BackendCallbacks *callbacks) {
   if (!out_backend)
     return;
 

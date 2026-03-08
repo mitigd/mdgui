@@ -1,12 +1,12 @@
-#include "mgui_primitives.h"
-#include "mgui_c.h"
-#include "mgui_font8x8.h"
+#include "mdgui_primitives.h"
+#include "mdgui_c.h"
+#include "mdgui_font8x8.h"
 #include <string.h>
 
-// Renderer/palette glue for MGUI primitives.
+// Renderer/palette glue for MDGUI primitives.
 
 namespace {
-MGUI_RenderBackend g_backend = {};
+MDGUI_RenderBackend g_backend = {};
 bool g_has_backend = false;
 
 struct Color {
@@ -19,7 +19,7 @@ struct Color {
 Color g_palette[256];
 Color g_custom_palette[256];
 bool g_has_custom_palette[256];
-int g_theme_id = MGUI_THEME_DEFAULT;
+int g_theme_id = MDGUI_THEME_DEFAULT;
 
 bool backend_ready() {
   return g_has_backend && g_backend.set_clip_rect && g_backend.fill_rect_rgba &&
@@ -61,7 +61,7 @@ void fill_base_palette() {
 
 void apply_theme_builtin(int theme_id) {
   switch (theme_id) {
-  case MGUI_THEME_DARK:
+  case MDGUI_THEME_DARK:
     set_theme_slot(15, 0xdf, 0xdf, 0xdf, 0xff);
     set_theme_slot(25, 0x3a, 0x3a, 0x3a, 0xff);
     set_theme_slot(141, 0x1d, 0x1f, 0x26, 0xff);
@@ -73,7 +73,7 @@ void apply_theme_builtin(int theme_id) {
     set_theme_slot(244, 0x36, 0x3d, 0x4d, 0xff);
     set_theme_slot(245, 0x3a, 0x3a, 0x3a, 0xff);
     break;
-  case MGUI_THEME_AMBER:
+  case MDGUI_THEME_AMBER:
     set_theme_slot(15, 0xf3, 0xe2, 0xb2, 0xff);
     set_theme_slot(25, 0x4c, 0x3a, 0x1f, 0xff);
     set_theme_slot(141, 0x1f, 0x17, 0x0f, 0xff);
@@ -85,7 +85,7 @@ void apply_theme_builtin(int theme_id) {
     set_theme_slot(244, 0x6e, 0x4d, 0x1e, 0xff);
     set_theme_slot(245, 0x4c, 0x3a, 0x1f, 0xff);
     break;
-  case MGUI_THEME_GRAPHITE:
+  case MDGUI_THEME_GRAPHITE:
     set_theme_slot(15, 0xd8, 0xdd, 0xe6, 0xff);
     set_theme_slot(25, 0x3f, 0x45, 0x52, 0xff);
     set_theme_slot(141, 0x26, 0x2b, 0x33, 0xff);
@@ -97,7 +97,7 @@ void apply_theme_builtin(int theme_id) {
     set_theme_slot(244, 0x3f, 0x4f, 0x67, 0xff);
     set_theme_slot(245, 0x3f, 0x45, 0x52, 0xff);
     break;
-  case MGUI_THEME_MIDNIGHT:
+  case MDGUI_THEME_MIDNIGHT:
     set_theme_slot(15, 0xbf, 0xd8, 0xff, 0xff);
     set_theme_slot(25, 0x1c, 0x2a, 0x44, 0xff);
     set_theme_slot(141, 0x08, 0x12, 0x24, 0xff);
@@ -109,7 +109,7 @@ void apply_theme_builtin(int theme_id) {
     set_theme_slot(244, 0x13, 0x3a, 0x74, 0xff);
     set_theme_slot(245, 0x1c, 0x2a, 0x44, 0xff);
     break;
-  case MGUI_THEME_OLIVE:
+  case MDGUI_THEME_OLIVE:
     set_theme_slot(15, 0xd9, 0xe0, 0xc8, 0xff);
     set_theme_slot(25, 0x36, 0x43, 0x30, 0xff);
     set_theme_slot(141, 0x1d, 0x27, 0x1a, 0xff);
@@ -121,7 +121,7 @@ void apply_theme_builtin(int theme_id) {
     set_theme_slot(244, 0x43, 0x5a, 0x31, 0xff);
     set_theme_slot(245, 0x36, 0x43, 0x30, 0xff);
     break;
-  case MGUI_THEME_DEFAULT:
+  case MDGUI_THEME_DEFAULT:
   default:
     set_theme_slot(15, 0xc0, 0xc0, 0xc0, 0xff);
     set_theme_slot(25, 0x70, 0x70, 0x70, 0xff);
@@ -175,7 +175,7 @@ bool draw_glyph_fast(unsigned char glyph, int x, int y, unsigned char color_idx)
 const unsigned char *glyph_for_char(unsigned char c) {
   if (c >= 128)
     c = '?';
-  return (const unsigned char *)mgui_font8x8_basic[c];
+  return (const unsigned char *)mdgui_font8x8_basic[c];
 }
 
 int glyph_width(unsigned char c) {
@@ -199,7 +199,7 @@ int glyph_width(unsigned char c) {
 } // namespace
 
 extern "C" {
-void mgui_bind_backend(const MGUI_RenderBackend *backend) {
+void mdgui_bind_backend(const MDGUI_RenderBackend *backend) {
   if (!backend) {
     g_has_backend = false;
     memset(&g_backend, 0, sizeof(g_backend));
@@ -211,23 +211,23 @@ void mgui_bind_backend(const MGUI_RenderBackend *backend) {
   rebuild_palette();
 }
 
-void mgui_backend_begin_frame(void) {
+void mdgui_backend_begin_frame(void) {
   if (g_has_backend && g_backend.begin_frame)
     g_backend.begin_frame(g_backend.user_data);
 }
 
-void mgui_backend_end_frame(void) {
+void mdgui_backend_end_frame(void) {
   if (g_has_backend && g_backend.end_frame)
     g_backend.end_frame(g_backend.user_data);
 }
 
-void mgui_backend_set_clip_rect(int enabled, int x, int y, int w, int h) {
+void mdgui_backend_set_clip_rect(int enabled, int x, int y, int w, int h) {
   if (!backend_ready())
     return;
   g_backend.set_clip_rect(g_backend.user_data, enabled, x, y, w, h);
 }
 
-int mgui_backend_get_render_size(int *out_w, int *out_h) {
+int mdgui_backend_get_render_size(int *out_w, int *out_h) {
   if (!backend_ready()) {
     if (out_w)
       *out_w = 320;
@@ -238,22 +238,22 @@ int mgui_backend_get_render_size(int *out_w, int *out_h) {
   return g_backend.get_render_size(g_backend.user_data, out_w, out_h);
 }
 
-unsigned long long mgui_backend_get_ticks_ms(void) {
+unsigned long long mdgui_backend_get_ticks_ms(void) {
   if (!backend_ready())
     return 0;
   return g_backend.get_ticks_ms(g_backend.user_data);
 }
 
-void mgui_set_theme(int theme_id) {
-  if (theme_id < MGUI_THEME_DEFAULT || theme_id > MGUI_THEME_OLIVE)
-    theme_id = MGUI_THEME_DEFAULT;
+void mdgui_set_theme(int theme_id) {
+  if (theme_id < MDGUI_THEME_DEFAULT || theme_id > MDGUI_THEME_OLIVE)
+    theme_id = MDGUI_THEME_DEFAULT;
   g_theme_id = theme_id;
   rebuild_palette();
 }
 
-int mgui_get_theme(void) { return g_theme_id; }
+int mdgui_get_theme(void) { return g_theme_id; }
 
-void mgui_set_theme_color(int palette_index, unsigned char r, unsigned char g,
+void mdgui_set_theme_color(int palette_index, unsigned char r, unsigned char g,
                           unsigned char b, unsigned char a) {
   if (palette_index < 0 || palette_index >= 256)
     return;
@@ -262,19 +262,19 @@ void mgui_set_theme_color(int palette_index, unsigned char r, unsigned char g,
   rebuild_palette();
 }
 
-void mgui_clear_theme_color(int palette_index) {
+void mdgui_clear_theme_color(int palette_index) {
   if (palette_index < 0 || palette_index >= 256)
     return;
   g_has_custom_palette[palette_index] = false;
   rebuild_palette();
 }
 
-void mgui_clear_all_theme_colors(void) {
+void mdgui_clear_all_theme_colors(void) {
   memset(g_has_custom_palette, 0, sizeof(g_has_custom_palette));
   rebuild_palette();
 }
 
-void mgui_fill_rect_idx(char *d, int idx, int x, int y, int w, int h) {
+void mdgui_fill_rect_idx(char *d, int idx, int x, int y, int w, int h) {
   if (!backend_ready())
     return;
   const Color c = palette_color((unsigned char)idx);
@@ -282,7 +282,7 @@ void mgui_fill_rect_idx(char *d, int idx, int x, int y, int w, int h) {
                            h);
 }
 
-void mgui_draw_hline_idx(char *d, int idx, int x1, int y, int x2) {
+void mdgui_draw_hline_idx(char *d, int idx, int x1, int y, int x2) {
   if (!backend_ready())
     return;
   const Color c = palette_color((unsigned char)idx);
@@ -290,7 +290,7 @@ void mgui_draw_hline_idx(char *d, int idx, int x1, int y, int x2) {
                            x2 - 1, y);
 }
 
-void mgui_draw_vline_idx(char *d, int idx, int x, int y1, int y2) {
+void mdgui_draw_vline_idx(char *d, int idx, int x, int y1, int y2) {
   if (!backend_ready())
     return;
   const Color c = palette_color((unsigned char)idx);
@@ -299,25 +299,25 @@ void mgui_draw_vline_idx(char *d, int idx, int x, int y1, int y2) {
 }
 
 // Draw a beveled frame using palette indices.
-void mgui_draw_frame_idx(char *d, int idx, int x1, int y1, int x2, int y2) {
-  mgui_draw_hline_idx(d, 0, x1, y1, x2);
-  mgui_draw_hline_idx(d, 0, x1, y2 - 1, x2);
-  mgui_draw_vline_idx(d, 0, x1, y1, y2);
-  mgui_draw_vline_idx(d, 0, x2 - 1, y1, y2);
+void mdgui_draw_frame_idx(char *d, int idx, int x1, int y1, int x2, int y2) {
+  mdgui_draw_hline_idx(d, 0, x1, y1, x2);
+  mdgui_draw_hline_idx(d, 0, x1, y2 - 1, x2);
+  mdgui_draw_vline_idx(d, 0, x1, y1, y2);
+  mdgui_draw_vline_idx(d, 0, x2 - 1, y1, y2);
 
-  mgui_draw_hline_idx(d, 29, x1 + 1, y1 + 1, x2 - 1);
-  mgui_draw_vline_idx(d, 29, x1 + 1, y1 + 1, y2 - 1);
+  mdgui_draw_hline_idx(d, 29, x1 + 1, y1 + 1, x2 - 1);
+  mdgui_draw_vline_idx(d, 29, x1 + 1, y1 + 1, y2 - 1);
 
-  mgui_draw_vline_idx(d, 23, x2 - 2, y1 + 1, y2 - 1);
-  mgui_draw_hline_idx(d, 23, x1 + 1, y2 - 2, x2 - 1);
+  mdgui_draw_vline_idx(d, 23, x2 - 2, y1 + 1, y2 - 1);
+  mdgui_draw_hline_idx(d, 23, x1 + 1, y2 - 2, x2 - 1);
 }
 }
 
-MGuiFont *mgui_fonts[10] = {nullptr};
+MDGuiFont *mdgui_fonts[10] = {nullptr};
 
-MGuiFont::MGuiFont() { atlas_raw = nullptr; }
+MDGuiFont::MDGuiFont() { atlas_raw = nullptr; }
 
-int MGuiFont::drawChar(unsigned char c, int x, int y, int colorIdx) {
+int MDGuiFont::drawChar(unsigned char c, int x, int y, int colorIdx) {
   if (!backend_ready())
     return 6;
 
@@ -339,7 +339,7 @@ int MGuiFont::drawChar(unsigned char c, int x, int y, int colorIdx) {
   return xw;
 }
 
-int MGuiFont::measureTextWidth(const char *s) const {
+int MDGuiFont::measureTextWidth(const char *s) const {
   if (!s)
     return 0;
   int w = 0;
@@ -349,14 +349,14 @@ int MGuiFont::measureTextWidth(const char *s) const {
   return w;
 }
 
-void MGuiFont::drawText(const char *s, char *d, int x, int y, int colorIdx) {
+void MDGuiFont::drawText(const char *s, char *d, int x, int y, int colorIdx) {
   if (!s)
     return;
   for (const unsigned char *p = (const unsigned char *)s; *p; ++p) {
     x += drawChar(*p, x, y, colorIdx);
   }
 }
-void MGuiFont::drawText(const char *s, char *d, int x, int y) {
+void MDGuiFont::drawText(const char *s, char *d, int x, int y) {
   drawText(s, d, x, y, -1); // Use default font palette indices.
 }
 

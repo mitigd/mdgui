@@ -10,7 +10,7 @@ pub fn build(b: *std.Build) void {
     });
 
     const exe = b.addExecutable(.{
-        .name = "mgui-demo",
+        .name = "mdgui-demo",
         .root_module = b.createModule(.{
             .root_source_file = b.path("demo/main.zig"),
             .target = target,
@@ -26,11 +26,11 @@ pub fn build(b: *std.Build) void {
     exe.root_module.addIncludePath(b.path("include"));
     exe.root_module.addCSourceFiles(.{
         .files = &.{
-            "src/mgui_c.cpp",
-            "src/mgui_glue.cpp",
-            "src/mgui_backend_sdl.cpp",
-            "src/mgui_backend_opengl.cpp",
-            "src/mgui_backend_vulkan.cpp",
+            "src/mdgui_c.cpp",
+            "src/mdgui_glue.cpp",
+            "src/mdgui_backend_sdl.cpp",
+            "src/mdgui_backend_opengl.cpp",
+            "src/mdgui_backend_vulkan.cpp",
         },
         .flags = &.{ "-std=c++17", "-fpermissive" },
     });

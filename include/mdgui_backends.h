@@ -1,13 +1,13 @@
-#ifndef MGUI_BACKENDS_H
-#define MGUI_BACKENDS_H
+#ifndef MDGUI_BACKENDS_H
+#define MDGUI_BACKENDS_H
 
-#include "mgui_c.h"
+#include "mdgui_c.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-typedef struct MGUI_BackendCallbacks {
+typedef struct MDGUI_BackendCallbacks {
   void *user_data;
   void (*begin_frame)(void *user_data);
   void (*end_frame)(void *user_data);
@@ -26,18 +26,18 @@ typedef struct MGUI_BackendCallbacks {
                          unsigned char a);
   int (*get_render_size)(void *user_data, int *out_w, int *out_h);
   unsigned long long (*get_ticks_ms)(void *user_data);
-} MGUI_BackendCallbacks;
+} MDGUI_BackendCallbacks;
 
-// SDL renderer compatibility backend (implemented in src/mgui_backend_sdl.cpp).
-void mgui_make_sdl_backend(MGUI_RenderBackend *out_backend, void *sdl_renderer);
+// SDL renderer compatibility backend (implemented in src/mdgui_backend_sdl.cpp).
+void mdgui_make_sdl_backend(MDGUI_RenderBackend *out_backend, void *sdl_renderer);
 
 // OpenGL compatibility backend adapter.
-void mgui_make_opengl_backend(MGUI_RenderBackend *out_backend,
-                              const MGUI_BackendCallbacks *callbacks);
+void mdgui_make_opengl_backend(MDGUI_RenderBackend *out_backend,
+                              const MDGUI_BackendCallbacks *callbacks);
 
 // Vulkan compatibility backend adapter.
-void mgui_make_vulkan_backend(MGUI_RenderBackend *out_backend,
-                              const MGUI_BackendCallbacks *callbacks);
+void mdgui_make_vulkan_backend(MDGUI_RenderBackend *out_backend,
+                              const MDGUI_BackendCallbacks *callbacks);
 
 #ifdef __cplusplus
 }

@@ -1,17 +1,17 @@
 .{
-    .name = .mgui_demo,
+    .name = .mdgui_demo,
     .version = "0.1.0",
-    .fingerprint = 0x4de52247ce020c78,
+    .fingerprint = 0xc0dc6704b2282e42,
     .minimum_zig_version = "0.15.2",
     .paths = .{
         "build.zig",
         "build.zig.zon",
         "demo/main.zig",
-        "include/mgui_primitives.h",
-        "include/mgui_font8x8.h",
-        "src/mgui_c.cpp",
-        "src/mgui_glue.cpp",
-        "include/mgui_c.h",
+        "include/mdgui_primitives.h",
+        "include/mdgui_font8x8.h",
+        "src/mdgui_c.cpp",
+        "src/mdgui_glue.cpp",
+        "include/mdgui_c.h",
     },
     .dependencies = .{
         .sdl = .{

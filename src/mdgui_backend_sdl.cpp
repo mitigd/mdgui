@@ -1,7 +1,7 @@
-#include "mgui_c.h"
+#include "mdgui_c.h"
 
 #include <SDL3/SDL.h>
-#include "mgui_font8x8.h"
+#include "mdgui_font8x8.h"
 #include <string.h>
 #include <vector>
 
@@ -15,7 +15,7 @@ static int g_font_mod_b = -1;
 const unsigned char *glyph_for_char(unsigned char c) {
   if (c >= 128)
     c = '?';
-  return (const unsigned char *)mgui_font8x8_basic[c];
+  return (const unsigned char *)mdgui_font8x8_basic[c];
 }
 
 bool ensure_font_atlas(SDL_Renderer *renderer) {
@@ -179,7 +179,7 @@ unsigned long long sdl_get_ticks_ms(void *user_data) {
 } // namespace
 
 extern "C" {
-void mgui_make_sdl_backend(MGUI_RenderBackend *out_backend,
+void mdgui_make_sdl_backend(MDGUI_RenderBackend *out_backend,
                            void *sdl_renderer) {
   if (!out_backend)
     return;

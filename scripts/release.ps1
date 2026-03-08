@@ -1,6 +1,6 @@
 $Action = $Args[0]
 $RemainingArgs = $Args | Select-Object -Skip 1
-$ExeName = "mgui-demo.exe"
+$ExeName = "mdgui-demo.exe"
 
 if ($null -eq $Action) {
     $Action = "build"
@@ -8,16 +8,16 @@ if ($null -eq $Action) {
 
 switch ($Action) {
     "build" {
-        Write-Host "Building mgui demo..." -ForegroundColor Cyan
+        Write-Host "Building mdgui demo..." -ForegroundColor Cyan
         zig build $RemainingArgs
     }
     "run" {
-        Write-Host "Running mgui demo..." -ForegroundColor Cyan
+        Write-Host "Running mdgui demo..." -ForegroundColor Cyan
         zig build run -- $RemainingArgs
     }
     "release" {
         $Version = if ($RemainingArgs.Count -gt 0) { $RemainingArgs[0] } else { "0.1.0" }
-        $ReleaseDir = "mgui-$Version-win64"
+        $ReleaseDir = "mdgui-$Version-win64"
         $ZipFile = "$ReleaseDir.zip"
 
         Write-Host "Building release (ReleaseFast)..." -ForegroundColor Green

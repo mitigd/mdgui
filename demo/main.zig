@@ -2,7 +2,7 @@ const std = @import("std");
 
 const c = @cImport({
     @cInclude("SDL3/SDL.h");
-    @cInclude("mgui_c.h");
+    @cInclude("mdgui_c.h");
 });
 
 const render_api_window_title = "WINDOW API";
@@ -170,37 +170,37 @@ fn drawAnalyticsGraph(renderer: ?*c.SDL_Renderer, a: *const Analytics, x: c_int,
     }
 }
 
-fn drawAnalyticsWindow(ctx: ?*c.MGUI_Context, analytics: *Analytics) void {
+fn drawAnalyticsWindow(ctx: ?*c.MDGUI_Context, analytics: *Analytics) void {
     if (!analytics.show_window) return;
-    if (c.mgui_begin_window(ctx, "PERF ANALYTICS", 10, 145, 240, 205) == 0) return;
+    if (c.mdgui_begin_window(ctx, "PERF ANALYTICS", 10, 145, 240, 205) == 0) return;
 
     const stats = analyticsStats(analytics);
 
     const was_show_graph = analytics.show_graph;
     var toggle_graph = analytics.show_graph;
-    _ = c.mgui_checkbox(ctx, "Show realtime graph", &toggle_graph, 10, 5);
+    _ = c.mdgui_checkbox(ctx, "Show realtime graph", &toggle_graph, 10, 5);
     analytics.show_graph = toggle_graph;
     if (!was_show_graph and analytics.show_graph) {
-        c.mgui_set_window_open(ctx, "PERF GRAPH", 1);
-        c.mgui_focus_window(ctx, "PERF GRAPH");
+        c.mdgui_set_window_open(ctx, "PERF GRAPH", 1);
+        c.mdgui_focus_window(ctx, "PERF GRAPH");
     }
 
-    c.mgui_label(ctx, "FPS + Frame Time", 10, 5);
+    c.mdgui_label(ctx, "FPS + Frame Time", 10, 5);
 
     var line1: [64]u8 = undefined;
     const txt_fps = std.fmt.bufPrintZ(&line1, "{d:.1} fps (avg {d:.1})", .{ stats.current_fps, stats.avg_fps }) catch "fps";
-    c.mgui_progress_bar(ctx, clamp01(stats.current_fps / analytics.target_fps), 10, 3, -16, 10, txt_fps.ptr);
+    c.mdgui_progress_bar(ctx, clamp01(stats.current_fps / analytics.target_fps), 10, 3, -16, 10, txt_fps.ptr);
 
     var line2: [64]u8 = undefined;
     const txt_ms = std.fmt.bufPrintZ(&line2, "{d:.2} ms", .{stats.current_ms}) catch "ms";
-    c.mgui_progress_bar(ctx, clamp01(stats.current_ms / analytics.graph_max_ms), 10, 3, -16, 10, txt_ms.ptr);
+    c.mdgui_progress_bar(ctx, clamp01(stats.current_ms / analytics.graph_max_ms), 10, 3, -16, 10, txt_ms.ptr);
 
     var line3: [64]u8 = undefined;
     const txt_minmax = std.fmt.bufPrintZ(&line3, "min/max {d:.1}/{d:.1}", .{ stats.min_fps, stats.max_fps }) catch "min/max";
-    c.mgui_label(ctx, txt_minmax.ptr, 10, 5);
+    c.mdgui_label(ctx, txt_minmax.ptr, 10, 5);
 
-    c.mgui_separator(ctx, 10, 5, 0);
-    c.mgui_label(ctx, "Frame Time Histogram", 10, 5);
+    c.mdgui_separator(ctx, 10, 5, 0);
+    c.mdgui_label(ctx, "Frame Time Histogram", 10, 5);
 
     const bins = analyticsHistogram(analytics);
     const labels = [_][]const u8{ "<14ms", "14-16.7", "16.7-20", "20-25", "25-33", ">=33" };
@@ -214,46 +214,46 @@ fn drawAnalyticsWindow(ctx: ?*c.MGUI_Context, analytics: *Analytics) void {
         var row: [64]u8 = undefined;
         const pct = if (analytics.count == 0) 0.0 else (@as(f32, @floatFromInt(bins[i])) * 100.0 / @as(f32, @floatFromInt(analytics.count)));
         const txt = std.fmt.bufPrintZ(&row, "{s}: {d:.0}%", .{ labels[i], pct }) catch "bin";
-        c.mgui_label(ctx, txt.ptr, 10, 3);
-        c.mgui_progress_bar(ctx, @as(f32, @floatFromInt(bins[i])) / @as(f32, @floatFromInt(max_bin)), 10, 1, -16, 8, null);
+        c.mdgui_label(ctx, txt.ptr, 10, 3);
+        c.mdgui_progress_bar(ctx, @as(f32, @floatFromInt(bins[i])) / @as(f32, @floatFromInt(max_bin)), 10, 1, -16, 8, null);
     }
 
-    c.mgui_end_window(ctx);
+    c.mdgui_end_window(ctx);
 }
 
-fn drawMainWindow(ctx: ?*c.MGUI_Context, running: *bool, open_file_browser: *bool) void {
-    if (c.mgui_begin_window(ctx, "MGUI", 10, 10, 190, 130) != 0) {
-        c.mgui_begin_menu_bar(ctx);
-        if (c.mgui_begin_menu(ctx, "FILE") != 0) {
-            if (c.mgui_menu_item(ctx, "OPEN ROM") != 0) open_file_browser.* = true;
-            if (c.mgui_menu_item(ctx, "EXIT") != 0) running.* = false;
-            c.mgui_end_menu(ctx);
+fn drawMainWindow(ctx: ?*c.MDGUI_Context, running: *bool, open_file_browser: *bool) void {
+    if (c.mdgui_begin_window(ctx, "MDGUI", 10, 10, 190, 130) != 0) {
+        c.mdgui_begin_menu_bar(ctx);
+        if (c.mdgui_begin_menu(ctx, "FILE") != 0) {
+            if (c.mdgui_menu_item(ctx, "OPEN ROM") != 0) open_file_browser.* = true;
+            if (c.mdgui_menu_item(ctx, "EXIT") != 0) running.* = false;
+            c.mdgui_end_menu(ctx);
         }
-        if (c.mgui_begin_menu(ctx, "OPTIONS") != 0) {
-            _ = c.mgui_menu_item(ctx, "VIDEO");
-            _ = c.mgui_menu_item(ctx, "AUDIO");
-            c.mgui_end_menu(ctx);
+        if (c.mdgui_begin_menu(ctx, "OPTIONS") != 0) {
+            _ = c.mdgui_menu_item(ctx, "VIDEO");
+            _ = c.mdgui_menu_item(ctx, "AUDIO");
+            c.mdgui_end_menu(ctx);
         }
-        c.mgui_end_menu_bar(ctx);
-        c.mgui_label(ctx, "Demo window is draggable.", 8, 6);
-        if (c.mgui_button(ctx, "LOAD ROM", 10, 20, 90, 20) != 0) open_file_browser.* = true;
-        _ = c.mgui_button(ctx, "OPTIONS", 10, 45, 90, 20);
-        c.mgui_end_window(ctx);
+        c.mdgui_end_menu_bar(ctx);
+        c.mdgui_label(ctx, "Demo window is draggable.", 8, 6);
+        if (c.mdgui_button(ctx, "LOAD ROM", 10, 20, 90, 20) != 0) open_file_browser.* = true;
+        _ = c.mdgui_button(ctx, "OPTIONS", 10, 45, 90, 20);
+        c.mdgui_end_window(ctx);
     }
 }
 
-fn drawDemoWindow(ctx: ?*c.MGUI_Context, show_demo: bool) void {
+fn drawDemoWindow(ctx: ?*c.MDGUI_Context, show_demo: bool) void {
     if (show_demo) {
-        c.mgui_show_demo_window(ctx);
+        c.mdgui_show_demo_window(ctx);
     }
 }
 
-fn drawWindowApiDemo(ctx: ?*c.MGUI_Context, renderer: ?*c.SDL_Renderer, emu_view_menu: bool) void {
+fn drawWindowApiDemo(ctx: ?*c.MDGUI_Context, renderer: ?*c.SDL_Renderer, emu_view_menu: bool) void {
     var view_x: c_int = 0;
     var view_y: c_int = 0;
     var view_w: c_int = 0;
     var view_h: c_int = 0;
-    if (c.mgui_begin_render_window(
+    if (c.mdgui_begin_render_window(
         ctx,
         render_api_window_title,
         250,
@@ -297,16 +297,16 @@ fn drawWindowApiDemo(ctx: ?*c.MGUI_Context, renderer: ?*c.SDL_Renderer, emu_view
                 _ = c.SDL_RenderFillRect(renderer, &cell);
             }
         }
-        c.mgui_end_window(ctx);
+        c.mdgui_end_window(ctx);
     }
 }
 
-fn drawPerfGraphWindow(ctx: ?*c.MGUI_Context, renderer: ?*c.SDL_Renderer, analytics: *const Analytics) void {
+fn drawPerfGraphWindow(ctx: ?*c.MDGUI_Context, renderer: ?*c.SDL_Renderer, analytics: *const Analytics) void {
     var perf_x: c_int = 0;
     var perf_y: c_int = 0;
     var perf_w: c_int = 0;
     var perf_h: c_int = 0;
-    if (c.mgui_begin_render_window(
+    if (c.mdgui_begin_render_window(
         ctx,
         "PERF GRAPH",
         250,
@@ -320,7 +320,7 @@ fn drawPerfGraphWindow(ctx: ?*c.MGUI_Context, renderer: ?*c.SDL_Renderer, analyt
         &perf_h,
     ) != 0) {
         drawAnalyticsGraph(renderer, analytics, perf_x, perf_y, perf_w, perf_h);
-        c.mgui_end_window(ctx);
+        c.mdgui_end_window(ctx);
     }
 }
 
@@ -339,7 +339,7 @@ fn getLogicalRenderSize(renderer: ?*c.SDL_Renderer, out_w: *c_int, out_h: *c_int
     out_h.* = rh;
 }
 
-fn tileDemoWindows(ctx: ?*c.MGUI_Context, renderer: ?*c.SDL_Renderer, show_demo: bool, show_graph: bool) void {
+fn tileDemoWindows(ctx: ?*c.MDGUI_Context, renderer: ?*c.SDL_Renderer, show_demo: bool, show_graph: bool) void {
     var rw: c_int = 0;
     var rh: c_int = 0;
     getLogicalRenderSize(renderer, &rw, &rh);
@@ -357,14 +357,14 @@ fn tileDemoWindows(ctx: ?*c.MGUI_Context, renderer: ?*c.SDL_Renderer, show_demo:
     // Collect active windows in a stable priority order.
     var titles: [5][*:0]const u8 = undefined;
     var count: usize = 0;
-    titles[count] = "MGUI";
+    titles[count] = "MDGUI";
     count += 1;
     titles[count] = render_api_window_title;
     count += 1;
     titles[count] = "PERF ANALYTICS";
     count += 1;
     if (show_demo) {
-        titles[count] = "MGUI Demo Window";
+        titles[count] = "MDGUI Demo Window";
         count += 1;
     }
     if (show_graph) {
@@ -397,7 +397,7 @@ fn tileDemoWindows(ctx: ?*c.MGUI_Context, renderer: ?*c.SDL_Renderer, show_demo:
             const cols_left: c_int = cols_this_row - col;
             const w_remaining = (left + content_w) - x - (cols_left - 1) * gap;
             const cell_w: c_int = @max(120, @divTrunc(w_remaining, cols_left));
-            c.mgui_set_window_rect(ctx, titles[idx], x, y, cell_w, row_h);
+            c.mdgui_set_window_rect(ctx, titles[idx], x, y, cell_w, row_h);
             idx += 1;
             x += cell_w + gap;
         }
@@ -409,7 +409,7 @@ pub fn main() !void {
     if (c.SDL_Init(c.SDL_INIT_VIDEO) == false) return error.SDLInitFailed;
     defer c.SDL_Quit();
 
-    const window = c.SDL_CreateWindow("MGUI Demo", 1280, 720, 0) orelse return error.SDLWindowFailed;
+    const window = c.SDL_CreateWindow("MDGUI Demo", 1280, 720, 0) orelse return error.SDLWindowFailed;
     const renderer = c.SDL_CreateRenderer(window, null) orelse return error.SDLRendererFailed;
     _ = c.SDL_SetRenderScale(renderer, 2.0, 2.0);
     if (c.SDL_GetRendererName(renderer)) |renderer_name| {
@@ -425,13 +425,13 @@ pub fn main() !void {
     _ = c.SDL_GetRenderScale(renderer, &rsx, &rsy);
     std.log.info("Render output: {d}x{d}, scale {d:.2}x{d:.2}", .{ out_w, out_h, rsx, rsy });
 
-    const ctx = c.mgui_create(renderer) orelse return error.MguiInitFailed;
-    defer c.mgui_destroy(ctx);
-    c.mgui_set_custom_cursor_enabled(ctx, 1); // demo opt-in; library default is off
-    c.mgui_set_windows_locked(ctx, if (startup_lock_tiled_windows) 1 else 0);
+    const ctx = c.mdgui_create(renderer) orelse return error.MdguiInitFailed;
+    defer c.mdgui_destroy(ctx);
+    c.mdgui_set_custom_cursor_enabled(ctx, 1); // demo opt-in; library default is off
+    c.mdgui_set_windows_locked(ctx, if (startup_lock_tiled_windows) 1 else 0);
 
     var running = true;
-    var input = c.MGUI_Input{
+    var input = c.MDGUI_Input{
         .mouse_x = 0,
         .mouse_y = 0,
         .mouse_down = 0,
@@ -486,14 +486,14 @@ pub fn main() !void {
                 }
                 if (event.key.scancode == c.SDL_SCANCODE_F11) {
                     emu_view_fullscreen = !emu_view_fullscreen;
-                    c.mgui_set_window_fullscreen(ctx, render_api_window_title, if (emu_view_fullscreen) 1 else 0);
+                    c.mdgui_set_window_fullscreen(ctx, render_api_window_title, if (emu_view_fullscreen) 1 else 0);
                 }
                 if (event.key.scancode == c.SDL_SCANCODE_F2) {
                     request_tile = true;
                 }
                 if (event.key.scancode == c.SDL_SCANCODE_F3) {
-                    const lock_now = c.mgui_is_windows_locked(ctx) != 0;
-                    c.mgui_set_windows_locked(ctx, if (lock_now) 0 else 1);
+                    const lock_now = c.mdgui_is_windows_locked(ctx) != 0;
+                    c.mdgui_set_windows_locked(ctx, if (lock_now) 0 else 1);
                 }
             }
             if (event.type == c.SDL_EVENT_MOUSE_WHEEL) {
@@ -514,41 +514,41 @@ pub fn main() !void {
         _ = c.SDL_SetRenderDrawColor(renderer, 0x00, 0x00, 0x4c, 0xff);
         _ = c.SDL_RenderClear(renderer);
 
-        c.mgui_begin_frame(ctx, &input);
-        c.mgui_begin_main_menu_bar(ctx);
-        if (c.mgui_begin_main_menu(ctx, "FILE") != 0) {
-            if (c.mgui_main_menu_item(ctx, "OPEN ROM") != 0) open_file_browser = true;
-            if (c.mgui_main_menu_item(ctx, "EXIT") != 0) running = false;
-            c.mgui_end_main_menu(ctx);
+        c.mdgui_begin_frame(ctx, &input);
+        c.mdgui_begin_main_menu_bar(ctx);
+        if (c.mdgui_begin_main_menu(ctx, "FILE") != 0) {
+            if (c.mdgui_main_menu_item(ctx, "OPEN ROM") != 0) open_file_browser = true;
+            if (c.mdgui_main_menu_item(ctx, "EXIT") != 0) running = false;
+            c.mdgui_end_main_menu(ctx);
         }
-        if (c.mgui_begin_main_menu(ctx, "HELP") != 0) {
-            if (c.mgui_main_menu_item(ctx, "ABOUT") != 0) show_about = true;
-            if (c.mgui_main_menu_item(ctx, "DEMO") != 0) {
-                const demo_window_open = c.mgui_is_window_open(ctx, "MGUI Demo Window") != 0;
+        if (c.mdgui_begin_main_menu(ctx, "HELP") != 0) {
+            if (c.mdgui_main_menu_item(ctx, "ABOUT") != 0) show_about = true;
+            if (c.mdgui_main_menu_item(ctx, "DEMO") != 0) {
+                const demo_window_open = c.mdgui_is_window_open(ctx, "MDGUI Demo Window") != 0;
                 if (!show_demo or !demo_window_open) {
                     show_demo = true;
-                    c.mgui_set_window_open(ctx, "MGUI Demo Window", 1);
+                    c.mdgui_set_window_open(ctx, "MDGUI Demo Window", 1);
                 } else {
                     show_demo = false;
-                    c.mgui_set_window_open(ctx, "MGUI Demo Window", 0);
+                    c.mdgui_set_window_open(ctx, "MDGUI Demo Window", 0);
                 }
             }
-            c.mgui_end_main_menu(ctx);
+            c.mdgui_end_main_menu(ctx);
         }
-        if (c.mgui_begin_main_menu(ctx, "WINDOW") != 0) {
-            if (c.mgui_main_menu_item(ctx, "TILE WINDOWS (F2)") != 0) request_tile = true;
-            if (c.mgui_is_windows_locked(ctx) != 0) {
-                if (c.mgui_main_menu_item(ctx, "[x] Lock Tiled Windows (F3)") != 0) {
-                    c.mgui_set_windows_locked(ctx, 0);
+        if (c.mdgui_begin_main_menu(ctx, "WINDOW") != 0) {
+            if (c.mdgui_main_menu_item(ctx, "TILE WINDOWS (F2)") != 0) request_tile = true;
+            if (c.mdgui_is_windows_locked(ctx) != 0) {
+                if (c.mdgui_main_menu_item(ctx, "[x] Lock Tiled Windows (F3)") != 0) {
+                    c.mdgui_set_windows_locked(ctx, 0);
                 }
             } else {
-                if (c.mgui_main_menu_item(ctx, "[ ] Lock Tiled Windows (F3)") != 0) {
-                    c.mgui_set_windows_locked(ctx, 1);
+                if (c.mdgui_main_menu_item(ctx, "[ ] Lock Tiled Windows (F3)") != 0) {
+                    c.mdgui_set_windows_locked(ctx, 1);
                 }
             }
-            c.mgui_end_main_menu(ctx);
+            c.mdgui_end_main_menu(ctx);
         }
-        c.mgui_end_main_menu_bar(ctx);
+        c.mdgui_end_main_menu_bar(ctx);
 
         const DrawKind = enum { main_window, demo, perf_analytics, emu_view, perf_graph };
         var draw_kinds: [5]DrawKind = undefined;
@@ -556,26 +556,26 @@ pub fn main() !void {
         var draw_count: usize = 0;
 
         draw_kinds[draw_count] = .main_window;
-        draw_z[draw_count] = c.mgui_get_window_z(ctx, "MGUI");
+        draw_z[draw_count] = c.mdgui_get_window_z(ctx, "MDGUI");
         draw_count += 1;
 
         if (show_demo) {
             draw_kinds[draw_count] = .demo;
-            draw_z[draw_count] = c.mgui_get_window_z(ctx, "MGUI Demo Window");
+            draw_z[draw_count] = c.mdgui_get_window_z(ctx, "MDGUI Demo Window");
             draw_count += 1;
         }
 
         draw_kinds[draw_count] = .perf_analytics;
-        draw_z[draw_count] = c.mgui_get_window_z(ctx, "PERF ANALYTICS");
+        draw_z[draw_count] = c.mdgui_get_window_z(ctx, "PERF ANALYTICS");
         draw_count += 1;
 
         draw_kinds[draw_count] = .emu_view;
-        draw_z[draw_count] = c.mgui_get_window_z(ctx, render_api_window_title);
+        draw_z[draw_count] = c.mdgui_get_window_z(ctx, render_api_window_title);
         draw_count += 1;
 
         if (analytics.show_graph) {
             draw_kinds[draw_count] = .perf_graph;
-            draw_z[draw_count] = c.mgui_get_window_z(ctx, "PERF GRAPH");
+            draw_z[draw_count] = c.mdgui_get_window_z(ctx, "PERF GRAPH");
             draw_count += 1;
         }
 
@@ -611,9 +611,9 @@ pub fn main() !void {
         }
 
         if (open_file_browser) {
-            c.mgui_open_file_browser(ctx);
+            c.mdgui_open_file_browser(ctx);
         }
-        if (c.mgui_show_file_browser(ctx)) |picked| {
+        if (c.mdgui_show_file_browser(ctx)) |picked| {
             const span = std.mem.span(picked);
             const max_copy = selected_rom_buf.len - 1;
             const n = if (span.len < max_copy) span.len else max_copy;
@@ -622,12 +622,12 @@ pub fn main() !void {
             has_selected_rom = true;
         }
         if (has_selected_rom) {
-            if (c.mgui_message_box(
+            if (c.mdgui_message_box(
                 ctx,
                 "loaded-rom",
                 "ROM SELECTED",
                 @ptrCast(&selected_rom_buf[0]),
-                c.MGUI_MSGBOX_ONE_BUTTON,
+                c.MDGUI_MSGBOX_ONE_BUTTON,
                 "OK",
                 null,
             ) != 0) {
@@ -636,19 +636,19 @@ pub fn main() !void {
         }
 
         if (show_about) {
-            if (c.mgui_message_box_ex(
+            if (c.mdgui_message_box_ex(
                 ctx,
                 "about",
                 "ABOUT",
                 "Immediate-mode GUI demo\nby: mitigd",
-                c.MGUI_MSGBOX_ONE_BUTTON,
+                c.MDGUI_MSGBOX_ONE_BUTTON,
                 "OK",
                 null,
-                c.MGUI_TEXT_ALIGN_CENTER,
+                c.MDGUI_TEXT_ALIGN_CENTER,
             ) != 0) show_about = false;
         }
 
-        c.mgui_end_frame(ctx);
+        c.mdgui_end_frame(ctx);
 
         _ = c.SDL_RenderPresent(renderer);
     }

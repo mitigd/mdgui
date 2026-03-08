@@ -11,8 +11,8 @@ case "$OS" in
   *) OS_NAME="$OS" ;;
 esac
 
-ARTIFACT="mgui-${VERSION}-${OS_NAME}-${ARCH}.tar.gz"
-STAGE_DIR="mgui-${VERSION}-${OS_NAME}-${ARCH}"
+ARTIFACT="mdgui-${VERSION}-${OS_NAME}-${ARCH}.tar.gz"
+STAGE_DIR="mdgui-${VERSION}-${OS_NAME}-${ARCH}"
 
 echo "Building release (ReleaseFast)..."
 zig build -Doptimize=ReleaseFast
@@ -22,13 +22,13 @@ if [ -d "$STAGE_DIR" ]; then
 fi
 mkdir -p "$STAGE_DIR"
 
-BIN_PATH="zig-out/bin/mgui-demo"
+BIN_PATH="zig-out/bin/mdgui-demo"
 if [ ! -f "$BIN_PATH" ]; then
   echo "Expected binary not found: $BIN_PATH" >&2
   exit 1
 fi
 
-cp "$BIN_PATH" "$STAGE_DIR/mgui-demo"
+cp "$BIN_PATH" "$STAGE_DIR/mdgui-demo"
 cp README.md "$STAGE_DIR/README.md"
 
 tar -czf "$ARTIFACT" "$STAGE_DIR"
