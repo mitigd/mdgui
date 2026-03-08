@@ -924,8 +924,10 @@ int mdgui_begin_window(MDGUI_Context *ctx, const char *title, int x, int y, int 
                       (win.z == ctx->z_counter);
 
   // Slim gray border around the whole window
-  mdgui_draw_frame_idx(nullptr, CLR_TEXT_LIGHT, win.x - 1, win.y - 1, win.x + win.w + 1,
-          win.y + win.h + 1);
+  mdgui_draw_hline_idx(nullptr, CLR_BUTTON_SURFACE, win.x - 1, win.y - 1, win.x + win.w + 1);
+  mdgui_draw_hline_idx(nullptr, CLR_BUTTON_SURFACE, win.x - 1, win.y + win.h + 1, win.x + win.w + 1);
+  mdgui_draw_vline_idx(nullptr, CLR_BUTTON_SURFACE, win.x - 1, win.y - 1, win.y + win.h + 1);
+  mdgui_draw_vline_idx(nullptr, CLR_BUTTON_SURFACE, win.x + win.w + 1, win.y - 1, win.y + win.h + 1);
   mdgui_fill_rect_idx(nullptr, CLR_BOX_TITLE, win.x, win.y, win.w, title_h);
   mdgui_fill_rect_idx(nullptr, CLR_BOX_BODY, win.x, win.y + title_h, win.w,
            win.h - title_h - 2);
@@ -933,12 +935,6 @@ int mdgui_begin_window(MDGUI_Context *ctx, const char *title, int x, int y, int 
 
   // Draw 3D-style Close button
   mdgui_fill_rect_idx(nullptr, CLR_BUTTON_SURFACE, close_x, close_y, btn_w, btn_h);
-  mdgui_draw_hline_idx(nullptr, CLR_BUTTON_LIGHT, close_x, close_y, close_x + btn_w);
-  mdgui_draw_vline_idx(nullptr, CLR_BUTTON_LIGHT, close_x, close_y, close_y + btn_h);
-  mdgui_draw_hline_idx(nullptr, CLR_BUTTON_DARK, close_x, close_y + btn_h - 1,
-            close_x + btn_w);
-  mdgui_draw_vline_idx(nullptr, CLR_BUTTON_DARK, close_x + btn_w - 1, close_y,
-            close_y + btn_h);
   // Draw X as two diagonal lines with margin
   mdgui_draw_line_idx(nullptr, CLR_TEXT_LIGHT, close_x + 2, close_y + 2,
              close_x + 7, close_y + 7);
@@ -948,12 +944,6 @@ int mdgui_begin_window(MDGUI_Context *ctx, const char *title, int x, int y, int 
   // Draw 3D-style Maximize button (if not "MESSAGE")
   if (title && strcmp(title, "MESSAGE") != 0) {
     mdgui_fill_rect_idx(nullptr, CLR_BUTTON_SURFACE, max_x, max_y, btn_w, btn_h);
-    mdgui_draw_hline_idx(nullptr, CLR_BUTTON_LIGHT, max_x, max_y, max_x + btn_w);
-    mdgui_draw_vline_idx(nullptr, CLR_BUTTON_LIGHT, max_x, max_y, max_y + btn_h);
-    mdgui_draw_hline_idx(nullptr, CLR_BUTTON_DARK, max_x, max_y + btn_h - 1,
-              max_x + btn_w);
-    mdgui_draw_vline_idx(nullptr, CLR_BUTTON_DARK, max_x + btn_w - 1, max_y,
-              max_y + btn_h);
     mdgui_fill_rect_idx(nullptr, CLR_TEXT_LIGHT, max_x + 2, max_y + 2, btn_w - 4,
              btn_h - 4);
     mdgui_fill_rect_idx(nullptr, CLR_BUTTON_SURFACE, max_x + 3, max_y + 4, btn_w - 6,
