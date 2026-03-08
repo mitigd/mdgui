@@ -50,6 +50,7 @@ struct MDGUI_Window {
   bool text_scroll_dragging;
   int text_scroll_drag_offset;
   bool fixed_rect;
+  bool disallow_maximize;
 };
 
 struct FileBrowserEntry {
@@ -260,6 +261,7 @@ static int find_or_create_window(MDGUI_Context *ctx, const char *title, int x,
   nw.text_scroll_dragging = false;
   nw.text_scroll_drag_offset = 0;
   nw.fixed_rect = false;
+  nw.disallow_maximize = false;
   ctx->windows.push_back(nw);
   return (int)ctx->windows.size() - 1;
 }
@@ -769,6 +771,7 @@ int mdgui_begin_window(MDGUI_Context *ctx, const char *title, int x, int y, int 
   const int top_here = (top_idx == idx);
   const bool chrome_input_allowed = (ctx->open_main_menu_index == -1);
   const bool move_resize_allowed = chrome_input_allowed && !ctx->windows_locked;
+  const bool can_maximize = !win.disallow_maximize;
   const int title_h = 12;
   if (win.min_w < 50)
     win.min_w = 50;
@@ -778,7 +781,7 @@ int mdgui_begin_window(MDGUI_Context *ctx, const char *title, int x, int y, int 
   // Edge detection for hover AND interaction
   const int margin = 3;
   int edge_mask = 0;
-  if (strcmp(title, "MESSAGE") != 0 && !win.is_maximized) {
+  if (can_maximize && !win.is_maximized) {
     if (ctx->input.mouse_x >= win.x - margin &&
         ctx->input.mouse_x <= win.x + margin)
       edge_mask |= 1; // Left
@@ -846,7 +849,7 @@ int mdgui_begin_window(MDGUI_Context *ctx, const char *title, int x, int y, int 
       return 0;
     }
     // Check Maximize button
-    if (move_resize_allowed && title && strcmp(title, "MESSAGE") != 0 &&
+    if (move_resize_allowed && can_maximize &&
         point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y, max_x, max_y,
                       btn_w, btn_h)) {
       win.fixed_rect = false;
@@ -938,8 +941,8 @@ int mdgui_begin_window(MDGUI_Context *ctx, const char *title, int x, int y, int 
   mdgui_draw_line_idx(nullptr, CLR_TEXT_LIGHT, close_x + 6, close_y + 2,
              close_x + 2, close_y + 6);
 
-  // Draw 3D-style Maximize button (if not "MESSAGE")
-  if (title && strcmp(title, "MESSAGE") != 0) {
+  // Draw 3D-style Maximize button when allowed for this window.
+  if (can_maximize) {
     mdgui_fill_rect_idx(nullptr, CLR_BUTTON_SURFACE, max_x, max_y, btn_w, btn_h);
     mdgui_fill_rect_idx(nullptr, CLR_TEXT_LIGHT, max_x + 2, max_y + 2, btn_w - 4,
              btn_h - 4);
@@ -1947,6 +1950,8 @@ int mdgui_message_box_ex(MDGUI_Context *ctx, const char *id, const char *title,
   if (ctx->current_window >= 0) {
     auto &msg_win = ctx->windows[ctx->current_window];
     msg_win.z = ++ctx->z_counter;
+    msg_win.disallow_maximize = true;
+    msg_win.is_maximized = false;
     // Message boxes should remain fixed-size; avoid feedback with auto min-size
     // tracking when footer/button geometry is anchored to bottom chrome.
     msg_win.fixed_rect = true;
@@ -2110,6 +2115,10 @@ void mdgui_set_window_fullscreen(MDGUI_Context *ctx, const char *title,
     auto &w = ctx->windows[i];
     if (w.id != title)
       continue;
+    if (w.disallow_maximize) {
+      w.is_maximized = false;
+      return;
+    }
     if (fullscreen) {
       w.fixed_rect = false;
       if (!w.is_maximized) {
