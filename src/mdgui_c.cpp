@@ -1122,7 +1122,8 @@ void mdgui_end_window(MDGUI_Context *ctx) {
         win.text_scroll = 0;
       if (win.text_scroll > max_scroll)
         win.text_scroll = max_scroll;
-      note_content_bounds(ctx, sb_x + sb_w, viewport_top + viewport_h);
+      // Scrollbar is chrome anchored to the current window edge and should not
+      // participate in content-driven minimum width calculations.
     }
   }
 
@@ -1353,6 +1354,7 @@ int mdgui_listbox(MDGUI_Context *ctx, const char **items, int item_count,
   const auto &win = ctx->windows[ctx->current_window];
   if (rows < 1)
     rows = 1;
+  const int requested_w = w;
   w = resolve_dynamic_width(ctx, x, w, 24);
   const int row_h = 10;
   const int box_h = rows * row_h;
@@ -1385,7 +1387,10 @@ int mdgui_listbox(MDGUI_Context *ctx, const char **items, int item_count,
     }
   }
 
-  note_content_bounds(ctx, ix + w, logical_y + box_h);
+  int intrinsic_w = w;
+  if (requested_w <= 0)
+    intrinsic_w = 24;
+  note_content_bounds(ctx, ix + intrinsic_w, logical_y + box_h);
   ctx->content_y += box_h + 4;
   return clicked;
 }
@@ -1399,6 +1404,7 @@ int mdgui_combo(MDGUI_Context *ctx, const char *label, const char **items,
   const int topmost = is_current_window_topmost(ctx);
   const int item_h = 10;
   const int box_h = 12;
+  const int requested_w = w;
   w = resolve_dynamic_width(ctx, x, w, 40);
   if (*selected < 0)
     *selected = 0;
@@ -1439,6 +1445,16 @@ int mdgui_combo(MDGUI_Context *ctx, const char *label, const char **items,
   }
 
   int changed = 0;
+  int intrinsic_w = w;
+  if (requested_w <= 0) {
+    intrinsic_w = 40;
+    if (mdgui_fonts[1] && items[*selected]) {
+      const int text_need = mdgui_fonts[1]->measureTextWidth(items[*selected]) + 14;
+      if (text_need > intrinsic_w)
+        intrinsic_w = text_need;
+    }
+  }
+
   if (win.open_combo_id == combo_id) {
     const int popup_y = iy + box_h;
     const int popup_h = item_count * item_h;
@@ -1456,7 +1472,7 @@ int mdgui_combo(MDGUI_Context *ctx, const char *label, const char **items,
         ctx->input.mouse_pressed = 0; // consume popup selection click
       }
     }
-    note_content_bounds(ctx, ix + w, logical_y + box_h + popup_h);
+    note_content_bounds(ctx, ix + intrinsic_w, logical_y + box_h + popup_h);
     ctx->combo_overlay_pending = true;
     ctx->combo_overlay_window = ctx->current_window;
     ctx->combo_overlay_x = ix;
@@ -1468,7 +1484,7 @@ int mdgui_combo(MDGUI_Context *ctx, const char *label, const char **items,
     ctx->combo_overlay_items = items;
   }
 
-  note_content_bounds(ctx, ix + w, logical_y + box_h);
+  note_content_bounds(ctx, ix + intrinsic_w, logical_y + box_h);
   ctx->content_y += box_h + 4;
   return changed;
 }
@@ -1479,6 +1495,7 @@ void mdgui_progress_bar(MDGUI_Context *ctx, float value, int x, int y, int w,
     return;
   ctx->window_has_nonlabel_widget = true;
   const auto &win = ctx->windows[ctx->current_window];
+  const int requested_w = w;
   w = resolve_dynamic_width(ctx, x, w, 24);
   if (h < 6)
     h = 6;
@@ -1502,7 +1519,16 @@ void mdgui_progress_bar(MDGUI_Context *ctx, float value, int x, int y, int w,
     mdgui_fonts[1]->drawText(overlay_text, nullptr, ix + (w - tw) / 2, iy + 1,
                   CLR_TEXT_LIGHT);
   }
-  note_content_bounds(ctx, ix + w, logical_y + h);
+  int intrinsic_w = w;
+  if (requested_w <= 0) {
+    intrinsic_w = 24;
+    if (overlay_text && mdgui_fonts[1]) {
+      const int text_need = mdgui_fonts[1]->measureTextWidth(overlay_text) + 6;
+      if (text_need > intrinsic_w)
+        intrinsic_w = text_need;
+    }
+  }
+  note_content_bounds(ctx, ix + intrinsic_w, logical_y + h);
   ctx->content_y += h + 4;
 }
 
