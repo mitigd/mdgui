@@ -52,6 +52,8 @@ struct MDGUI_Window {
   int text_scroll_drag_offset;
   bool fixed_rect;
   bool disallow_maximize;
+  int tile_weight;
+  int tile_side;
 };
 
 struct FileBrowserEntry {
@@ -234,6 +236,301 @@ static int top_window_at_point(const MDGUI_Context *ctx, int px, int py,
 static int get_logical_render_w(MDGUI_Context *ctx);
 static int get_logical_render_h(MDGUI_Context *ctx);
 
+static int clampi(int v, int lo, int hi) {
+  if (v < lo)
+    return lo;
+  if (v > hi)
+    return hi;
+  return v;
+}
+
+static int normalize_tile_side(int side) {
+  if (side < MDGUI_TILE_SIDE_AUTO || side > MDGUI_TILE_SIDE_BOTTOM)
+    return MDGUI_TILE_SIDE_AUTO;
+  return side;
+}
+
+static int normalize_tile_weight(int weight) {
+  return (weight < 1) ? 1 : weight;
+}
+
+static void assign_tiled_window_rect(MDGUI_Window &w, int x, int y, int ww,
+                                     int hh) {
+  w.x = x;
+  w.y = y;
+  w.w = ww;
+  w.h = hh;
+  w.restored_x = x;
+  w.restored_y = y;
+  w.restored_w = ww;
+  w.restored_h = hh;
+  w.is_maximized = false;
+  w.fixed_rect = true;
+}
+
+static void tile_windows_grid(MDGUI_Context *ctx, const std::vector<int> &order,
+                              int left, int top, int content_w, int content_h,
+                              int gap) {
+  if (!ctx || order.empty() || content_w <= 0 || content_h <= 0)
+    return;
+
+  const int count = (int)order.size();
+  const float aspect =
+      (float)content_w / (float)((content_h > 0) ? content_h : 1);
+  int cols = (int)std::ceil(std::sqrt((float)count * aspect));
+  if (cols < 1)
+    cols = 1;
+  if (cols > count)
+    cols = count;
+  int rows = (count + cols - 1) / cols;
+  if (rows < 1)
+    rows = 1;
+
+  int y = top;
+  int idx = 0;
+  for (int row = 0; row < rows && idx < count; ++row) {
+    const int rows_left = rows - row;
+    const int remaining = count - idx;
+    const int cols_this_row = (remaining + rows_left - 1) / rows_left;
+    const int h_remaining = (top + content_h) - y - (rows_left - 1) * gap;
+    const int row_h = std::max(80, h_remaining / rows_left);
+
+    int x = left;
+    for (int col = 0; col < cols_this_row && idx < count; ++col) {
+      const int cols_left = cols_this_row - col;
+      const int w_remaining = (left + content_w) - x - (cols_left - 1) * gap;
+      const int cell_w = std::max(120, w_remaining / cols_left);
+      auto &w = ctx->windows[order[idx]];
+      assign_tiled_window_rect(w, x, y, cell_w, row_h);
+      ++idx;
+      x += cell_w + gap;
+    }
+    y += row_h + gap;
+  }
+}
+
+static int sum_tile_weights(MDGUI_Context *ctx, const std::vector<int> &indices) {
+  if (!ctx)
+    return 0;
+  int sum = 0;
+  for (int idx : indices) {
+    if (idx < 0 || idx >= (int)ctx->windows.size())
+      continue;
+    sum += normalize_tile_weight(ctx->windows[idx].tile_weight);
+  }
+  return sum;
+}
+
+static void sort_by_weight_then_z(MDGUI_Context *ctx, std::vector<int> &indices) {
+  if (!ctx)
+    return;
+  std::stable_sort(indices.begin(), indices.end(),
+                   [ctx](int a, int b) {
+                     const auto &wa = ctx->windows[a];
+                     const auto &wb = ctx->windows[b];
+                     const int wgt_a = normalize_tile_weight(wa.tile_weight);
+                     const int wgt_b = normalize_tile_weight(wb.tile_weight);
+                     if (wgt_a != wgt_b)
+                       return wgt_a > wgt_b;
+                     return wa.z > wb.z;
+                   });
+}
+
+static void tile_windows_vertical_weighted(MDGUI_Context *ctx,
+                                           const std::vector<int> &order,
+                                           int x, int y, int w, int h,
+                                           int gap) {
+  if (!ctx || order.empty() || w <= 0 || h <= 0)
+    return;
+  if ((int)order.size() == 1) {
+    assign_tiled_window_rect(ctx->windows[order[0]], x, y, w, h);
+    return;
+  }
+
+  const int min_h = 80;
+  int total_weight = sum_tile_weights(ctx, order);
+  if (total_weight < 1)
+    total_weight = (int)order.size();
+  int remaining_weight = total_weight;
+  int cy = y;
+
+  for (int i = 0; i < (int)order.size(); ++i) {
+    const int idx = order[i];
+    const int items_left = (int)order.size() - i;
+    int available_h = (y + h) - cy - (items_left - 1) * gap;
+    if (available_h < min_h)
+      available_h = min_h;
+
+    int cell_h = available_h;
+    if (i < (int)order.size() - 1 && remaining_weight > 0) {
+      const int wgt = normalize_tile_weight(ctx->windows[idx].tile_weight);
+      int proportional = (int)((double)available_h * (double)wgt /
+                               (double)remaining_weight);
+      int max_for_this = available_h - (items_left - 1) * min_h;
+      if (max_for_this < min_h)
+        max_for_this = min_h;
+      cell_h = clampi(proportional, min_h, max_for_this);
+    }
+
+    assign_tiled_window_rect(ctx->windows[idx], x, cy, w, cell_h);
+    cy += cell_h + gap;
+    remaining_weight -= normalize_tile_weight(ctx->windows[idx].tile_weight);
+    if (remaining_weight < 0)
+      remaining_weight = 0;
+  }
+}
+
+static void tile_windows_horizontal_weighted(MDGUI_Context *ctx,
+                                             const std::vector<int> &order,
+                                             int x, int y, int w, int h,
+                                             int gap) {
+  if (!ctx || order.empty() || w <= 0 || h <= 0)
+    return;
+  if ((int)order.size() == 1) {
+    assign_tiled_window_rect(ctx->windows[order[0]], x, y, w, h);
+    return;
+  }
+
+  const int min_w = 120;
+  int total_weight = sum_tile_weights(ctx, order);
+  if (total_weight < 1)
+    total_weight = (int)order.size();
+  int remaining_weight = total_weight;
+  int cx = x;
+
+  for (int i = 0; i < (int)order.size(); ++i) {
+    const int idx = order[i];
+    const int items_left = (int)order.size() - i;
+    int available_w = (x + w) - cx - (items_left - 1) * gap;
+    if (available_w < min_w)
+      available_w = min_w;
+
+    int cell_w = available_w;
+    if (i < (int)order.size() - 1 && remaining_weight > 0) {
+      const int wgt = normalize_tile_weight(ctx->windows[idx].tile_weight);
+      int proportional = (int)((double)available_w * (double)wgt /
+                               (double)remaining_weight);
+      int max_for_this = available_w - (items_left - 1) * min_w;
+      if (max_for_this < min_w)
+        max_for_this = min_w;
+      cell_w = clampi(proportional, min_w, max_for_this);
+    }
+
+    assign_tiled_window_rect(ctx->windows[idx], cx, y, cell_w, h);
+    cx += cell_w + gap;
+    remaining_weight -= normalize_tile_weight(ctx->windows[idx].tile_weight);
+    if (remaining_weight < 0)
+      remaining_weight = 0;
+  }
+}
+
+static void tile_windows_weighted_cluster(MDGUI_Context *ctx,
+                                          const std::vector<int> &order,
+                                          int left, int top, int content_w,
+                                          int content_h, int gap) {
+  if (!ctx || order.empty() || content_w <= 0 || content_h <= 0)
+    return;
+  const int count = (int)order.size();
+  if (count == 1) {
+    assign_tiled_window_rect(ctx->windows[order[0]], left, top, content_w,
+                             content_h);
+    return;
+  }
+
+  int primary_pos = -1;
+  int best_weight = 1;
+  int best_z = -2147483647;
+  for (int i = 0; i < count; ++i) {
+    const auto &w = ctx->windows[order[i]];
+    const int weight = normalize_tile_weight(w.tile_weight);
+    if (primary_pos < 0 || weight > best_weight ||
+        (weight == best_weight && w.z > best_z)) {
+      primary_pos = i;
+      best_weight = weight;
+      best_z = w.z;
+    }
+  }
+
+  if (best_weight <= 1) {
+    tile_windows_grid(ctx, order, left, top, content_w, content_h, gap);
+    return;
+  }
+
+  std::vector<int> secondary;
+  secondary.reserve((size_t)count - 1);
+  for (int i = 0; i < count; ++i) {
+    if (i == primary_pos)
+      continue;
+    secondary.push_back(order[i]);
+  }
+
+  int secondary_weight_sum = 0;
+  for (int idx : secondary) {
+    secondary_weight_sum += normalize_tile_weight(ctx->windows[idx].tile_weight);
+  }
+  if (secondary_weight_sum < 1)
+    secondary_weight_sum = (int)secondary.size();
+
+  const float split_raw =
+      (float)best_weight / (float)(best_weight + secondary_weight_sum);
+  const float split_ratio = std::max(0.34f, std::min(0.75f, split_raw));
+  const int side = (content_w >= content_h) ? MDGUI_TILE_SIDE_LEFT
+                                             : MDGUI_TILE_SIDE_TOP;
+
+  int px = left;
+  int py = top;
+  int pw = content_w;
+  int ph = content_h;
+  int sx = left;
+  int sy = top;
+  int sw = content_w;
+  int sh = content_h;
+
+  const int min_primary_w = 160;
+  const int min_secondary_w = 120;
+  const int min_primary_h = 100;
+  const int min_secondary_h = 80;
+
+  if (side == MDGUI_TILE_SIDE_LEFT || side == MDGUI_TILE_SIDE_RIGHT) {
+    if (content_w < (min_primary_w + min_secondary_w + gap)) {
+      tile_windows_grid(ctx, order, left, top, content_w, content_h, gap);
+      return;
+    }
+    int p_w = (int)((float)content_w * split_ratio);
+    p_w = clampi(p_w, min_primary_w, content_w - min_secondary_w - gap);
+    const int s_w = content_w - p_w - gap;
+    if (side == MDGUI_TILE_SIDE_LEFT) {
+      px = left;
+      sx = left + p_w + gap;
+    } else {
+      px = left + s_w + gap;
+      sx = left;
+    }
+    pw = p_w;
+    sw = s_w;
+  } else {
+    if (content_h < (min_primary_h + min_secondary_h + gap)) {
+      tile_windows_grid(ctx, order, left, top, content_w, content_h, gap);
+      return;
+    }
+    int p_h = (int)((float)content_h * split_ratio);
+    p_h = clampi(p_h, min_primary_h, content_h - min_secondary_h - gap);
+    const int s_h = content_h - p_h - gap;
+    if (side == MDGUI_TILE_SIDE_TOP) {
+      py = top;
+      sy = top + p_h + gap;
+    } else {
+      py = top + s_h + gap;
+      sy = top;
+    }
+    ph = p_h;
+    sh = s_h;
+  }
+
+  assign_tiled_window_rect(ctx->windows[order[primary_pos]], px, py, pw, ph);
+  tile_windows_grid(ctx, secondary, sx, sy, sw, sh, gap);
+}
+
 static void tile_windows_internal(MDGUI_Context *ctx) {
   if (!ctx)
     return;
@@ -266,47 +563,168 @@ static void tile_windows_internal(MDGUI_Context *ctx) {
     return;
 
   const int count = (int)order.size();
-  const float aspect =
-      (float)content_w / (float)((content_h > 0) ? content_h : 1);
-  int cols = (int)std::ceil(std::sqrt((float)count * aspect));
-  if (cols < 1)
-    cols = 1;
-  if (cols > count)
-    cols = count;
-  int rows = (count + cols - 1) / cols;
-  if (rows < 1)
-    rows = 1;
-
-  int y = top;
-  int idx = 0;
-  for (int row = 0; row < rows && idx < count; ++row) {
-    const int rows_left = rows - row;
-    const int remaining = count - idx;
-    const int cols_this_row = (remaining + rows_left - 1) / rows_left;
-    const int h_remaining = (top + content_h) - y - (rows_left - 1) * gap;
-    const int row_h = std::max(80, h_remaining / rows_left);
-
-    int x = left;
-    for (int col = 0; col < cols_this_row && idx < count; ++col) {
-      const int cols_left = cols_this_row - col;
-      const int w_remaining = (left + content_w) - x - (cols_left - 1) * gap;
-      const int cell_w = std::max(120, w_remaining / cols_left);
-      auto &w = ctx->windows[order[idx]];
-      w.x = x;
-      w.y = y;
-      w.w = cell_w;
-      w.h = row_h;
-      w.restored_x = x;
-      w.restored_y = y;
-      w.restored_w = cell_w;
-      w.restored_h = row_h;
-      w.is_maximized = false;
-      w.fixed_rect = true;
-      ++idx;
-      x += cell_w + gap;
-    }
-    y += row_h + gap;
+  if (count == 1) {
+    auto &only = ctx->windows[order[0]];
+    assign_tiled_window_rect(only, left, top, content_w, content_h);
+    return;
   }
+
+  std::vector<int> left_group;
+  std::vector<int> right_group;
+  std::vector<int> top_group;
+  std::vector<int> bottom_group;
+  std::vector<int> auto_group;
+  left_group.reserve(order.size());
+  right_group.reserve(order.size());
+  top_group.reserve(order.size());
+  bottom_group.reserve(order.size());
+  auto_group.reserve(order.size());
+
+  for (int idx : order) {
+    const auto &w = ctx->windows[idx];
+    const int side = normalize_tile_side(w.tile_side);
+    if (side == MDGUI_TILE_SIDE_LEFT)
+      left_group.push_back(idx);
+    else if (side == MDGUI_TILE_SIDE_RIGHT)
+      right_group.push_back(idx);
+    else if (side == MDGUI_TILE_SIDE_TOP)
+      top_group.push_back(idx);
+    else if (side == MDGUI_TILE_SIDE_BOTTOM)
+      bottom_group.push_back(idx);
+    else
+      auto_group.push_back(idx);
+  }
+
+  const bool has_directional_windows =
+      !left_group.empty() || !right_group.empty() || !top_group.empty() ||
+      !bottom_group.empty();
+  if (has_directional_windows) {
+    sort_by_weight_then_z(ctx, left_group);
+    sort_by_weight_then_z(ctx, right_group);
+    sort_by_weight_then_z(ctx, top_group);
+    sort_by_weight_then_z(ctx, bottom_group);
+    sort_by_weight_then_z(ctx, auto_group);
+
+    int left_sum = sum_tile_weights(ctx, left_group);
+    int right_sum = sum_tile_weights(ctx, right_group);
+    int top_sum = sum_tile_weights(ctx, top_group);
+    int bottom_sum = sum_tile_weights(ctx, bottom_group);
+    int auto_sum = sum_tile_weights(ctx, auto_group);
+    if (auto_sum < 1 && !auto_group.empty())
+      auto_sum = (int)auto_group.size();
+
+    int center_x = left;
+    int center_y = top;
+    int center_w = content_w;
+    int center_h = content_h;
+
+    const int min_center_w = 180;
+    const int min_center_h = 120;
+    const int min_side_w = 140;
+    const int min_side_h = 90;
+
+    int left_w_px = 0;
+    if (!left_group.empty()) {
+      int total_w_weight = left_sum + right_sum + auto_sum;
+      if (total_w_weight < 1)
+        total_w_weight = 1;
+      int reserve_right = right_group.empty() ? 0 : (min_side_w + gap);
+      int max_left_w = center_w - min_center_w - reserve_right;
+      if (max_left_w >= min_side_w) {
+        int raw = (int)((double)center_w * (double)left_sum /
+                        (double)total_w_weight);
+        left_w_px = clampi(raw, min_side_w, max_left_w);
+      }
+    }
+    if (left_w_px > 0) {
+      tile_windows_vertical_weighted(ctx, left_group, center_x, top, left_w_px,
+                                     content_h, gap);
+      center_x += left_w_px + gap;
+      center_w -= left_w_px + gap;
+    } else {
+      auto_group.insert(auto_group.end(), left_group.begin(), left_group.end());
+      left_group.clear();
+      auto_sum = sum_tile_weights(ctx, auto_group);
+    }
+
+    int right_w_px = 0;
+    if (!right_group.empty()) {
+      int total_w_weight = right_sum + auto_sum;
+      if (total_w_weight < 1)
+        total_w_weight = 1;
+      int max_right_w = center_w - min_center_w;
+      if (max_right_w >= min_side_w) {
+        int raw = (int)((double)center_w * (double)right_sum /
+                        (double)total_w_weight);
+        right_w_px = clampi(raw, min_side_w, max_right_w);
+      }
+    }
+    if (right_w_px > 0) {
+      const int rx = center_x + center_w - right_w_px;
+      tile_windows_vertical_weighted(ctx, right_group, rx, top, right_w_px,
+                                     content_h, gap);
+      center_w -= right_w_px + gap;
+    } else {
+      auto_group.insert(auto_group.end(), right_group.begin(), right_group.end());
+      right_group.clear();
+      auto_sum = sum_tile_weights(ctx, auto_group);
+    }
+
+    int top_h_px = 0;
+    if (!top_group.empty()) {
+      int total_h_weight = top_sum + bottom_sum + auto_sum;
+      if (total_h_weight < 1)
+        total_h_weight = 1;
+      int reserve_bottom = bottom_group.empty() ? 0 : (min_side_h + gap);
+      int max_top_h = center_h - min_center_h - reserve_bottom;
+      if (max_top_h >= min_side_h) {
+        int raw = (int)((double)center_h * (double)top_sum /
+                        (double)total_h_weight);
+        top_h_px = clampi(raw, min_side_h, max_top_h);
+      }
+    }
+    if (top_h_px > 0) {
+      tile_windows_horizontal_weighted(ctx, top_group, center_x, center_y,
+                                       center_w, top_h_px, gap);
+      center_y += top_h_px + gap;
+      center_h -= top_h_px + gap;
+    } else {
+      auto_group.insert(auto_group.end(), top_group.begin(), top_group.end());
+      top_group.clear();
+    }
+
+    int bottom_h_px = 0;
+    if (!bottom_group.empty()) {
+      int total_h_weight = bottom_sum + sum_tile_weights(ctx, auto_group);
+      if (total_h_weight < 1)
+        total_h_weight = 1;
+      int max_bottom_h = center_h - min_center_h;
+      if (max_bottom_h >= min_side_h) {
+        int raw = (int)((double)center_h * (double)bottom_sum /
+                        (double)total_h_weight);
+        bottom_h_px = clampi(raw, min_side_h, max_bottom_h);
+      }
+    }
+    if (bottom_h_px > 0) {
+      const int by = center_y + center_h - bottom_h_px;
+      tile_windows_horizontal_weighted(ctx, bottom_group, center_x, by, center_w,
+                                       bottom_h_px, gap);
+      center_h -= bottom_h_px + gap;
+    } else {
+      auto_group.insert(auto_group.end(), bottom_group.begin(),
+                        bottom_group.end());
+      bottom_group.clear();
+    }
+
+    if (!auto_group.empty()) {
+      sort_by_weight_then_z(ctx, auto_group);
+      tile_windows_weighted_cluster(ctx, auto_group, center_x, center_y, center_w,
+                                    center_h, gap);
+    }
+    return;
+  }
+  tile_windows_weighted_cluster(ctx, order, left, top, content_w, content_h,
+                                gap);
 }
 
 static int find_or_create_window(MDGUI_Context *ctx, const char *title, int x,
@@ -342,6 +760,8 @@ static int find_or_create_window(MDGUI_Context *ctx, const char *title, int x,
   nw.text_scroll_drag_offset = 0;
   nw.fixed_rect = false;
   nw.disallow_maximize = false;
+  nw.tile_weight = 1;
+  nw.tile_side = MDGUI_TILE_SIDE_AUTO;
   ctx->windows.push_back(nw);
   return (int)ctx->windows.size() - 1;
 }
@@ -2208,6 +2628,56 @@ int mdgui_is_tile_manager_enabled(MDGUI_Context *ctx) {
 }
 
 void mdgui_tile_windows(MDGUI_Context *ctx) { tile_windows_internal(ctx); }
+
+void mdgui_set_window_tile_weight(MDGUI_Context *ctx, const char *title,
+                                  int weight) {
+  if (!ctx || !title)
+    return;
+  const int normalized = normalize_tile_weight(weight);
+  for (int i = 0; i < (int)ctx->windows.size(); ++i) {
+    auto &w = ctx->windows[i];
+    if (w.id != title)
+      continue;
+    w.tile_weight = normalized;
+    return;
+  }
+}
+
+int mdgui_get_window_tile_weight(MDGUI_Context *ctx, const char *title) {
+  if (!ctx || !title)
+    return 1;
+  for (int i = 0; i < (int)ctx->windows.size(); ++i) {
+    const auto &w = ctx->windows[i];
+    if (w.id == title)
+      return normalize_tile_weight(w.tile_weight);
+  }
+  return 1;
+}
+
+void mdgui_set_window_tile_side(MDGUI_Context *ctx, const char *title,
+                                int side) {
+  if (!ctx || !title)
+    return;
+  const int normalized = normalize_tile_side(side);
+  for (int i = 0; i < (int)ctx->windows.size(); ++i) {
+    auto &w = ctx->windows[i];
+    if (w.id != title)
+      continue;
+    w.tile_side = normalized;
+    return;
+  }
+}
+
+int mdgui_get_window_tile_side(MDGUI_Context *ctx, const char *title) {
+  if (!ctx || !title)
+    return MDGUI_TILE_SIDE_AUTO;
+  for (int i = 0; i < (int)ctx->windows.size(); ++i) {
+    const auto &w = ctx->windows[i];
+    if (w.id == title)
+      return normalize_tile_side(w.tile_side);
+  }
+  return MDGUI_TILE_SIDE_AUTO;
+}
 
 void mdgui_set_window_fullscreen(MDGUI_Context *ctx, const char *title,
                                 int fullscreen) {

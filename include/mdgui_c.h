@@ -79,6 +79,16 @@ enum {
   MDGUI_THEME_OLIVE = 5,
 };
 
+enum {
+  MDGUI_TILE_SIDE_AUTO = 0,
+  MDGUI_TILE_SIDE_LEFT = 1,
+  MDGUI_TILE_SIDE_RIGHT = 2,
+  MDGUI_TILE_SIDE_TOP = 3,
+  MDGUI_TILE_SIDE_BOTTOM = 4,
+  MDGUI_TILE_SIDE_WEST = MDGUI_TILE_SIDE_LEFT,
+  MDGUI_TILE_SIDE_EAST = MDGUI_TILE_SIDE_RIGHT,
+};
+
 MDGUI_Context *mdgui_create(void *sdl_renderer);
 MDGUI_Context *mdgui_create_with_backend(const MDGUI_RenderBackend *backend);
 void mdgui_destroy(MDGUI_Context *ctx);
@@ -128,6 +138,12 @@ int mdgui_is_windows_locked(MDGUI_Context *ctx);
 void mdgui_set_tile_manager_enabled(MDGUI_Context *ctx, int enabled);
 int mdgui_is_tile_manager_enabled(MDGUI_Context *ctx);
 void mdgui_tile_windows(MDGUI_Context *ctx);
+void mdgui_set_window_tile_weight(MDGUI_Context *ctx, const char *title,
+                                  int weight);
+int mdgui_get_window_tile_weight(MDGUI_Context *ctx, const char *title);
+void mdgui_set_window_tile_side(MDGUI_Context *ctx, const char *title,
+                                int side);
+int mdgui_get_window_tile_side(MDGUI_Context *ctx, const char *title);
 
 void mdgui_begin_menu_bar(MDGUI_Context *ctx);
 int mdgui_begin_menu(MDGUI_Context *ctx, const char *text);
