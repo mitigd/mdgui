@@ -74,7 +74,7 @@ Artifacts:
 - Backend-agnostic core primitives/font code: `src/mdgui_glue.cpp`
 - SDL compatibility backend implementation: `src/mdgui_backend_sdl.cpp`
 - OpenGL compatibility backend adapter: `src/mdgui_backend_opengl.cpp`
-- Vulkan compatibility backend adapter: `src/mdgui_backend_vulkan.cpp`
+- Vulkan draw-data backend (command stream): `src/mdgui_backend_vulkan.cpp`
 - UI/window logic: `src/mdgui_c.cpp`
 - Backend helper declarations: `include/mdgui_backends.h`
 
@@ -82,7 +82,7 @@ Artifacts:
 MDGUI_Context *ctx = mdgui_create(sdl_renderer);
 ```
 
-For non-SDL renderers (Vulkan/OpenGL/etc), provide a `MDGUI_RenderBackend` with callback functions and create with:
+For non-SDL renderers, provide a `MDGUI_RenderBackend` and create with:
 
 ```c
 #include "mdgui_backends.h"
@@ -90,9 +90,8 @@ For non-SDL renderers (Vulkan/OpenGL/etc), provide a `MDGUI_RenderBackend` with 
 MDGUI_BackendCallbacks callbacks = { ... };
 MDGUI_RenderBackend backend = { ... };
 
-// Or use per-backend adapter helpers:
-mdgui_make_vulkan_backend(&backend, &callbacks);
-// mdgui_make_opengl_backend(&backend, &callbacks);
+// OpenGL adapter (for direct callback-style drawing):
+mdgui_make_opengl_backend(&backend, &callbacks);
 
 MDGUI_Context *ctx = mdgui_create_with_backend(&backend);
 ```
