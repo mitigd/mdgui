@@ -1166,10 +1166,10 @@ int mdgui_button(MDGUI_Context *ctx, const char *text, int x, int y, int w,
 
   if (depressed) {
     mdgui_fill_rect_idx(nullptr, CLR_BUTTON_PRESSED, abs_x, abs_y, w, h);
-    mdgui_draw_hline_idx(nullptr, 29, abs_x, abs_y, abs_x + w);
-    mdgui_draw_vline_idx(nullptr, 29, abs_x + w - 1, abs_y, abs_y + h);
-    mdgui_draw_vline_idx(nullptr, 23, abs_x, abs_y, abs_y + h);
-    mdgui_draw_hline_idx(nullptr, 23, abs_x, abs_y + h - 1, abs_x + w);
+    mdgui_draw_hline_idx(nullptr, CLR_BUTTON_DARK, abs_x, abs_y, abs_x + w);
+    mdgui_draw_vline_idx(nullptr, CLR_BUTTON_DARK, abs_x + w - 1, abs_y, abs_y + h);
+    mdgui_draw_vline_idx(nullptr, CLR_BUTTON_LIGHT, abs_x, abs_y, abs_y + h);
+    mdgui_draw_hline_idx(nullptr, CLR_BUTTON_LIGHT, abs_x, abs_y + h - 1, abs_x + w);
   } else {
     mdgui_fill_rect_idx(nullptr, CLR_BUTTON_SURFACE, abs_x, abs_y, w, h);
     mdgui_draw_hline_idx(nullptr, CLR_BUTTON_LIGHT, abs_x, abs_y, abs_x + w);
