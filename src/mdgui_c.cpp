@@ -1945,13 +1945,30 @@ int mdgui_message_box_ex(MDGUI_Context *ctx, const char *id, const char *title,
     return 2; // Return "Cancel" if closed via X
   }
   if (ctx->current_window >= 0) {
-    ctx->windows[ctx->current_window].z = ++ctx->z_counter;
+    auto &msg_win = ctx->windows[ctx->current_window];
+    msg_win.z = ++ctx->z_counter;
+    // Message boxes should remain fixed-size; avoid feedback with auto min-size
+    // tracking when footer/button geometry is anchored to bottom chrome.
+    msg_win.fixed_rect = true;
+    msg_win.w = box_w;
+    msg_win.h = box_h;
+    msg_win.min_w = box_w;
+    msg_win.min_h = box_h;
   }
 
   const auto &win = ctx->windows[ctx->current_window];
-  mdgui_fill_rect_idx(nullptr, CLR_MSG_BG, win.x, win.y + 12, win.w, win.h - 24);
-  mdgui_fill_rect_idx(nullptr, CLR_MSG_BAR, win.x, win.y, win.w, 12);
-  mdgui_fill_rect_idx(nullptr, CLR_MSG_BAR, win.x, win.y + win.h - 12, win.w, 12);
+  const int title_h = 12;
+  const int footer_h = 16;
+  // Content is clipped to (win.y + win.h - 4); keep footer fully inside that.
+  const int footer_y = (win.y + win.h - 4) - footer_h;
+  const int body_y = win.y + title_h;
+  int body_h = footer_y - body_y;
+  if (body_h < 1)
+    body_h = 1;
+
+  mdgui_fill_rect_idx(nullptr, CLR_MSG_BG, win.x, body_y, win.w, body_h);
+  mdgui_fill_rect_idx(nullptr, CLR_MSG_BAR, win.x, footer_y, win.w, footer_h);
+
   const int text_y0 = win.y + top_pad;
   for (size_t i = 0; i < lines.size(); ++i) {
     const char *ln = lines[i].c_str();
@@ -1967,16 +1984,23 @@ int mdgui_message_box_ex(MDGUI_Context *ctx, const char *id, const char *title,
   }
 
   int result = 0;
+  const int btn_w = 70;
+  const int btn_h = 12;
+  const int btn_abs_y = footer_y + (footer_h - btn_h) / 2;
+  // mdgui_button applies window text_scroll to y; compensate so footer button
+  // stays visually centered regardless of scroll state.
+  const int btn_y = btn_abs_y - ctx->content_y + win.text_scroll;
+
   if (style == MDGUI_MSGBOX_TWO_BUTTON) {
-    const int b1x = box_w / 4 - 35;
-    const int b2x = (box_w * 3) / 4 - 35;
-    if (mdgui_button(ctx, button1, b1x, box_h - 24, 70, 12))
+    const int b1_abs_x = win.x + (win.w / 4) - (btn_w / 2);
+    const int b2_abs_x = win.x + ((win.w * 3) / 4) - (btn_w / 2);
+    if (mdgui_button(ctx, button1, b1_abs_x - ctx->origin_x, btn_y, btn_w, btn_h))
       result = 1;
-    if (mdgui_button(ctx, button2, b2x, box_h - 24, 70, 12))
+    if (mdgui_button(ctx, button2, b2_abs_x - ctx->origin_x, btn_y, btn_w, btn_h))
       result = 2;
   } else {
-    const int bx = box_w / 2 - 35;
-    if (mdgui_button(ctx, button1, bx, box_h - 24, 70, 12))
+    const int b_abs_x = win.x + (win.w / 2) - (btn_w / 2);
+    if (mdgui_button(ctx, button1, b_abs_x - ctx->origin_x, btn_y, btn_w, btn_h))
       result = 1;
   }
 
