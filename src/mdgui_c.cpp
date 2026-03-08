@@ -1514,7 +1514,8 @@ void mdgui_progress_bar(MDGUI_Context *ctx, float value, int x, int y, int w,
     value = 1.0f;
 
   const int ix = ctx->origin_x + x;
-  const int logical_y = ctx->content_y + y;
+  const int top_margin = 4;
+  const int logical_y = ctx->content_y + std::max(y, top_margin);
   const int iy = logical_y - win.text_scroll;
   const int fill_w = (int)((float)w * value);
 
@@ -1538,7 +1539,8 @@ void mdgui_progress_bar(MDGUI_Context *ctx, float value, int x, int y, int w,
     }
   }
   note_content_bounds(ctx, ix + intrinsic_w, logical_y + h);
-  ctx->content_y += h + 4;
+  const int bottom_margin = 4;
+  ctx->content_y += std::max(y, top_margin) + h + bottom_margin;
 }
 
 void mdgui_begin_menu_bar(MDGUI_Context *ctx) {
