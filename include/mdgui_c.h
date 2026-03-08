@@ -106,6 +106,12 @@ int mdgui_combo(MDGUI_Context *ctx, const char *label, const char **items,
                int item_count, int *selected, int x, int y, int w);
 void mdgui_progress_bar(MDGUI_Context *ctx, float value, int x, int y, int w,
                        int h, const char *overlay_text);
+// For frame graph sizing, w/h follow widget conventions:
+// w == 0 uses available width, w < 0 subtracts from available width.
+// h == 0 uses remaining window content height, h < 0 subtracts from it.
+void mdgui_frame_time_graph(MDGUI_Context *ctx, const float *frame_ms_samples,
+                           int sample_count, float target_fps,
+                           float graph_max_ms, int x, int y, int w, int h);
 
 void mdgui_show_demo_window(MDGUI_Context *ctx);
 void mdgui_open_file_browser(MDGUI_Context *ctx);

@@ -1549,6 +1549,121 @@ void mdgui_progress_bar(MDGUI_Context *ctx, float value, int x, int y, int w,
   ctx->content_y += std::max(y, top_margin) + h + bottom_margin;
 }
 
+void mdgui_frame_time_graph(MDGUI_Context *ctx, const float *frame_ms_samples,
+                           int sample_count, float target_fps,
+                           float graph_max_ms, int x, int y, int w, int h) {
+  if (!ctx || ctx->current_window < 0)
+    return;
+  ctx->window_has_nonlabel_widget = true;
+  const auto &win = ctx->windows[ctx->current_window];
+
+  const int requested_w = w;
+  const int requested_h = h;
+  const bool fill_mode = (requested_w == 0 && requested_h == 0);
+  if (fill_mode) {
+    int avail_w = (win.x + win.w - 2) - (ctx->origin_x + x);
+    if (avail_w < 24)
+      avail_w = 24;
+    w = avail_w;
+  } else {
+    w = resolve_dynamic_width(ctx, x, w, 24);
+  }
+  if (target_fps < 1.0f)
+    target_fps = 1.0f;
+  if (graph_max_ms < 1.0f)
+    graph_max_ms = 1.0f;
+
+  const int ix = ctx->origin_x + x;
+  const int top_margin = 4;
+  const int logical_y = ctx->content_y + std::max(y, top_margin);
+  const int iy = logical_y - win.text_scroll;
+
+  // Height 0/negative mirrors dynamic width behavior: fill remaining viewport.
+  if (requested_h == 0 || requested_h < 0) {
+    const int viewport_bottom = win.y + win.h - 4;
+    int avail_h = viewport_bottom - logical_y;
+    if (requested_h < 0)
+      avail_h += requested_h;
+    h = avail_h;
+  }
+  if (h < 12)
+    h = 12;
+
+  if (!fill_mode) {
+    mdgui_draw_hline_idx(nullptr, CLR_WINDOW_BORDER, ix - 1, iy - 1, ix + w + 1);
+    mdgui_draw_hline_idx(nullptr, CLR_WINDOW_BORDER, ix - 1, iy + h + 1, ix + w + 1);
+    mdgui_draw_vline_idx(nullptr, CLR_WINDOW_BORDER, ix - 1, iy - 1, iy + h + 1);
+    mdgui_draw_vline_idx(nullptr, CLR_WINDOW_BORDER, ix + w + 1, iy - 1, iy + h + 1);
+  }
+  mdgui_fill_rect_idx(nullptr, CLR_BOX_BODY, ix, iy, w, h);
+
+  const int pad = 2;
+  const int plot_x = ix + pad;
+  const int plot_y = iy + pad;
+  const int plot_w = w - (pad * 2);
+  const int plot_h = h - (pad * 2);
+
+  if (plot_w > 1 && plot_h > 1) {
+    const float target_ms = 1000.0f / target_fps;
+    float target_ratio = target_ms / graph_max_ms;
+    if (target_ratio < 0.0f)
+      target_ratio = 0.0f;
+    if (target_ratio > 1.0f)
+      target_ratio = 1.0f;
+    const int target_y = plot_y + plot_h - (int)(target_ratio * (float)plot_h);
+    mdgui_draw_hline_idx(nullptr, CLR_BUTTON_LIGHT, plot_x, target_y, plot_x + plot_w);
+
+    if (frame_ms_samples && sample_count > 0) {
+      for (int px = 0; px < plot_w; ++px) {
+        int sample_index = (px * sample_count) / plot_w;
+        if (sample_index < 0)
+          sample_index = 0;
+        if (sample_index >= sample_count)
+          sample_index = sample_count - 1;
+
+        float ms = frame_ms_samples[sample_index];
+        if (ms < 0.0f)
+          ms = 0.0f;
+        float ratio = ms / graph_max_ms;
+        if (ratio < 0.0f)
+          ratio = 0.0f;
+        if (ratio > 1.0f)
+          ratio = 1.0f;
+
+        int bar_h = (int)(ratio * (float)plot_h);
+        if (bar_h < 1 && ms > 0.0f)
+          bar_h = 1;
+        const int by = plot_y + plot_h - bar_h;
+
+        int bar_color = CLR_ACCENT;
+        if (ms > target_ms * 1.2f)
+          bar_color = CLR_BUTTON_DARK;
+        else if (ms > target_ms)
+          bar_color = CLR_BUTTON_LIGHT;
+
+        if (bar_h > 0)
+          mdgui_fill_rect_idx(nullptr, bar_color, plot_x + px, by, 1, bar_h);
+      }
+    }
+  }
+
+  int intrinsic_w = w;
+  if (requested_w <= 0)
+    intrinsic_w = 24;
+
+  // In fill mode, the graph tracks current window height. Reporting that full
+  // height as required content would ratchet min_h upward and prevent shrinking.
+  // Report only a minimal intrinsic height for min-size calculations.
+  const int intrinsic_h = fill_mode ? 12 : h;
+  note_content_bounds(ctx, ix + intrinsic_w, logical_y + intrinsic_h);
+  if (fill_mode) {
+    ctx->content_y = logical_y + h;
+  } else {
+    const int bottom_margin = 4;
+    ctx->content_y += std::max(y, top_margin) + h + bottom_margin;
+  }
+}
+
 void mdgui_begin_menu_bar(MDGUI_Context *ctx) {
   if (!ctx || ctx->current_window < 0)
     return;

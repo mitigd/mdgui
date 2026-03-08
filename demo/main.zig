@@ -112,64 +112,6 @@ fn analyticsHistogram(a: *const Analytics) [Analytics.histogram_bin_count]usize 
     return bins;
 }
 
-fn drawAnalyticsGraph(renderer: ?*c.SDL_Renderer, a: *const Analytics, x: c_int, y: c_int, w: c_int, h: c_int) void {
-    if (renderer == null or w <= 8 or h <= 8) return;
-
-    var bg = c.SDL_FRect{
-        .x = @floatFromInt(x),
-        .y = @floatFromInt(y),
-        .w = @floatFromInt(w),
-        .h = @floatFromInt(h),
-    };
-    _ = c.SDL_SetRenderDrawColor(renderer, 0x0e, 0x13, 0x1a, 0xff);
-    _ = c.SDL_RenderFillRect(renderer, &bg);
-
-    const pad: c_int = 3;
-    const plot_x0 = x + pad;
-    const plot_y0 = y + pad;
-    const plot_w = w - (pad * 2);
-    const plot_h = h - (pad * 2);
-    if (plot_w <= 4 or plot_h <= 4) return;
-
-    const target_ms = 1000.0 / a.target_fps;
-    const target_yf = @as(f32, @floatFromInt(plot_y0 + plot_h)) - clamp01(target_ms / a.graph_max_ms) * @as(f32, @floatFromInt(plot_h));
-    var target_line = c.SDL_FRect{
-        .x = @floatFromInt(plot_x0),
-        .y = target_yf,
-        .w = @floatFromInt(plot_w),
-        .h = 1.0,
-    };
-    _ = c.SDL_SetRenderDrawColor(renderer, 0x60, 0x70, 0x90, 0xff);
-    _ = c.SDL_RenderFillRect(renderer, &target_line);
-
-    const sample_count: usize = if (a.count > 0) a.count else 1;
-    var px: c_int = 0;
-    while (px < plot_w) : (px += 1) {
-        const t = @as(usize, @intCast(px));
-        const sample_index = (t * sample_count) / @as(usize, @intCast(plot_w));
-        const ms = analyticsSampleFrameMs(a, sample_index);
-        const norm = clamp01(ms / a.graph_max_ms);
-        const bar_h: c_int = @intFromFloat(norm * @as(f32, @floatFromInt(plot_h)));
-        const by = plot_y0 + plot_h - bar_h;
-
-        if (ms <= 16.7) {
-            _ = c.SDL_SetRenderDrawColor(renderer, 0x50, 0xd0, 0x60, 0xff);
-        } else if (ms <= 20.0) {
-            _ = c.SDL_SetRenderDrawColor(renderer, 0xe0, 0xc0, 0x50, 0xff);
-        } else {
-            _ = c.SDL_SetRenderDrawColor(renderer, 0xe0, 0x60, 0x50, 0xff);
-        }
-
-        var bar = c.SDL_FRect{
-            .x = @floatFromInt(plot_x0 + px),
-            .y = @floatFromInt(by),
-            .w = 1.0,
-            .h = @floatFromInt(bar_h),
-        };
-        _ = c.SDL_RenderFillRect(renderer, &bar);
-    }
-}
-
 fn drawAnalyticsWindow(ctx: ?*c.MDGUI_Context, analytics: *Analytics) void {
     if (!analytics.show_window) return;
     if (c.mdgui_begin_window(ctx, "PERF ANALYTICS", 10, 145, 240, 205) == 0) return;
@@ -301,27 +243,28 @@ fn drawWindowApiDemo(ctx: ?*c.MDGUI_Context, renderer: ?*c.SDL_Renderer, emu_vie
     }
 }
 
-fn drawPerfGraphWindow(ctx: ?*c.MDGUI_Context, renderer: ?*c.SDL_Renderer, analytics: *const Analytics) void {
-    var perf_x: c_int = 0;
-    var perf_y: c_int = 0;
-    var perf_w: c_int = 0;
-    var perf_h: c_int = 0;
-    if (c.mdgui_begin_render_window(
-        ctx,
-        "PERF GRAPH",
-        250,
-        195,
-        380,
-        155,
-        0,
-        &perf_x,
-        &perf_y,
-        &perf_w,
-        &perf_h,
-    ) != 0) {
-        drawAnalyticsGraph(renderer, analytics, perf_x, perf_y, perf_w, perf_h);
-        c.mdgui_end_window(ctx);
+fn drawPerfGraphWindow(ctx: ?*c.MDGUI_Context, analytics: *const Analytics) void {
+    if (c.mdgui_begin_window(ctx, "PERF GRAPH", 250, 195, 380, 155) == 0) return;
+
+    var ordered: [Analytics.history_len]f32 = [_]f32{16.67} ** Analytics.history_len;
+    var i: usize = 0;
+    while (i < analytics.count) : (i += 1) {
+        ordered[i] = analyticsSampleFrameMs(analytics, i);
     }
+
+    c.mdgui_frame_time_graph(
+        ctx,
+        &ordered[0],
+        @as(c_int, @intCast(analytics.count)),
+        analytics.target_fps,
+        analytics.graph_max_ms,
+        0,
+        0,
+        0,
+        0,
+    );
+
+    c.mdgui_end_window(ctx);
 }
 
 fn getLogicalRenderSize(renderer: ?*c.SDL_Renderer, out_w: *c_int, out_h: *c_int) void {
@@ -601,7 +544,7 @@ pub fn main() !void {
                 .demo => drawDemoWindow(ctx, show_demo),
                 .perf_analytics => drawAnalyticsWindow(ctx, &analytics),
                 .emu_view => drawWindowApiDemo(ctx, renderer, emu_view_menu),
-                .perf_graph => drawPerfGraphWindow(ctx, renderer, &analytics),
+                .perf_graph => drawPerfGraphWindow(ctx, &analytics),
             }
         }
 
