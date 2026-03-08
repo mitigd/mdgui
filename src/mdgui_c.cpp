@@ -167,7 +167,7 @@ static void set_content_clip(MDGUI_Context *ctx) {
     return;
   const auto &win = ctx->windows[ctx->current_window];
   int clip_w = win.w - 4;
-  int clip_h = (win.y + win.h - 2) - ctx->origin_y;
+  int clip_h = (win.y + win.h - 4) - ctx->origin_y;
   if (clip_w < 1)
     clip_w = 1;
   if (clip_h < 1)
@@ -925,15 +925,10 @@ int mdgui_begin_window(MDGUI_Context *ctx, const char *title, int x, int y, int 
                                            ctx->input.mouse_y) == idx) ||
                       (win.z == ctx->z_counter);
 
-  // Slim border around the whole window using theme accent color
-  mdgui_draw_hline_idx(nullptr, CLR_WINDOW_BORDER, win.x - 1, win.y - 1, win.x + win.w + 1);
-  mdgui_draw_hline_idx(nullptr, CLR_WINDOW_BORDER, win.x - 1, win.y + win.h + 1, win.x + win.w + 1);
-  mdgui_draw_vline_idx(nullptr, CLR_WINDOW_BORDER, win.x - 1, win.y - 1, win.y + win.h + 1);
-  mdgui_draw_vline_idx(nullptr, CLR_WINDOW_BORDER, win.x + win.w + 1, win.y - 1, win.y + win.h + 1);
   mdgui_fill_rect_idx(nullptr, CLR_BOX_TITLE, win.x, win.y, win.w, title_h);
   mdgui_fill_rect_idx(nullptr, CLR_BOX_BODY, win.x, win.y + title_h, win.w,
            win.h - title_h - 2);
-  mdgui_fill_rect_idx(nullptr, CLR_BOX_TITLE, win.x, win.y + win.h - 2, win.w, 2);
+  mdgui_fill_rect_idx(nullptr, CLR_BOX_BODY, win.x, win.y + win.h - 2, win.w, 2);
 
   // Draw 3D-style Close button
   mdgui_fill_rect_idx(nullptr, CLR_BUTTON_SURFACE, close_x, close_y, btn_w, btn_h);
@@ -955,6 +950,12 @@ int mdgui_begin_window(MDGUI_Context *ctx, const char *title, int x, int y, int 
   if (title && mdgui_fonts[1]) {
     mdgui_fonts[1]->drawText(title, nullptr, win.x + 5, win.y + 1, CLR_TEXT_LIGHT);
   }
+
+  // Draw border after fills so it renders on top
+  mdgui_draw_hline_idx(nullptr, CLR_WINDOW_BORDER, win.x - 1, win.y - 1, win.x + win.w + 1);
+  mdgui_draw_hline_idx(nullptr, CLR_WINDOW_BORDER, win.x - 1, win.y + win.h - 2, win.x + win.w + 1);
+  mdgui_draw_vline_idx(nullptr, CLR_WINDOW_BORDER, win.x - 1, win.y - 1, win.y + win.h - 1);
+  mdgui_draw_vline_idx(nullptr, CLR_WINDOW_BORDER, win.x + win.w, win.y - 1, win.y + win.h - 1);
 
   ctx->origin_x = win.x + 2;
   ctx->origin_y = win.y + title_h + 2;
@@ -1044,7 +1045,7 @@ void mdgui_end_window(MDGUI_Context *ctx) {
   // All windows can scroll when content exceeds viewport.
   {
     const int viewport_top = ctx->origin_y;
-    const int viewport_h = (win.y + win.h - 2) - viewport_top;
+    const int viewport_h = (win.y + win.h - 4) - viewport_top;
     int total_h = ctx->content_y - ctx->origin_y;
     if (total_h < 0)
       total_h = 0;
@@ -2031,7 +2032,7 @@ int mdgui_begin_render_window(MDGUI_Context *ctx, const char *title, int x, int 
   const int cx = ctx->origin_x;
   const int cy = ctx->content_y;
   int cw = win.w - 4;
-  int ch = (win.y + win.h - 2) - cy;
+  int ch = (win.y + win.h - 4) - cy;
   if (cw < 1)
     cw = 1;
   if (ch < 1)
@@ -2093,7 +2094,7 @@ void mdgui_run_window_pass(MDGUI_Context *ctx, const MDGUI_WindowPassItem *items
           cx = ctx->origin_x;
           cy = ctx->content_y;
           cw = win.w - 4;
-          ch = (win.y + win.h - 2) - cy;
+          ch = (win.y + win.h - 4) - cy;
           if (cw < 1)
             cw = 1;
           if (ch < 1)
@@ -2395,7 +2396,7 @@ void mdgui_show_demo_window(MDGUI_Context *ctx) {
     // Reserve footer space, but only show the close action when scrolled near
     // the bottom of content.
     const auto &win = ctx->windows[ctx->current_window];
-    const int viewport_h = (win.y + win.h - 2) - ctx->origin_y;
+    const int viewport_h = (win.y + win.h - 4) - ctx->origin_y;
     const int content_h_before_footer = ctx->content_y - ctx->origin_y;
     const int footer_h = 6 + 12 + 4; // spacer + button + widget gap
     const int total_h_with_footer = content_h_before_footer + footer_h;
