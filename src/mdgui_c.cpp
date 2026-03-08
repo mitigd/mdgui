@@ -1277,7 +1277,8 @@ int mdgui_slider(MDGUI_Context *ctx, const char *text, float *val, float min,
   const int requested_w = w;
   w = resolve_dynamic_width(ctx, x, w, 24);
   const int ix = ctx->origin_x + x;
-  const int logical_y = ctx->content_y + y;
+  const int top_margin = 10;
+  const int logical_y = ctx->content_y + std::max(y, top_margin);
   const int iy = logical_y - win.text_scroll;
   const int track_h = 4;
   const int thumb_w = 8;
@@ -1328,7 +1329,8 @@ int mdgui_slider(MDGUI_Context *ctx, const char *text, float *val, float min,
   note_content_bounds(ctx, ix + intrinsic_slider_w + 4 + text_w,
                       logical_y + thumb_h);
 
-  ctx->content_y += thumb_h + 4;
+  const int bottom_margin = 4;
+  ctx->content_y += std::max(y, top_margin) + thumb_h + bottom_margin;
   return result;
 }
 
@@ -1362,7 +1364,8 @@ int mdgui_listbox(MDGUI_Context *ctx, const char **items, int item_count,
   const int row_h = 10;
   const int box_h = rows * row_h;
   const int ix = ctx->origin_x + x;
-  const int logical_y = ctx->content_y + y;
+  const int top_margin = 4;
+  const int logical_y = ctx->content_y + std::max(y, top_margin);
   const int iy = logical_y - win.text_scroll;
   const int topmost = is_current_window_topmost(ctx);
 
@@ -1394,7 +1397,8 @@ int mdgui_listbox(MDGUI_Context *ctx, const char **items, int item_count,
   if (requested_w <= 0)
     intrinsic_w = 24;
   note_content_bounds(ctx, ix + intrinsic_w, logical_y + box_h);
-  ctx->content_y += box_h + 4;
+  const int bottom_margin = 4;
+  ctx->content_y += std::max(y, top_margin) + box_h + bottom_margin;
   return clicked;
 }
 
@@ -1415,7 +1419,8 @@ int mdgui_combo(MDGUI_Context *ctx, const char *label, const char **items,
     *selected = item_count - 1;
 
   const int ix = ctx->origin_x + x;
-  const int logical_y = ctx->content_y + y;
+  const int top_margin = 10;
+  const int logical_y = ctx->content_y + std::max(y, top_margin);
   const int iy = logical_y - win.text_scroll;
   const int combo_id = ((ix & 0xffff) << 16) ^ (iy & 0xffff) ^ (w << 2);
   const int open = (win.open_combo_id == combo_id);
@@ -1488,7 +1493,8 @@ int mdgui_combo(MDGUI_Context *ctx, const char *label, const char **items,
   }
 
   note_content_bounds(ctx, ix + intrinsic_w, logical_y + box_h);
-  ctx->content_y += box_h + 4;
+  const int bottom_margin = 4;
+  ctx->content_y += std::max(y, top_margin) + box_h + bottom_margin;
   return changed;
 }
 
@@ -2328,7 +2334,10 @@ void mdgui_show_demo_window(MDGUI_Context *ctx) {
     return;
 
   if (mdgui_begin_window(ctx, "MDGUI Demo Window", 20, 20, 220, 220)) {
+
+    mdgui_separator(ctx, 10, 5, 0);
     mdgui_label(ctx, "Aesthetics & Widgets", 10, 5);
+    mdgui_spacer(ctx, 4);
     mdgui_separator(ctx, 10, 0, 0);
 
     static bool check1 = true;
@@ -2338,6 +2347,7 @@ void mdgui_show_demo_window(MDGUI_Context *ctx) {
 
     mdgui_separator(ctx, 10, 5, 0);
     mdgui_label(ctx, "Volumes", 10, 5);
+    mdgui_separator(ctx, 10, 5, 0);
 
     static float vol1 = 0.5f;
     static float vol2 = 0.8f;
@@ -2346,15 +2356,23 @@ void mdgui_show_demo_window(MDGUI_Context *ctx) {
 
     mdgui_separator(ctx, 10, 5, 0);
     mdgui_label(ctx, "Renderer", 10, 5);
+    mdgui_separator(ctx, 10, 5, 0);
+    mdgui_spacer(ctx, 4);
+
     mdgui_listbox(ctx, quality_items, 3, &quality_idx, 10, 3, -16, 3);
 
+    //ctx->content_y += 8; // hard spacer: keep combo clear of renderer listbox
+
     mdgui_separator(ctx, 10, 5, 0);
-    ctx->content_y += 8; // hard spacer: keep combo clear of renderer listbox
-    mdgui_label(ctx, "Filter Combo", 10, 0);
+    mdgui_label(ctx, "Filter Combo", 10, 5);
+    mdgui_separator(ctx, 10, 5, 0);
+
     mdgui_combo(ctx, nullptr, quality_items, 3, &quality_idx, 10, 2, -16);
 
     mdgui_separator(ctx, 10, 5, 0);
     mdgui_label(ctx, "Theme", 10, 5);
+    mdgui_separator(ctx, 10, 5, 0);
+
     theme_idx = mdgui_get_theme();
     if (mdgui_combo(ctx, nullptr, theme_items, 6, &theme_idx, 10, 2, -16)) {
       mdgui_set_theme(theme_idx);
