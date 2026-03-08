@@ -190,7 +190,7 @@ fn drawDemoWindow(ctx: ?*c.MDGUI_Context, show_demo: bool) void {
     }
 }
 
-fn drawWindowApiDemo(ctx: ?*c.MDGUI_Context, renderer: ?*c.SDL_Renderer, emu_view_menu: bool) void {
+fn drawWindowApiDemo(ctx: ?*c.MDGUI_Context, renderer: ?*c.SDL_Renderer, show_window_api_menu: bool) void {
     var view_x: c_int = 0;
     var view_y: c_int = 0;
     var view_w: c_int = 0;
@@ -202,7 +202,7 @@ fn drawWindowApiDemo(ctx: ?*c.MDGUI_Context, renderer: ?*c.SDL_Renderer, emu_vie
         10,
         220,
         175,
-        if (emu_view_menu) 1 else 0,
+        if (show_window_api_menu) 1 else 0,
         &view_x,
         &view_y,
         &view_w,
@@ -398,7 +398,7 @@ pub fn main() !void {
     };
     var show_about = false;
     var show_demo = true;
-    var emu_view_menu = true;
+    var show_window_api_menu = false;
     var emu_view_fullscreen = false;
     var selected_rom_buf: [512]u8 = [_]u8{0} ** 512;
     var has_selected_rom = false;
@@ -440,7 +440,7 @@ pub fn main() !void {
             }
             if (event.type == c.SDL_EVENT_KEY_DOWN and event.key.repeat == false) {
                 if (event.key.scancode == c.SDL_SCANCODE_F1) {
-                    emu_view_menu = !emu_view_menu;
+                    show_window_api_menu = !show_window_api_menu;
                 }
                 if (event.key.scancode == c.SDL_SCANCODE_F11) {
                     emu_view_fullscreen = !emu_view_fullscreen;
@@ -558,7 +558,7 @@ pub fn main() !void {
                 .main_window => drawMainWindow(ctx, &running, &open_file_browser),
                 .demo => drawDemoWindow(ctx, show_demo),
                 .perf_analytics => drawAnalyticsWindow(ctx, &analytics),
-                .emu_view => drawWindowApiDemo(ctx, renderer, emu_view_menu),
+                .emu_view => drawWindowApiDemo(ctx, renderer, show_window_api_menu),
                 .perf_graph => drawPerfGraphWindow(ctx, &analytics),
             }
         }
