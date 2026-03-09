@@ -469,7 +469,9 @@ pub fn main() !void {
     if (c.SDL_Init(c.SDL_INIT_VIDEO) == false) return error.SDLInitFailed;
     defer c.SDL_Quit();
 
-    const window = c.SDL_CreateWindow("MDGUI Demo", 1280, 720, 0) orelse return error.SDLWindowFailed;
+    const window_flags: c.SDL_WindowFlags = c.SDL_WINDOW_RESIZABLE;
+    const window = c.SDL_CreateWindow("MDGUI Demo", 1280, 720, window_flags) orelse return error.SDLWindowFailed;
+    _ = c.SDL_SetWindowMinimumSize(window, 640, 360);
     _ = c.SDL_StartTextInput(window);
     defer _ = c.SDL_StopTextInput(window);
     const renderer = c.SDL_CreateRenderer(window, null) orelse return error.SDLRendererFailed;
@@ -523,6 +525,7 @@ pub fn main() !void {
     var demo_text: [128]u8 = [_]u8{0} ** 128;
     var demo_text_multiline: [1024]u8 = [_]u8{0} ** 1024;
     c.mdgui_set_tile_manager_enabled(ctx, if (startup_tile_windows) 1 else 0);
+    var retile_needed = startup_tile_windows;
     const perf_freq = c.SDL_GetPerformanceFrequency();
     var last_counter = c.SDL_GetPerformanceCounter();
 
@@ -561,6 +564,13 @@ pub fn main() !void {
         var event: c.SDL_Event = undefined;
         while (c.SDL_PollEvent(&event)) {
             if (event.type == c.SDL_EVENT_QUIT) running = false;
+            if (event.type == c.SDL_EVENT_WINDOW_RESIZED or
+                event.type == c.SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED or
+                event.type == c.SDL_EVENT_WINDOW_MAXIMIZED or
+                event.type == c.SDL_EVENT_WINDOW_RESTORED)
+            {
+                retile_needed = true;
+            }
             if (event.type == c.SDL_EVENT_MOUSE_MOTION) {
                 input.mouse_x = @intFromFloat(event.motion.x / 2.0);
                 input.mouse_y = @intFromFloat(event.motion.y / 2.0);
@@ -595,6 +605,14 @@ pub fn main() !void {
                 if (event.key.repeat == false) {
                     if (event.key.scancode == c.SDL_SCANCODE_F1) {
                         show_window_api_menu = !show_window_api_menu;
+                    }
+                    if (event.key.scancode == c.SDL_SCANCODE_F10) {
+                        if (c.SDL_GetWindowFlags(window) & c.SDL_WINDOW_MAXIMIZED != 0) {
+                            _ = c.SDL_RestoreWindow(window);
+                        } else {
+                            _ = c.SDL_MaximizeWindow(window);
+                        }
+                        retile_needed = true;
                     }
                     if (event.key.scancode == c.SDL_SCANCODE_F11) {
                         emu_view_fullscreen = !emu_view_fullscreen;
@@ -808,6 +826,21 @@ pub fn main() !void {
             c.mdgui_end_main_menu(ctx);
         }
         c.mdgui_end_main_menu_bar(ctx);
+
+        if (retile_needed and c.mdgui_is_tile_manager_enabled(ctx) != 0) {
+            c.mdgui_tile_windows(ctx);
+
+            var min_w: c_int = 0;
+            var min_h: c_int = 0;
+            c.mdgui_get_tiling_min_size(ctx, &min_w, &min_h);
+
+            // Convert logical min size to physical pixels for SDL
+            const phys_min_w: c_int = @intFromFloat(@as(f32, @floatFromInt(min_w)) * 2.0);
+            const phys_min_h: c_int = @intFromFloat(@as(f32, @floatFromInt(min_h)) * 2.0);
+            _ = c.SDL_SetWindowMinimumSize(window, phys_min_w, phys_min_h);
+
+            retile_needed = false;
+        }
         c.mdgui_set_windows_alpha(ctx, alphaByteFromFloat(windows_alpha));
 
         const DrawKind = enum { main_window, demo, perf_analytics, emu_view, perf_graph };

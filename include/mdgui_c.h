@@ -18,8 +18,8 @@ typedef struct MDGUI_RenderBackend {
   void (*set_clip_rect)(void *user_data, int enabled, int x, int y, int w,
                         int h);
   void (*fill_rect_rgba)(void *user_data, unsigned char r, unsigned char g,
-                         unsigned char b, unsigned char a, int x, int y,
-                         int w, int h);
+                         unsigned char b, unsigned char a, int x, int y, int w,
+                         int h);
   void (*draw_line_rgba)(void *user_data, unsigned char r, unsigned char g,
                          unsigned char b, unsigned char a, int x1, int y1,
                          int x2, int y2);
@@ -55,8 +55,8 @@ typedef struct MDGUI_Input {
 } MDGUI_Input;
 
 typedef void (*MDGUI_WindowDrawFn)(MDGUI_Context *ctx, int content_x,
-                                  int content_y, int content_w, int content_h,
-                                  void *user_data);
+                                   int content_y, int content_w, int content_h,
+                                   void *user_data);
 
 typedef struct MDGUI_WindowPassItem {
   const char *title;
@@ -123,55 +123,55 @@ void mdgui_set_backend(MDGUI_Context *ctx, const MDGUI_RenderBackend *backend);
 void mdgui_begin_frame(MDGUI_Context *ctx, const MDGUI_Input *input);
 void mdgui_end_frame(MDGUI_Context *ctx);
 
-int mdgui_begin_window(MDGUI_Context *ctx, const char *title, int x, int y, int w,
-                      int h);
+int mdgui_begin_window(MDGUI_Context *ctx, const char *title, int x, int y,
+                       int w, int h);
 int mdgui_begin_window_ex(MDGUI_Context *ctx, const char *title, int x, int y,
                           int w, int h, int flags);
 void mdgui_end_window(MDGUI_Context *ctx);
 int mdgui_button(MDGUI_Context *ctx, const char *text, int x, int y, int w,
-                int h);
+                 int h);
 void mdgui_label(MDGUI_Context *ctx, const char *text, int x, int y);
 void mdgui_label_wrapped(MDGUI_Context *ctx, const char *text, int x, int y,
-                        int w);
+                         int w);
 void mdgui_spacer(MDGUI_Context *ctx, int pixels);
 int mdgui_checkbox(MDGUI_Context *ctx, const char *text, bool *checked, int x,
-                  int y);
+                   int y);
 int mdgui_slider(MDGUI_Context *ctx, const char *text, float *val, float min,
-                float max, int x, int y, int w);
+                 float max, int x, int y, int w);
 int mdgui_collapsing_header(MDGUI_Context *ctx, const char *id,
                             const char *text, int x, int y, int w,
                             int default_open);
 void mdgui_separator(MDGUI_Context *ctx, int x, int y, int w);
 int mdgui_listbox(MDGUI_Context *ctx, const char **items, int item_count,
-                 int *selected, int x, int y, int w, int rows);
+                  int *selected, int x, int y, int w, int rows);
 int mdgui_combo(MDGUI_Context *ctx, const char *label, const char **items,
-               int item_count, int *selected, int x, int y, int w);
+                int item_count, int *selected, int x, int y, int w);
 // Returns MDGUI_INPUT_TEXT_* flags.
 int mdgui_input_text(MDGUI_Context *ctx, const char *label, char *buffer,
-                    int buffer_size, int x, int y, int w);
+                     int buffer_size, int x, int y, int w);
 // Returns MDGUI_INPUT_TEXT_* flags.
 int mdgui_input_text_multiline(MDGUI_Context *ctx, const char *label,
-                              char *buffer, int buffer_size, int x, int y,
-                              int w, int h, int flags);
+                               char *buffer, int buffer_size, int x, int y,
+                               int w, int h, int flags);
 void mdgui_progress_bar(MDGUI_Context *ctx, float value, int x, int y, int w,
-                       int h, const char *overlay_text);
+                        int h, const char *overlay_text);
 // For frame graph sizing, w/h follow widget conventions:
 // w == 0 uses available width, w < 0 subtracts from available width.
 // h == 0 uses remaining window content height, h < 0 subtracts from it.
 void mdgui_frame_time_graph(MDGUI_Context *ctx, const float *frame_ms_samples,
-                           int sample_count, float target_fps,
-                           float graph_max_ms, int x, int y, int w, int h);
+                            int sample_count, float target_fps,
+                            float graph_max_ms, int x, int y, int w, int h);
 
 void mdgui_show_demo_window(MDGUI_Context *ctx);
 void mdgui_open_file_browser(MDGUI_Context *ctx);
 const char *mdgui_show_file_browser(MDGUI_Context *ctx);
 void mdgui_set_file_browser_filters(MDGUI_Context *ctx, const char **extensions,
-                                   int extension_count);
+                                    int extension_count);
 void mdgui_set_window_open(MDGUI_Context *ctx, const char *title, int open);
 int mdgui_is_window_open(MDGUI_Context *ctx, const char *title);
 void mdgui_focus_window(MDGUI_Context *ctx, const char *title);
 void mdgui_set_window_rect(MDGUI_Context *ctx, const char *title, int x, int y,
-                          int w, int h);
+                           int w, int h);
 void mdgui_set_window_alpha(MDGUI_Context *ctx, const char *title,
                             unsigned char alpha);
 unsigned char mdgui_get_window_alpha(MDGUI_Context *ctx, const char *title);
@@ -182,6 +182,7 @@ int mdgui_is_windows_locked(MDGUI_Context *ctx);
 void mdgui_set_tile_manager_enabled(MDGUI_Context *ctx, int enabled);
 int mdgui_is_tile_manager_enabled(MDGUI_Context *ctx);
 void mdgui_tile_windows(MDGUI_Context *ctx);
+void mdgui_get_tiling_min_size(MDGUI_Context *ctx, int *w, int *h);
 void mdgui_set_window_tile_weight(MDGUI_Context *ctx, const char *title,
                                   int weight);
 int mdgui_get_window_tile_weight(MDGUI_Context *ctx, const char *title);
@@ -215,32 +216,32 @@ const char *mdgui_get_status_bar_text(MDGUI_Context *ctx);
 // Returns 0 while open/no click, 1 when first button clicked, 2 when second
 // button clicked.
 int mdgui_message_box(MDGUI_Context *ctx, const char *id, const char *title,
-                     const char *text, int style, const char *button1,
-                     const char *button2);
+                      const char *text, int style, const char *button1,
+                      const char *button2);
 int mdgui_message_box_ex(MDGUI_Context *ctx, const char *id, const char *title,
-                        const char *text, int style, const char *button1,
-                        const char *button2, int text_align);
+                         const char *text, int style, const char *button1,
+                         const char *button2, int text_align);
 int mdgui_get_window_z(MDGUI_Context *ctx, const char *title);
 void mdgui_set_theme(int theme_id);
 int mdgui_get_theme(void);
 void mdgui_get_accent_color(unsigned char *out_r, unsigned char *out_g,
                             unsigned char *out_b);
 void mdgui_set_theme_color(int palette_index, unsigned char r, unsigned char g,
-                          unsigned char b, unsigned char a);
+                           unsigned char b, unsigned char a);
 void mdgui_clear_theme_color(int palette_index);
 void mdgui_clear_all_theme_colors(void);
 
-int mdgui_begin_render_window(MDGUI_Context *ctx, const char *title, int x, int y,
-                             int w, int h, int show_menu, int *out_x,
-                             int *out_y, int *out_w, int *out_h);
+int mdgui_begin_render_window(MDGUI_Context *ctx, const char *title, int x,
+                              int y, int w, int h, int show_menu, int *out_x,
+                              int *out_y, int *out_w, int *out_h);
 int mdgui_begin_render_window_ex(MDGUI_Context *ctx, const char *title, int x,
-                                 int y, int w, int h, int show_menu,
-                                 int flags, int *out_x, int *out_y,
-                                 int *out_w, int *out_h);
-void mdgui_run_window_pass(MDGUI_Context *ctx, const MDGUI_WindowPassItem *items,
-                          int item_count);
+                                 int y, int w, int h, int show_menu, int flags,
+                                 int *out_x, int *out_y, int *out_w,
+                                 int *out_h);
+void mdgui_run_window_pass(MDGUI_Context *ctx,
+                           const MDGUI_WindowPassItem *items, int item_count);
 void mdgui_set_window_fullscreen(MDGUI_Context *ctx, const char *title,
-                                int fullscreen);
+                                 int fullscreen);
 int mdgui_is_window_fullscreen(MDGUI_Context *ctx, const char *title);
 
 void mdgui_set_custom_cursor_enabled(MDGUI_Context *ctx, int enabled);

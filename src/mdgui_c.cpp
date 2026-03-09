@@ -383,23 +383,45 @@ static int normalize_tile_weight(int weight) {
   return (weight < 1) ? 1 : weight;
 }
 
+// Fit a desired per-tile minimum into the available span so tiles + gaps never
+// exceed the container when the host window is very small.
+static int fit_tile_min_size(int total_size, int count, int gap,
+                             int desired_min) {
+  if (count <= 0)
+    return std::max(1, desired_min);
+  if (gap < 0)
+    gap = 0;
+  if (desired_min < 1)
+    desired_min = 1;
+
+  const int total_gap = (count - 1) * gap;
+  int usable = total_size - total_gap;
+  if (usable < count)
+    return 1;
+  const int max_equal = usable / count;
+  if (max_equal < 1)
+    return 1;
+  return std::min(desired_min, max_equal);
+}
+
 static void assign_tiled_window_rect(MDGUI_Window &w, int x, int y, int ww,
                                      int hh) {
   w.x = x;
   w.y = y;
-  w.w = ww;
-  w.h = hh;
+  w.w = std::max(1, ww);
+  w.h = std::max(1, hh);
   w.restored_x = x;
   w.restored_y = y;
-  w.restored_w = ww;
-  w.restored_h = hh;
+  w.restored_w = w.w;
+  w.restored_h = w.h;
   w.is_maximized = false;
   w.fixed_rect = true;
 }
 
 static void tile_windows_grid(MDGUI_Context *ctx, const std::vector<int> &order,
                               int left, int top, int content_w, int content_h,
-                              int gap) {
+                              int gap, int *out_total_min_w = nullptr,
+                              int *out_total_min_h = nullptr) {
   if (!ctx || order.empty() || content_w <= 0 || content_h <= 0)
     return;
 
@@ -415,27 +437,74 @@ static void tile_windows_grid(MDGUI_Context *ctx, const std::vector<int> &order,
   if (rows < 1)
     rows = 1;
 
+  int total_min_w = 0;
+  int total_min_h = 0;
+
   int y = top;
   int idx = 0;
   for (int row = 0; row < rows && idx < count; ++row) {
     const int rows_left = rows - row;
     const int remaining = count - idx;
     const int cols_this_row = (remaining + rows_left - 1) / rows_left;
-    const int h_remaining = (top + content_h) - y - (rows_left - 1) * gap;
-    const int row_h = std::max(80, h_remaining / rows_left);
 
+    int max_row_min_h = 80; // Default minimum height
+    for (int i = 0; i < cols_this_row && (idx + i) < count; ++i) {
+      if (ctx->windows[order[idx + i]].min_h > max_row_min_h)
+        max_row_min_h = ctx->windows[order[idx + i]].min_h;
+    }
+
+    const int span_h = (top + content_h) - y;
+    const int row_min_h =
+        fit_tile_min_size(span_h, rows_left, gap, max_row_min_h);
+    const int h_remaining = span_h - (rows_left - 1) * gap;
+    int row_h = std::max(1, h_remaining);
+    if (row < rows - 1) {
+      int target = h_remaining / rows_left;
+      int max_for_this = h_remaining - (rows_left - 1) * row_min_h;
+      if (max_for_this < row_min_h)
+        max_for_this = row_min_h;
+      row_h = clampi(target, row_min_h, max_for_this);
+    }
+
+    total_min_h += max_row_min_h;
+    if (row < rows - 1)
+      total_min_h += gap;
+
+    int current_row_min_w = 0;
     int x = left;
     for (int col = 0; col < cols_this_row && idx < count; ++col) {
       const int cols_left = cols_this_row - col;
-      const int w_remaining = (left + content_w) - x - (cols_left - 1) * gap;
-      const int cell_w = std::max(120, w_remaining / cols_left);
+      const int span_w = (left + content_w) - x;
+      const int col_min_w = fit_tile_min_size(span_w, cols_left, gap,
+                                              ctx->windows[order[idx]].min_w);
+      const int w_remaining = span_w - (cols_left - 1) * gap;
+      int cell_w = std::max(1, w_remaining);
+      if (col < cols_this_row - 1) {
+        int target = w_remaining / cols_left;
+        int max_for_this = w_remaining - (cols_left - 1) * col_min_w;
+        if (max_for_this < col_min_w)
+          max_for_this = col_min_w;
+        cell_w = clampi(target, col_min_w, max_for_this);
+      }
       auto &w = ctx->windows[order[idx]];
       assign_tiled_window_rect(w, x, y, cell_w, row_h);
+
+      current_row_min_w += w.min_w;
+      if (col < cols_this_row - 1)
+        current_row_min_w += gap;
+
       ++idx;
       x += cell_w + gap;
     }
+    if (current_row_min_w > total_min_w)
+      total_min_w = current_row_min_w;
     y += row_h + gap;
   }
+
+  if (out_total_min_w)
+    *out_total_min_w = total_min_w;
+  if (out_total_min_h)
+    *out_total_min_h = total_min_h;
 }
 
 static int sum_tile_weights(MDGUI_Context *ctx,
@@ -468,15 +537,24 @@ static void sort_by_weight_then_z(MDGUI_Context *ctx,
 
 static void tile_windows_vertical_weighted(MDGUI_Context *ctx,
                                            const std::vector<int> &order, int x,
-                                           int y, int w, int h, int gap) {
+                                           int y, int w, int h, int gap,
+                                           int *out_total_min_w = nullptr,
+                                           int *out_total_min_h = nullptr) {
   if (!ctx || order.empty() || w <= 0 || h <= 0)
     return;
   if ((int)order.size() == 1) {
-    assign_tiled_window_rect(ctx->windows[order[0]], x, y, w, h);
+    auto &win = ctx->windows[order[0]];
+    assign_tiled_window_rect(win, x, y, w, h);
+    if (out_total_min_w)
+      *out_total_min_w = win.min_w;
+    if (out_total_min_h)
+      *out_total_min_h = win.min_h;
     return;
   }
 
-  const int min_h = 80;
+  int total_min_h = 0;
+  int max_min_w = 0;
+
   int total_weight = sum_tile_weights(ctx, order);
   if (total_weight < 1)
     total_weight = (int)order.size();
@@ -486,41 +564,63 @@ static void tile_windows_vertical_weighted(MDGUI_Context *ctx,
   for (int i = 0; i < (int)order.size(); ++i) {
     const int idx = order[i];
     const int items_left = (int)order.size() - i;
-    int available_h = (y + h) - cy - (items_left - 1) * gap;
-    if (available_h < min_h)
-      available_h = min_h;
+    const int span_h = (y + h) - cy;
+    const int item_min_h =
+        fit_tile_min_size(span_h, items_left, gap, ctx->windows[idx].min_h);
+    int available_h = span_h - (items_left - 1) * gap;
+    if (available_h < item_min_h)
+      available_h = item_min_h;
 
     int cell_h = available_h;
     if (i < (int)order.size() - 1 && remaining_weight > 0) {
       const int wgt = normalize_tile_weight(ctx->windows[idx].tile_weight);
       int proportional =
           (int)((double)available_h * (double)wgt / (double)remaining_weight);
-      int max_for_this = available_h - (items_left - 1) * min_h;
-      if (max_for_this < min_h)
-        max_for_this = min_h;
-      cell_h = clampi(proportional, min_h, max_for_this);
+      int max_for_this = available_h - (items_left - 1) * item_min_h;
+      if (max_for_this < item_min_h)
+        max_for_this = item_min_h;
+      cell_h = clampi(proportional, item_min_h, max_for_this);
     }
 
     assign_tiled_window_rect(ctx->windows[idx], x, cy, w, cell_h);
+
+    total_min_h += ctx->windows[idx].min_h;
+    if (i < (int)order.size() - 1)
+      total_min_h += gap;
+    if (ctx->windows[idx].min_w > max_min_w)
+      max_min_w = ctx->windows[idx].min_w;
+
     cy += cell_h + gap;
     remaining_weight -= normalize_tile_weight(ctx->windows[idx].tile_weight);
     if (remaining_weight < 0)
       remaining_weight = 0;
   }
+
+  if (out_total_min_w)
+    *out_total_min_w = max_min_w;
+  if (out_total_min_h)
+    *out_total_min_h = total_min_h;
 }
 
 static void tile_windows_horizontal_weighted(MDGUI_Context *ctx,
                                              const std::vector<int> &order,
                                              int x, int y, int w, int h,
-                                             int gap) {
+                                             int gap,
+                                             int *out_total_min_w = nullptr,
+                                             int *out_total_min_h = nullptr) {
   if (!ctx || order.empty() || w <= 0 || h <= 0)
     return;
   if ((int)order.size() == 1) {
-    assign_tiled_window_rect(ctx->windows[order[0]], x, y, w, h);
+    auto &win = ctx->windows[order[0]];
+    assign_tiled_window_rect(win, x, y, w, h);
+    if (out_total_min_w)
+      *out_total_min_w = win.min_w;
+    if (out_total_min_h)
+      *out_total_min_h = win.min_h;
     return;
   }
 
-  const int min_w = 120;
+  int total_min_w = 0, max_min_h = 0;
   int total_weight = sum_tile_weights(ctx, order);
   if (total_weight < 1)
     total_weight = (int)order.size();
@@ -530,39 +630,60 @@ static void tile_windows_horizontal_weighted(MDGUI_Context *ctx,
   for (int i = 0; i < (int)order.size(); ++i) {
     const int idx = order[i];
     const int items_left = (int)order.size() - i;
-    int available_w = (x + w) - cx - (items_left - 1) * gap;
-    if (available_w < min_w)
-      available_w = min_w;
+    const int span_w = (x + w) - cx;
+    const int item_min_w =
+        fit_tile_min_size(span_w, items_left, gap, ctx->windows[idx].min_w);
+    int available_w = span_w - (items_left - 1) * gap;
+    if (available_w < item_min_w)
+      available_w = item_min_w;
 
     int cell_w = available_w;
     if (i < (int)order.size() - 1 && remaining_weight > 0) {
       const int wgt = normalize_tile_weight(ctx->windows[idx].tile_weight);
       int proportional =
           (int)((double)available_w * (double)wgt / (double)remaining_weight);
-      int max_for_this = available_w - (items_left - 1) * min_w;
-      if (max_for_this < min_w)
-        max_for_this = min_w;
-      cell_w = clampi(proportional, min_w, max_for_this);
+      int max_for_this = available_w - (items_left - 1) * item_min_w;
+      if (max_for_this < item_min_w)
+        max_for_this = item_min_w;
+      cell_w = clampi(proportional, item_min_w, max_for_this);
     }
 
     assign_tiled_window_rect(ctx->windows[idx], cx, y, cell_w, h);
+
+    total_min_w += ctx->windows[idx].min_w;
+    if (i < (int)order.size() - 1)
+      total_min_w += gap;
+    if (ctx->windows[idx].min_h > max_min_h)
+      max_min_h = ctx->windows[idx].min_h;
+
     cx += cell_w + gap;
     remaining_weight -= normalize_tile_weight(ctx->windows[idx].tile_weight);
     if (remaining_weight < 0)
       remaining_weight = 0;
   }
+
+  if (out_total_min_w)
+    *out_total_min_w = total_min_w;
+  if (out_total_min_h)
+    *out_total_min_h = max_min_h;
 }
 
 static void tile_windows_weighted_cluster(MDGUI_Context *ctx,
                                           const std::vector<int> &order,
                                           int left, int top, int content_w,
-                                          int content_h, int gap) {
+                                          int content_h, int gap,
+                                          int *out_total_min_w = nullptr,
+                                          int *out_total_min_h = nullptr) {
   if (!ctx || order.empty() || content_w <= 0 || content_h <= 0)
     return;
   const int count = (int)order.size();
   if (count == 1) {
-    assign_tiled_window_rect(ctx->windows[order[0]], left, top, content_w,
-                             content_h);
+    auto &win = ctx->windows[order[0]];
+    assign_tiled_window_rect(win, left, top, content_w, content_h);
+    if (out_total_min_w)
+      *out_total_min_w = win.min_w;
+    if (out_total_min_h)
+      *out_total_min_h = win.min_h;
     return;
   }
 
@@ -580,8 +701,9 @@ static void tile_windows_weighted_cluster(MDGUI_Context *ctx,
     }
   }
 
-  if (best_weight <= 1) {
-    tile_windows_grid(ctx, order, left, top, content_w, content_h, gap);
+  if (primary_pos == -1 || best_weight <= 1) {
+    tile_windows_grid(ctx, order, left, top, content_w, content_h, gap,
+                      out_total_min_w, out_total_min_h);
     return;
   }
 
@@ -607,27 +729,24 @@ static void tile_windows_weighted_cluster(MDGUI_Context *ctx,
   const int side =
       (content_w >= content_h) ? MDGUI_TILE_SIDE_LEFT : MDGUI_TILE_SIDE_TOP;
 
-  int px = left;
-  int py = top;
-  int pw = content_w;
-  int ph = content_h;
-  int sx = left;
-  int sy = top;
-  int sw = content_w;
-  int sh = content_h;
+  int px = left, py = top, pw = content_w, ph = content_h;
+  int sx = left, sy = top, sw = content_w, sh = content_h;
 
-  const int min_primary_w = 160;
-  const int min_secondary_w = 120;
-  const int min_primary_h = 100;
-  const int min_secondary_h = 80;
+  const int min_primary_w = ctx->windows[order[primary_pos]].min_w;
+  const int min_primary_h = ctx->windows[order[primary_pos]].min_h;
+
+  int min_sec_w = 0, min_sec_h = 0;
+  tile_windows_grid(ctx, secondary, left, top, content_w, content_h, gap,
+                    &min_sec_w, &min_sec_h);
 
   if (side == MDGUI_TILE_SIDE_LEFT || side == MDGUI_TILE_SIDE_RIGHT) {
-    if (content_w < (min_primary_w + min_secondary_w + gap)) {
-      tile_windows_grid(ctx, order, left, top, content_w, content_h, gap);
+    if (content_w < (min_primary_w + min_sec_w + gap)) {
+      tile_windows_grid(ctx, order, left, top, content_w, content_h, gap,
+                        out_total_min_w, out_total_min_h);
       return;
     }
     int p_w = (int)((float)content_w * split_ratio);
-    p_w = clampi(p_w, min_primary_w, content_w - min_secondary_w - gap);
+    p_w = clampi(p_w, min_primary_w, content_w - min_sec_w - gap);
     const int s_w = content_w - p_w - gap;
     if (side == MDGUI_TILE_SIDE_LEFT) {
       px = left;
@@ -638,13 +757,18 @@ static void tile_windows_weighted_cluster(MDGUI_Context *ctx,
     }
     pw = p_w;
     sw = s_w;
+    if (out_total_min_w)
+      *out_total_min_w = min_primary_w + gap + min_sec_w;
+    if (out_total_min_h)
+      *out_total_min_h = std::max(min_primary_h, min_sec_h);
   } else {
-    if (content_h < (min_primary_h + min_secondary_h + gap)) {
-      tile_windows_grid(ctx, order, left, top, content_w, content_h, gap);
+    if (content_h < (min_primary_h + min_sec_h + gap)) {
+      tile_windows_grid(ctx, order, left, top, content_w, content_h, gap,
+                        out_total_min_w, out_total_min_h);
       return;
     }
     int p_h = (int)((float)content_h * split_ratio);
-    p_h = clampi(p_h, min_primary_h, content_h - min_secondary_h - gap);
+    p_h = clampi(p_h, min_primary_h, content_h - min_sec_h - gap);
     const int s_h = content_h - p_h - gap;
     if (side == MDGUI_TILE_SIDE_TOP) {
       py = top;
@@ -655,26 +779,30 @@ static void tile_windows_weighted_cluster(MDGUI_Context *ctx,
     }
     ph = p_h;
     sh = s_h;
+    if (out_total_min_w)
+      *out_total_min_w = std::max(min_primary_w, min_sec_w);
+    if (out_total_min_h)
+      *out_total_min_h = min_primary_h + gap + min_sec_h;
   }
 
   assign_tiled_window_rect(ctx->windows[order[primary_pos]], px, py, pw, ph);
   tile_windows_grid(ctx, secondary, sx, sy, sw, sh, gap);
 }
 
-static void tile_windows_internal(MDGUI_Context *ctx) {
+static void tile_windows_internal(MDGUI_Context *ctx,
+                                  int *out_total_min_w = nullptr,
+                                  int *out_total_min_h = nullptr) {
   if (!ctx)
     return;
 
   const int rw = get_logical_render_w(ctx);
   const int rh = get_logical_render_h(ctx);
-
   const int gap = 6;
   int top = get_work_area_top(ctx) + 6;
   if (top < 18)
     top = 18;
   const int bottom = 6 + get_status_bar_h(ctx);
-  const int left = gap;
-  const int right = gap;
+  const int left = gap, right = gap;
 
   const int content_w = rw - left - right;
   const int content_h = rh - top - bottom;
@@ -696,20 +824,14 @@ static void tile_windows_internal(MDGUI_Context *ctx) {
   if (count == 1) {
     auto &only = ctx->windows[order[0]];
     assign_tiled_window_rect(only, left, top, content_w, content_h);
+    if (out_total_min_w)
+      *out_total_min_w = left + only.min_w + right;
+    if (out_total_min_h)
+      *out_total_min_h = top + only.min_h + bottom;
     return;
   }
 
-  std::vector<int> left_group;
-  std::vector<int> right_group;
-  std::vector<int> top_group;
-  std::vector<int> bottom_group;
-  std::vector<int> auto_group;
-  left_group.reserve(order.size());
-  right_group.reserve(order.size());
-  top_group.reserve(order.size());
-  bottom_group.reserve(order.size());
-  auto_group.reserve(order.size());
-
+  std::vector<int> left_group, right_group, top_group, bottom_group, auto_group;
   for (int idx : order) {
     const auto &w = ctx->windows[idx];
     const int side = normalize_tile_side(w.tile_side);
@@ -743,119 +865,94 @@ static void tile_windows_internal(MDGUI_Context *ctx) {
     if (auto_sum < 1 && !auto_group.empty())
       auto_sum = (int)auto_group.size();
 
-    int center_x = left;
-    int center_y = top;
-    int center_w = content_w;
-    int center_h = content_h;
+    int center_x = left, center_y = top, center_w = content_w,
+        center_h = content_h;
 
-    const int min_center_w = 180;
-    const int min_center_h = 120;
-    const int min_side_w = 140;
-    const int min_side_h = 90;
+    int min_l_w = 0, min_l_h = 0, min_r_w = 0, min_r_h = 0;
+    int min_t_w = 0, min_t_h = 0, min_b_w = 0, min_b_h = 0;
+    int min_a_w = 0, min_a_h = 0;
 
-    int left_w_px = 0;
+    if (!left_group.empty())
+      tile_windows_vertical_weighted(ctx, left_group, 0, 0, 100, 100, gap,
+                                     &min_l_w, &min_l_h);
+    if (!right_group.empty())
+      tile_windows_vertical_weighted(ctx, right_group, 0, 0, 100, 100, gap,
+                                     &min_r_w, &min_r_h);
+    if (!top_group.empty())
+      tile_windows_horizontal_weighted(ctx, top_group, 0, 0, 100, 100, gap,
+                                       &min_t_w, &min_t_h);
+    if (!bottom_group.empty())
+      tile_windows_horizontal_weighted(ctx, bottom_group, 0, 0, 100, 100, gap,
+                                       &min_b_w, &min_b_h);
+    if (!auto_group.empty())
+      tile_windows_weighted_cluster(ctx, auto_group, 0, 0, 100, 100, gap,
+                                    &min_a_w, &min_a_h);
+
+    const int min_center_w = std::max(min_a_w, std::max(min_t_w, min_b_w));
+    const int min_center_h = std::max(min_a_h, std::max(min_l_h, min_r_h));
+
+    if (out_total_min_w)
+      *out_total_min_w = left + min_l_w + (min_l_w > 0 ? gap : 0) +
+                         min_center_w + (min_r_w > 0 ? gap : 0) + min_r_w +
+                         right;
+    if (out_total_min_h)
+      *out_total_min_h = top + min_t_h + (min_t_h > 0 ? gap : 0) +
+                         min_center_h + (min_b_h > 0 ? gap : 0) + min_b_h +
+                         bottom;
+
     if (!left_group.empty()) {
       int total_w_weight = left_sum + right_sum + auto_sum;
-      if (total_w_weight < 1)
-        total_w_weight = 1;
-      int reserve_right = right_group.empty() ? 0 : (min_side_w + gap);
-      int max_left_w = center_w - min_center_w - reserve_right;
-      if (max_left_w >= min_side_w) {
-        int raw =
-            (int)((double)center_w * (double)left_sum / (double)total_w_weight);
-        left_w_px = clampi(raw, min_side_w, max_left_w);
-      }
-    }
-    if (left_w_px > 0) {
+      int max_left_w =
+          center_w - min_center_w - (right_group.empty() ? 0 : (min_r_w + gap));
+      int left_w_px =
+          clampi((int)((double)center_w * (double)left_sum / total_w_weight),
+                 min_l_w, max_left_w);
       tile_windows_vertical_weighted(ctx, left_group, center_x, top, left_w_px,
                                      content_h, gap);
       center_x += left_w_px + gap;
       center_w -= left_w_px + gap;
-    } else {
-      auto_group.insert(auto_group.end(), left_group.begin(), left_group.end());
-      left_group.clear();
-      auto_sum = sum_tile_weights(ctx, auto_group);
     }
-
-    int right_w_px = 0;
     if (!right_group.empty()) {
       int total_w_weight = right_sum + auto_sum;
-      if (total_w_weight < 1)
-        total_w_weight = 1;
       int max_right_w = center_w - min_center_w;
-      if (max_right_w >= min_side_w) {
-        int raw = (int)((double)center_w * (double)right_sum /
-                        (double)total_w_weight);
-        right_w_px = clampi(raw, min_side_w, max_right_w);
-      }
-    }
-    if (right_w_px > 0) {
-      const int rx = center_x + center_w - right_w_px;
-      tile_windows_vertical_weighted(ctx, right_group, rx, top, right_w_px,
-                                     content_h, gap);
+      int right_w_px =
+          clampi((int)((double)center_w * (double)right_sum / total_w_weight),
+                 min_r_w, max_right_w);
+      tile_windows_vertical_weighted(ctx, right_group,
+                                     center_x + center_w - right_w_px, top,
+                                     right_w_px, content_h, gap);
       center_w -= right_w_px + gap;
-    } else {
-      auto_group.insert(auto_group.end(), right_group.begin(),
-                        right_group.end());
-      right_group.clear();
-      auto_sum = sum_tile_weights(ctx, auto_group);
     }
-
-    int top_h_px = 0;
     if (!top_group.empty()) {
       int total_h_weight = top_sum + bottom_sum + auto_sum;
-      if (total_h_weight < 1)
-        total_h_weight = 1;
-      int reserve_bottom = bottom_group.empty() ? 0 : (min_side_h + gap);
-      int max_top_h = center_h - min_center_h - reserve_bottom;
-      if (max_top_h >= min_side_h) {
-        int raw =
-            (int)((double)center_h * (double)top_sum / (double)total_h_weight);
-        top_h_px = clampi(raw, min_side_h, max_top_h);
-      }
-    }
-    if (top_h_px > 0) {
+      int max_top_h = center_h - min_center_h -
+                      (bottom_group.empty() ? 0 : (min_b_h + gap));
+      int top_h_px =
+          clampi((int)((double)center_h * (double)top_sum / total_h_weight),
+                 min_t_h, max_top_h);
       tile_windows_horizontal_weighted(ctx, top_group, center_x, center_y,
                                        center_w, top_h_px, gap);
       center_y += top_h_px + gap;
       center_h -= top_h_px + gap;
-    } else {
-      auto_group.insert(auto_group.end(), top_group.begin(), top_group.end());
-      top_group.clear();
     }
-
-    int bottom_h_px = 0;
     if (!bottom_group.empty()) {
-      int total_h_weight = bottom_sum + sum_tile_weights(ctx, auto_group);
-      if (total_h_weight < 1)
-        total_h_weight = 1;
+      int total_h_weight = bottom_sum + auto_sum;
       int max_bottom_h = center_h - min_center_h;
-      if (max_bottom_h >= min_side_h) {
-        int raw = (int)((double)center_h * (double)bottom_sum /
-                        (double)total_h_weight);
-        bottom_h_px = clampi(raw, min_side_h, max_bottom_h);
-      }
-    }
-    if (bottom_h_px > 0) {
-      const int by = center_y + center_h - bottom_h_px;
-      tile_windows_horizontal_weighted(ctx, bottom_group, center_x, by,
+      int bottom_h_px =
+          clampi((int)((double)center_h * (double)bottom_sum / total_h_weight),
+                 min_b_h, max_bottom_h);
+      tile_windows_horizontal_weighted(ctx, bottom_group, center_x,
+                                       center_y + center_h - bottom_h_px,
                                        center_w, bottom_h_px, gap);
       center_h -= bottom_h_px + gap;
-    } else {
-      auto_group.insert(auto_group.end(), bottom_group.begin(),
-                        bottom_group.end());
-      bottom_group.clear();
     }
-
-    if (!auto_group.empty()) {
-      sort_by_weight_then_z(ctx, auto_group);
+    if (!auto_group.empty())
       tile_windows_weighted_cluster(ctx, auto_group, center_x, center_y,
                                     center_w, center_h, gap);
-    }
-    return;
+  } else {
+    tile_windows_weighted_cluster(ctx, order, left, top, content_w, content_h,
+                                  gap, out_total_min_w, out_total_min_h);
   }
-  tile_windows_weighted_cluster(ctx, order, left, top, content_w, content_h,
-                                gap);
 }
 
 static int find_or_create_window(MDGUI_Context *ctx, const char *title, int x,
@@ -1142,7 +1239,8 @@ static std::string path_extension_lower(const std::filesystem::path &p) {
 static bool file_matches_filters(const MDGUI_Context *ctx,
                                  const std::filesystem::path &p) {
   if (!ctx || ctx->file_browser_ext_filters.empty())
-    return true; // default: show all regular files
+    return true; // default: show all
+                 // regular files
   const std::string ext = path_extension_lower(p);
   if (ext.empty())
     return false;
@@ -1363,15 +1461,16 @@ MDGUI_Context *mdgui_create_with_backend(const MDGUI_RenderBackend *backend) {
 
   for (int i = 0; i < 16; i++)
     ctx->cursors[i] = nullptr;
-  // Only SDL system cursors are used in release-safe builds.
+  // Only SDL system cursors are used
+  // in release-safe builds.
   ctx->cursors[0] = SDL_CreateSystemCursor((SDL_SystemCursor)0);
   ctx->cursor_anim_count = ctx->cursors[0] ? 1 : 0;
   ctx->cursors[5] = SDL_CreateSystemCursor((SDL_SystemCursor)5); // NWSE
   ctx->cursors[6] = SDL_CreateSystemCursor((SDL_SystemCursor)6); // NESW
   ctx->cursors[7] = SDL_CreateSystemCursor((SDL_SystemCursor)7); // EW
   ctx->cursors[8] = SDL_CreateSystemCursor((SDL_SystemCursor)8); // NS
-  ctx->cursors[9] =
-      SDL_CreateSystemCursor((SDL_SystemCursor)0); // default arrow
+  ctx->cursors[9] = SDL_CreateSystemCursor((SDL_SystemCursor)0); // default
+                                                                 // arrow
   ctx->custom_cursor_enabled = false;
   ctx->cursor_request_idx = 9;
   ctx->current_cursor_idx = -1;
@@ -1475,7 +1574,8 @@ void mdgui_begin_frame(MDGUI_Context *ctx, const MDGUI_Input *input) {
     ctx->cursor_request_idx = ctx->cursors[9] ? 9 : 0;
   }
 
-  // Bring the clicked window to front before any drawing in this frame.
+  // Bring the clicked window to front
+  // before any drawing in this frame.
   if (ctx->input.mouse_pressed && !main_menu_modal) {
     const int clicked_idx =
         top_window_at_point(ctx, ctx->input.mouse_x, ctx->input.mouse_y, 3);
@@ -1605,7 +1705,9 @@ void mdgui_end_frame(MDGUI_Context *ctx) {
   ctx->main_menu_defs.clear();
   ctx->main_menu_build_stack.clear();
 
-  // Apply final cursor decision once per frame to avoid visible cursor thrash.
+  // Apply final cursor decision once
+  // per frame to avoid visible cursor
+  // thrash.
   if (ctx->cursor_request_idx >= 0 && ctx->cursor_request_idx < 16 &&
       ctx->cursors[ctx->cursor_request_idx] &&
       ctx->current_cursor_idx != ctx->cursor_request_idx) {
@@ -1661,7 +1763,8 @@ int mdgui_begin_window_ex(MDGUI_Context *ctx, const char *title, int x, int y,
     win.min_h = 30;
   clamp_window_to_work_area(ctx, win);
 
-  // Edge detection for hover AND interaction
+  // Edge detection for hover AND
+  // interaction
   const int margin = 3;
   int edge_mask = 0;
   if (can_maximize && !win.is_maximized) {
@@ -1680,7 +1783,8 @@ int mdgui_begin_window_ex(MDGUI_Context *ctx, const char *title, int x, int y,
   }
   win.last_edge_mask = edge_mask;
 
-  // Cursor feedback (Hover OR active resizing)
+  // Cursor feedback (Hover OR active
+  // resizing)
   if (move_resize_allowed &&
       ((edge_mask != 0 && top_here && ctx->resizing_window == -1) ||
        (ctx->resizing_window == idx))) {
@@ -1702,7 +1806,8 @@ int mdgui_begin_window_ex(MDGUI_Context *ctx, const char *title, int x, int y,
     }
   }
 
-  // Handle Close and Maximize button interaction
+  // Handle Close and Maximize button
+  // interaction
   const int btn_w = 9;
   const int btn_h = 9;
   const int close_x = win.x + win.w - btn_w - 1;
@@ -1721,8 +1826,11 @@ int mdgui_begin_window_ex(MDGUI_Context *ctx, const char *title, int x, int y,
     win.min_w = chrome_min_w;
 
   if (chrome_input_allowed && ctx->input.mouse_pressed && top_here) {
-    // If a combo popup is open in this window, let combo logic consume this
-    // click first; don't treat it as titlebar/chrome interaction.
+    // If a combo popup is open in
+    // this window, let combo logic
+    // consume this click first; don't
+    // treat it as titlebar/chrome
+    // interaction.
     if (win.open_combo_id != -1) {
       win.z = ++ctx->z_counter;
     } else {
@@ -1825,13 +1933,15 @@ int mdgui_begin_window_ex(MDGUI_Context *ctx, const char *title, int x, int y,
   // Draw 3D-style Close button
   mdgui_fill_rect_idx(nullptr, CLR_BUTTON_SURFACE, close_x, close_y, btn_w,
                       btn_h);
-  // Draw X as two diagonal lines with margin
+  // Draw X as two diagonal lines with
+  // margin
   mdgui_draw_line_idx(nullptr, CLR_TEXT_LIGHT, close_x + 2, close_y + 2,
                       close_x + 6, close_y + 6);
   mdgui_draw_line_idx(nullptr, CLR_TEXT_LIGHT, close_x + 6, close_y + 2,
                       close_x + 2, close_y + 6);
 
-  // Draw 3D-style Maximize button when allowed for this window.
+  // Draw 3D-style Maximize button
+  // when allowed for this window.
   if (can_maximize) {
     mdgui_fill_rect_idx(nullptr, CLR_BUTTON_SURFACE, max_x, max_y, btn_w,
                         btn_h);
@@ -1847,7 +1957,8 @@ int mdgui_begin_window_ex(MDGUI_Context *ctx, const char *title, int x, int y,
                              CLR_TEXT_LIGHT);
   }
 
-  // Draw border after fills so it renders on top
+  // Draw border after fills so it
+  // renders on top
   mdgui_draw_hline_idx(nullptr, CLR_WINDOW_BORDER, win.x - 1, win.y - 1,
                        win.x + win.w + 1);
   mdgui_draw_hline_idx(nullptr, CLR_WINDOW_BORDER, win.x - 1, win.y + win.h - 1,
@@ -1967,7 +2078,8 @@ void mdgui_end_window(MDGUI_Context *ctx) {
     ctx->combo_overlay_items = nullptr;
   }
 
-  // All windows can scroll when content exceeds viewport.
+  // All windows can scroll when
+  // content exceeds viewport.
   {
     const int viewport_top = ctx->origin_y;
     const int viewport_h = (win.y + win.h - 4) - viewport_top;
@@ -1991,7 +2103,9 @@ void mdgui_end_window(MDGUI_Context *ctx) {
       if (win.text_scroll > max_scroll)
         win.text_scroll = max_scroll;
       if (win.text_scroll == prev) {
-        // At edge: keep stable (prevents visual jitter while wheel continues).
+        // At edge: keep stable
+        // (prevents visual jitter
+        // while wheel continues).
         win.text_scroll = prev;
       }
     }
@@ -2043,21 +2157,25 @@ void mdgui_end_window(MDGUI_Context *ctx) {
         win.text_scroll = 0;
       if (win.text_scroll > max_scroll)
         win.text_scroll = max_scroll;
-      // Scrollbar is chrome anchored to the current window edge and should not
-      // participate in content-driven minimum width calculations.
+      // Scrollbar is chrome anchored
+      // to the current window edge
+      // and should not participate in
+      // content-driven minimum width
+      // calculations.
     }
   }
 
-  // Dynamic minimum size based on hard content only (widgets/interactive UI).
+  // Dynamic minimum size based on hard content
+  const int measured_min_w = (ctx->content_req_right - win.x) + 4;
+  if (ctx->window_has_nonlabel_widget) {
+    win.min_w = std::max(50, measured_min_w);
+  } else {
+    win.min_w = 50;
+  }
+
+  win.min_h = win.chrome_min_h;
+
   if (!win.fixed_rect) {
-    const int measured_min_w = (ctx->content_req_right - win.x) + 4;
-    if (ctx->window_has_nonlabel_widget) {
-      if (measured_min_w > win.min_w)
-        win.min_w = measured_min_w;
-    }
-    // Keep vertical resize floor to chrome minimum only; overflowing content
-    // should rely on scrollbars, not force taller windows.
-    win.min_h = win.chrome_min_h;
     if (win.w < win.min_w)
       win.w = win.min_w;
     if (win.h < win.min_h)
@@ -2109,8 +2227,12 @@ int mdgui_button(MDGUI_Context *ctx, const char *text, int x, int y, int w,
   const auto &win = ctx->windows[ctx->current_window];
 
   const int topmost = is_current_window_topmost(ctx);
-  const int requested_w = w;
   w = resolve_dynamic_width(ctx, x, w, 12);
+  if (text && mdgui_fonts[1]) {
+    int tw = mdgui_fonts[1]->measureTextWidth(text) + 8;
+    if (w < tw)
+      w = tw;
+  }
   const int abs_x = ctx->origin_x + x;
   const int logical_y = ctx->content_y + y;
   const int abs_y = logical_y - win.text_scroll;
@@ -2142,16 +2264,7 @@ int mdgui_button(MDGUI_Context *ctx, const char *text, int x, int y, int w,
     const int ty = abs_y + (h - 8) / 2;
     mdgui_fonts[1]->drawText(text, nullptr, tx, ty, CLR_TEXT_LIGHT);
   }
-  int intrinsic_w = w;
-  if (requested_w <= 0) {
-    intrinsic_w = 12;
-    if (text && mdgui_fonts[1]) {
-      int tw = mdgui_fonts[1]->measureTextWidth(text) + 8;
-      if (tw > intrinsic_w)
-        intrinsic_w = tw;
-    }
-  }
-  note_content_bounds(ctx, abs_x + intrinsic_w, logical_y + h);
+  note_content_bounds(ctx, abs_x + w, logical_y + h);
 
   return hovered && ctx->input.mouse_pressed && win.z == ctx->z_counter;
 }
@@ -2408,7 +2521,9 @@ int mdgui_slider(MDGUI_Context *ctx, const char *text, float *val, float min,
     int label_x = right_label_x;
     int label_y = iy + 1;
 
-    // Prefer right-side labels, but if they don't fit then place above slider.
+    // Prefer right-side labels, but
+    // if they don't fit then place
+    // above slider.
     if (text_w > right_room) {
       label_x = ix;
       label_y = iy - 9;
@@ -2443,6 +2558,11 @@ int mdgui_collapsing_header(MDGUI_Context *ctx, const char *id,
 
   const int requested_w = w;
   w = resolve_dynamic_width(ctx, x, w, 24);
+  const int text_w =
+      mdgui_fonts[1] ? mdgui_fonts[1]->measureTextWidth(text) : 0;
+  const int needed_w = 12 + text_w + 4;
+  if (w < needed_w)
+    w = needed_w;
   const int ix = ctx->origin_x + x;
   const int top_margin = 2;
   const int logical_y = ctx->content_y + std::max(y, top_margin);
@@ -2471,11 +2591,11 @@ int mdgui_collapsing_header(MDGUI_Context *ctx, const char *id,
   mdgui_fonts[1]->drawText(text, nullptr, ix + 12, iy + 2, CLR_TEXT_LIGHT);
 
   int intrinsic_w = w;
-  const int text_w = mdgui_fonts[1]->measureTextWidth(text);
   const int text_right = ix + 12 + text_w;
-  const int needed_w = 12 + text_w + 4;
   if (requested_w <= 0) {
-    // Dynamic width: derive requirement from content, not resolved width.
+    // Dynamic width: derive
+    // requirement from content, not
+    // resolved width.
     intrinsic_w = (needed_w > 24) ? needed_w : 24;
   } else if (needed_w > intrinsic_w) {
     intrinsic_w = needed_w;
@@ -2484,7 +2604,9 @@ int mdgui_collapsing_header(MDGUI_Context *ctx, const char *id,
   if (requested_w > 0)
     right_needed = std::max(right_needed, text_right);
   if (requested_w <= 0)
-    right_needed += 14; // match resolve_dynamic_width right gutter reserve
+    right_needed += 14; // match
+                        // resolve_dynamic_width
+                        // right gutter reserve
   note_content_bounds(ctx, right_needed, logical_y + row_h);
   ctx->content_y += std::max(y, top_margin) + row_h + 2;
   return *open ? 1 : 0;
@@ -2613,8 +2735,9 @@ int mdgui_combo(MDGUI_Context *ctx, const char *label, const char **items,
   if (hovered && ctx->input.mouse_pressed) {
     win.open_combo_id = open ? -1 : combo_id;
     win.z = ++ctx->z_counter;
-    ctx->input.mouse_pressed =
-        0; // consume click so underlying widgets don't also fire
+    ctx->input.mouse_pressed = 0; // consume click so
+                                  // underlying widgets don't
+                                  // also fire
   } else if (ctx->input.mouse_pressed && open) {
     const int popup_h = item_count * item_h;
     const int in_popup = point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y,
@@ -2650,7 +2773,8 @@ int mdgui_combo(MDGUI_Context *ctx, const char *label, const char **items,
         }
         win.open_combo_id = -1;
         win.z = ++ctx->z_counter;
-        ctx->input.mouse_pressed = 0; // consume popup selection click
+        ctx->input.mouse_pressed = 0; // consume popup
+                                      // selection click
       }
     }
     note_content_bounds(ctx, ix + intrinsic_w, logical_y + box_h + popup_h);
@@ -3428,7 +3552,9 @@ void mdgui_frame_time_graph(MDGUI_Context *ctx, const float *frame_ms_samples,
   const int logical_y = ctx->content_y + std::max(y, top_margin);
   const int iy = logical_y - win.text_scroll;
 
-  // Height 0/negative mirrors dynamic width behavior: fill remaining viewport.
+  // Height 0/negative mirrors dynamic
+  // width behavior: fill remaining
+  // viewport.
   if (requested_h == 0 || requested_h < 0) {
     const int viewport_bottom = win.y + win.h - 4;
     int avail_h = viewport_bottom - logical_y;
@@ -3506,10 +3632,13 @@ void mdgui_frame_time_graph(MDGUI_Context *ctx, const float *frame_ms_samples,
   if (requested_w <= 0)
     intrinsic_w = 24;
 
-  // In fill mode, the graph tracks current window height. Reporting that full
-  // height as required content would ratchet min_h upward and prevent
-  // shrinking. Report only a minimal intrinsic height for min-size
-  // calculations.
+  // In fill mode, the graph tracks
+  // current window height. Reporting
+  // that full height as required
+  // content would ratchet min_h
+  // upward and prevent shrinking.
+  // Report only a minimal intrinsic
+  // height for min-size calculations.
   const int intrinsic_h = fill_mode ? 12 : h;
   note_content_bounds(ctx, ix + intrinsic_w, logical_y + intrinsic_h);
   if (fill_mode) {
@@ -4086,15 +4215,19 @@ int mdgui_message_box_ex(MDGUI_Context *ctx, const char *id, const char *title,
 
   (void)id;
   if (!mdgui_begin_window(ctx, title, x, y, box_w, box_h)) {
-    return 2; // Return "Cancel" if closed via X
+    return 2; // Return "Cancel" if
+              // closed via X
   }
   if (ctx->current_window >= 0) {
     auto &msg_win = ctx->windows[ctx->current_window];
     msg_win.z = ++ctx->z_counter;
     msg_win.disallow_maximize = true;
     msg_win.is_maximized = false;
-    // Message boxes should remain fixed-size; avoid feedback with auto min-size
-    // tracking when footer/button geometry is anchored to bottom chrome.
+    // Message boxes should remain
+    // fixed-size; avoid feedback with
+    // auto min-size tracking when
+    // footer/button geometry is
+    // anchored to bottom chrome.
     msg_win.fixed_rect = true;
     msg_win.w = box_w;
     msg_win.h = box_h;
@@ -4105,7 +4238,9 @@ int mdgui_message_box_ex(MDGUI_Context *ctx, const char *id, const char *title,
   const auto &win = ctx->windows[ctx->current_window];
   const int title_h = 12;
   const int footer_h = 16;
-  // Content is clipped to (win.y + win.h - 4); keep footer fully inside that.
+  // Content is clipped to (win.y +
+  // win.h - 4); keep footer fully
+  // inside that.
   const int footer_y = (win.y + win.h - 4) - footer_h;
   const int body_y = win.y + title_h;
   int body_h = footer_y - body_y;
@@ -4133,8 +4268,11 @@ int mdgui_message_box_ex(MDGUI_Context *ctx, const char *id, const char *title,
   const int btn_w = 70;
   const int btn_h = 12;
   const int btn_abs_y = footer_y + (footer_h - btn_h) / 2;
-  // mdgui_button applies window text_scroll to y; compensate so footer button
-  // stays visually centered regardless of scroll state.
+  // mdgui_button applies window
+  // text_scroll to y; compensate so
+  // footer button stays visually
+  // centered regardless of scroll
+  // state.
   const int btn_y = btn_abs_y - ctx->content_y + win.text_scroll;
 
   if (style == MDGUI_MSGBOX_TWO_BUTTON) {
@@ -4299,6 +4437,24 @@ void mdgui_set_tile_manager_enabled(MDGUI_Context *ctx, int enabled) {
   }
 }
 
+void mdgui_get_tiling_min_size(MDGUI_Context *ctx, int *w, int *h) {
+  if (!ctx) {
+    if (w)
+      *w = 0;
+    if (h)
+      *h = 0;
+    return;
+  }
+  // This calculates the minimum size without actually moving windows,
+  // as out_total_min_w/h are populated even if the current size is small.
+  int min_w = 0, min_h = 0;
+  tile_windows_internal(ctx, &min_w, &min_h);
+  if (w)
+    *w = min_w;
+  if (h)
+    *h = min_h;
+}
+
 int mdgui_is_tile_manager_enabled(MDGUI_Context *ctx) {
   if (!ctx)
     return 0;
@@ -4421,8 +4577,11 @@ int mdgui_begin_render_window_ex(MDGUI_Context *ctx, const char *title, int x,
   if (!ctx)
     return 0;
 
-  // Nested mode: inside an existing parent window, treat render window as a
-  // clipped child viewport anchored in parent-local coordinates.
+  // Nested mode: inside an existing
+  // parent window, treat render
+  // window as a clipped child
+  // viewport anchored in parent-local
+  // coordinates.
   if (ctx->current_window >= 0 &&
       ctx->current_window < (int)ctx->windows.size()) {
     auto &parent = ctx->windows[ctx->current_window];
@@ -4442,8 +4601,11 @@ int mdgui_begin_render_window_ex(MDGUI_Context *ctx, const char *title, int x,
     if (h < 8)
       h = 8;
 
-    // Parent content clip (active while drawing nested frame/body) so border
-    // can never bleed outside tiled/visible parent content.
+    // Parent content clip (active
+    // while drawing nested
+    // frame/body) so border can never
+    // bleed outside tiled/visible
+    // parent content.
     const int parent_clip_x = parent.x + 2;
     const int parent_clip_y = ctx->origin_y;
     int parent_clip_w = parent.w - 4;
@@ -4461,8 +4623,11 @@ int mdgui_begin_render_window_ex(MDGUI_Context *ctx, const char *title, int x,
         (ix >= parent_clip_x) && (iy >= parent_clip_y) &&
         ((ix + w) <= parent_clip_x2) && ((iy + h) <= parent_clip_y2);
     if (!fully_inside_parent) {
-      // In tiled/scroll-constrained parents, nested viewports that are not
-      // fully within the visible content region should not render at all.
+      // In tiled/scroll-constrained
+      // parents, nested viewports
+      // that are not fully within the
+      // visible content region should
+      // not render at all.
       note_content_bounds(ctx, ix + w, logical_y + h);
       ctx->content_y = logical_y + h + 4;
       if (out_x)
@@ -4507,7 +4672,8 @@ int mdgui_begin_render_window_ex(MDGUI_Context *ctx, const char *title, int x,
     if (ch < 1)
       ch = 1;
 
-    // Intersect child content clip with parent content clip.
+    // Intersect child content clip
+    // with parent content clip.
     int clip_x1 = cx;
     int clip_y1 = cy;
     int clip_x2 = cx + cw;
@@ -4648,7 +4814,8 @@ void mdgui_run_window_pass(MDGUI_Context *ctx,
 void mdgui_open_file_browser(MDGUI_Context *ctx) {
   if (!ctx)
     return;
-  // Prevent same-frame click-through from the opener button/menu item.
+  // Prevent same-frame click-through
+  // from the opener button/menu item.
   ctx->input.mouse_pressed = 0;
   const int idx = find_or_create_window(ctx, "File Browser", 28, 20, 280, 180);
   if (idx >= 0 && idx < (int)ctx->windows.size()) {
@@ -4745,7 +4912,9 @@ const char *mdgui_show_file_browser(MDGUI_Context *ctx) {
                        list_x + list_w + 1, list_y + list_h + 1);
   mdgui_fill_rect_idx(nullptr, CLR_BOX_BODY, list_x, list_y, list_w, list_h);
 
-  // Clip row text to the virtual list viewport so long names can't bleed out.
+  // Clip row text to the virtual list
+  // viewport so long names can't
+  // bleed out.
   mdgui_backend_set_clip_rect(1, list_x, list_y, content_w, list_h);
 
   int clicked = 0;
@@ -4920,12 +5089,15 @@ void mdgui_show_demo_window(MDGUI_Context *ctx) {
       }
     }
 
-    // Reserve footer space, but only show the close action when scrolled near
-    // the bottom of content.
+    // Reserve footer space, but only
+    // show the close action when
+    // scrolled near the bottom of
+    // content.
     const auto &win = ctx->windows[ctx->current_window];
     const int viewport_h = (win.y + win.h - 4) - ctx->origin_y;
     const int content_h_before_footer = ctx->content_y - ctx->origin_y;
-    const int footer_h = 6 + 12 + 4; // spacer + button + widget gap
+    const int footer_h = 6 + 12 + 4; // spacer + button
+                                     // + widget gap
     const int total_h_with_footer = content_h_before_footer + footer_h;
     const int max_scroll_with_footer =
         (viewport_h > 0 && total_h_with_footer > viewport_h)
