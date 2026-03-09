@@ -2922,6 +2922,7 @@ int mdgui_begin_main_menu(MDGUI_Context *ctx, const char *text) {
       ctx->open_main_menu_path[0] = ctx->main_menu_index;
       ctx->open_main_menu_index = ctx->main_menu_index;
     }
+    ctx->input.mouse_pressed = 0;
   }
 
   const int open =
@@ -2975,6 +2976,7 @@ int mdgui_main_menu_item(MDGUI_Context *ctx, const char *text) {
   if (hovered && ctx->input.mouse_pressed) {
     ctx->open_main_menu_path.clear();
     ctx->open_main_menu_index = -1;
+    ctx->input.mouse_pressed = 0;
     return 1;
   }
   return 0;
@@ -3039,6 +3041,7 @@ int mdgui_begin_main_submenu(MDGUI_Context *ctx, const char *text) {
       ctx->open_main_menu_index =
           ctx->open_main_menu_path.empty() ? -1 : ctx->open_main_menu_path[0];
     }
+    ctx->input.mouse_pressed = 0;
   } else if (hovered) {
     ctx->open_main_menu_path.resize((size_t)submenu_depth + 1);
     for (int i = 0; i < submenu_depth; ++i)
