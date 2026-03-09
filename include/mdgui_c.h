@@ -89,6 +89,11 @@ enum {
   MDGUI_TILE_SIDE_EAST = MDGUI_TILE_SIDE_RIGHT,
 };
 
+enum {
+  MDGUI_WINDOW_FLAG_NONE = 0,
+  MDGUI_WINDOW_FLAG_CENTER_ON_FIRST_USE = 1 << 0,
+};
+
 MDGUI_Context *mdgui_create(void *sdl_renderer);
 MDGUI_Context *mdgui_create_with_backend(const MDGUI_RenderBackend *backend);
 void mdgui_destroy(MDGUI_Context *ctx);
@@ -100,6 +105,8 @@ void mdgui_end_frame(MDGUI_Context *ctx);
 
 int mdgui_begin_window(MDGUI_Context *ctx, const char *title, int x, int y, int w,
                       int h);
+int mdgui_begin_window_ex(MDGUI_Context *ctx, const char *title, int x, int y,
+                          int w, int h, int flags);
 void mdgui_end_window(MDGUI_Context *ctx);
 int mdgui_button(MDGUI_Context *ctx, const char *text, int x, int y, int w,
                 int h);

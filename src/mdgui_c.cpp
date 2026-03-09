@@ -774,11 +774,14 @@ static void tile_windows_internal(MDGUI_Context *ctx) {
 }
 
 static int find_or_create_window(MDGUI_Context *ctx, const char *title, int x,
-                                 int y, int w, int h) {
+                                 int y, int w, int h,
+                                 bool *out_created = nullptr) {
   const char *key = title ? title : "window";
   for (int i = 0; i < (int)ctx->windows.size(); ++i) {
     if (ctx->windows[i].id == key) {
       ctx->windows[i].title = key;
+      if (out_created)
+        *out_created = false;
       return i;
     }
   }
@@ -811,6 +814,8 @@ static int find_or_create_window(MDGUI_Context *ctx, const char *title, int x,
   nw.tile_side = MDGUI_TILE_SIDE_AUTO;
   nw.alpha = ctx->default_window_alpha;
   ctx->windows.push_back(nw);
+  if (out_created)
+    *out_created = true;
   return (int)ctx->windows.size() - 1;
 }
 
@@ -889,6 +894,29 @@ static int get_logical_render_h(MDGUI_Context *ctx) {
   if (rh <= 0)
     rh = 240;
   return rh;
+}
+
+static void center_window_rect_menu_aware(MDGUI_Context *ctx, MDGUI_Window &win) {
+  const int screen_w = get_logical_render_w(ctx);
+  const int screen_h = get_logical_render_h(ctx);
+  const int top = ctx ? ctx->main_menu_bar_h : 0;
+  const int avail_h = std::max(1, screen_h - top);
+  const int max_x = std::max(0, screen_w - win.w);
+  const int max_y = top + std::max(0, avail_h - win.h);
+
+  int x = (screen_w - win.w) / 2;
+  int y = top + ((avail_h - win.h) / 2);
+  if (x < 0)
+    x = 0;
+  if (x > max_x)
+    x = max_x;
+  if (y < top)
+    y = top;
+  if (y > max_y)
+    y = max_y;
+
+  win.x = x;
+  win.y = y;
 }
 
 static bool ci_less(const std::string &a, const std::string &b) {
@@ -1336,13 +1364,22 @@ void mdgui_end_frame(MDGUI_Context *ctx) {
   mdgui_backend_end_frame();
 }
 
-int mdgui_begin_window(MDGUI_Context *ctx, const char *title, int x, int y, int w,
-                      int h) {
+int mdgui_begin_window_ex(MDGUI_Context *ctx, const char *title, int x, int y,
+                          int w, int h, int flags) {
   if (!ctx)
     return 0;
-  const int idx = find_or_create_window(ctx, title, x, y, w, h);
+  bool created = false;
+  const int idx = find_or_create_window(ctx, title, x, y, w, h, &created);
   ctx->current_window = idx;
   auto &win = ctx->windows[idx];
+
+  if (created && (flags & MDGUI_WINDOW_FLAG_CENTER_ON_FIRST_USE)) {
+    center_window_rect_menu_aware(ctx, win);
+    win.restored_x = win.x;
+    win.restored_y = win.y;
+    win.restored_w = win.w;
+    win.restored_h = win.h;
+  }
 
   if (win.closed)
     return 0;
@@ -1579,6 +1616,11 @@ int mdgui_begin_window(MDGUI_Context *ctx, const char *title, int x, int y, int 
 
   set_content_clip(ctx);
   return 1;
+}
+
+int mdgui_begin_window(MDGUI_Context *ctx, const char *title, int x, int y,
+                       int w, int h) {
+  return mdgui_begin_window_ex(ctx, title, x, y, w, h, MDGUI_WINDOW_FLAG_NONE);
 }
 
 void mdgui_end_window(MDGUI_Context *ctx) {
