@@ -718,7 +718,7 @@ pub fn main() !void {
             if (c.mdgui_main_menu_item(ctx, "ABOUT") != 0) show_about = true;
             if (c.mdgui_main_menu_item(ctx, "DEMO") != 0) {
                 const demo_window_open = c.mdgui_is_window_open(ctx, "MDGUI Demo Window") != 0;
-                if (!show_demo or !demo_window_open) {
+                if (!demo_window_open) {
                     show_demo = true;
                     c.mdgui_set_window_open(ctx, "MDGUI Demo Window", 1);
                 } else {
@@ -731,22 +731,50 @@ pub fn main() !void {
         if (c.mdgui_begin_main_menu(ctx, "WINDOW") != 0) {
             if (c.mdgui_begin_main_submenu(ctx, "OPEN WINDOW") != 0) {
                 if (c.mdgui_main_menu_item(ctx, "Main UI") != 0) {
-                    request_open_main_ui = true;
+                    const is_open = c.mdgui_is_window_open(ctx, "MDGUI") != 0;
+                    if (is_open) {
+                        c.mdgui_set_window_open(ctx, "MDGUI", 0);
+                    } else {
+                        request_open_main_ui = true;
+                    }
                 }
                 if (c.mdgui_main_menu_item(ctx, "Demo Window") != 0) {
-                    show_demo = true;
-                    request_open_demo_window = true;
+                    const is_open = c.mdgui_is_window_open(ctx, "MDGUI Demo Window") != 0;
+                    if (is_open) {
+                        show_demo = false;
+                        c.mdgui_set_window_open(ctx, "MDGUI Demo Window", 0);
+                    } else {
+                        show_demo = true;
+                        request_open_demo_window = true;
+                    }
                 }
                 if (c.mdgui_main_menu_item(ctx, "Perf Analytics") != 0) {
-                    analytics.show_window = true;
-                    request_open_perf_analytics = true;
+                    const is_open = c.mdgui_is_window_open(ctx, "PERF ANALYTICS") != 0;
+                    if (is_open) {
+                        analytics.show_window = false;
+                        c.mdgui_set_window_open(ctx, "PERF ANALYTICS", 0);
+                    } else {
+                        analytics.show_window = true;
+                        request_open_perf_analytics = true;
+                    }
                 }
                 if (c.mdgui_main_menu_item(ctx, "Perf Graph") != 0) {
-                    analytics.show_graph = true;
-                    request_open_perf_graph = true;
+                    const is_open = c.mdgui_is_window_open(ctx, "PERF GRAPH") != 0;
+                    if (is_open) {
+                        analytics.show_graph = false;
+                        c.mdgui_set_window_open(ctx, "PERF GRAPH", 0);
+                    } else {
+                        analytics.show_graph = true;
+                        request_open_perf_graph = true;
+                    }
                 }
                 if (c.mdgui_main_menu_item(ctx, "Window API") != 0) {
-                    request_open_window_api = true;
+                    const is_open = c.mdgui_is_window_open(ctx, render_api_window_title) != 0;
+                    if (is_open) {
+                        c.mdgui_set_window_open(ctx, render_api_window_title, 0);
+                    } else {
+                        request_open_window_api = true;
+                    }
                 }
                 c.mdgui_end_main_submenu(ctx);
             }
