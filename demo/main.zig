@@ -181,7 +181,9 @@ fn drawMainWindow(ctx: ?*c.MDGUI_Context, running: *bool, open_file_browser: *bo
                 if (c.mdgui_menu_item(ctx, "Tetris.gb") != 0) open_file_browser.* = true;
                 c.mdgui_end_submenu(ctx);
             }
+            c.mdgui_menu_separator(ctx);
             if (c.mdgui_menu_item(ctx, "OPEN ROM") != 0) open_file_browser.* = true;
+            c.mdgui_menu_separator(ctx);
             if (c.mdgui_menu_item(ctx, "EXIT") != 0) running.* = false;
             c.mdgui_end_menu(ctx);
         }
@@ -549,7 +551,9 @@ pub fn main() !void {
                 if (c.mdgui_main_menu_item(ctx, "ABOUT") != 0) show_about = true;
                 c.mdgui_end_main_submenu(ctx);
             }
+            c.mdgui_main_menu_separator(ctx);
             if (c.mdgui_main_menu_item(ctx, "OPEN ROM") != 0) open_file_browser = true;
+            c.mdgui_main_menu_separator(ctx);
             if (c.mdgui_main_menu_item(ctx, "EXIT") != 0) running = false;
             c.mdgui_end_main_menu(ctx);
         }

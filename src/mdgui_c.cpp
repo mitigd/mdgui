@@ -102,6 +102,7 @@ struct MDGUI_Context {
     struct ItemDef {
       std::string text;
       int child_menu_index;
+      bool is_separator;
     };
     int x;
     int y;
@@ -846,6 +847,14 @@ static void draw_open_menu_overlay(MDGUI_Context *ctx) {
 
     for (int i = 0; i < (int)def.items.size(); ++i) {
       const int iy = def.y + (i * item_h);
+      if (def.items[i].is_separator) {
+        const int sep_y = iy + (item_h / 2);
+        mdgui_draw_hline_idx(nullptr, CLR_BUTTON_LIGHT, def.x + 4, sep_y,
+                             def.x + def.w - 4);
+        mdgui_draw_hline_idx(nullptr, CLR_BUTTON_DARK, def.x + 4, sep_y + 1,
+                             def.x + def.w - 4);
+        continue;
+      }
       const int hovered = point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y,
                                         def.x, iy, def.w, item_h);
       if (hovered) {
@@ -1036,6 +1045,14 @@ static void draw_open_main_menu_overlay(MDGUI_Context *ctx) {
 
     for (int i = 0; i < (int)def.items.size(); ++i) {
       const int iy = def.y + (i * item_h);
+      if (def.items[i].is_separator) {
+        const int sep_y = iy + (item_h / 2);
+        mdgui_draw_hline_idx(nullptr, CLR_BUTTON_LIGHT, def.x + 4, sep_y,
+                             def.x + def.w - 4);
+        mdgui_draw_hline_idx(nullptr, CLR_BUTTON_DARK, def.x + 4, sep_y + 1,
+                             def.x + def.w - 4);
+        continue;
+      }
       const int hovered = point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y,
                                         def.x, iy, def.w, item_h);
       if (hovered)
@@ -2472,7 +2489,7 @@ int mdgui_menu_item(MDGUI_Context *ctx, const char *text) {
   const int item_needed_w = item_text_w + 12;
   if (item_needed_w > def.w)
     def.w = item_needed_w;
-  def.items.push_back({text, -1});
+  def.items.push_back({text, -1, false});
   const int item_index = (int)def.items.size() - 1;
   const int item_y = def.y + (item_index * ctx->current_menu_h);
 
@@ -2483,6 +2500,13 @@ int mdgui_menu_item(MDGUI_Context *ctx, const char *text) {
     return 1;
   }
   return 0;
+}
+
+void mdgui_menu_separator(MDGUI_Context *ctx) {
+  if (!ctx || !ctx->in_menu || ctx->menu_build_stack.empty())
+    return;
+  auto &def = ctx->menu_defs[ctx->menu_build_stack.back()];
+  def.items.push_back({"", -1, true});
 }
 
 int mdgui_begin_submenu(MDGUI_Context *ctx, const char *text) {
@@ -2496,7 +2520,7 @@ int mdgui_begin_submenu(MDGUI_Context *ctx, const char *text) {
   const int item_needed_w = item_text_w + 20;
   if (item_needed_w > parent.w)
     parent.w = item_needed_w;
-  parent.items.push_back({text, -1});
+  parent.items.push_back({text, -1, false});
   const int item_index = (int)parent.items.size() - 1;
   const int item_y = parent.y + (item_index * item_h);
 
@@ -2665,7 +2689,7 @@ int mdgui_main_menu_item(MDGUI_Context *ctx, const char *text) {
   const int item_needed_w = item_text_w + 12;
   if (item_needed_w > def.w)
     def.w = item_needed_w;
-  def.items.push_back({text, -1});
+  def.items.push_back({text, -1, false});
   const int item_index = (int)def.items.size() - 1;
   const int item_y = def.y + (item_index * ctx->current_menu_h);
   const int hovered = point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y,
@@ -2679,6 +2703,13 @@ int mdgui_main_menu_item(MDGUI_Context *ctx, const char *text) {
   return 0;
 }
 
+void mdgui_main_menu_separator(MDGUI_Context *ctx) {
+  if (!ctx || !ctx->in_main_menu || ctx->main_menu_build_stack.empty())
+    return;
+  auto &def = ctx->main_menu_defs[ctx->main_menu_build_stack.back()];
+  def.items.push_back({"", -1, true});
+}
+
 int mdgui_begin_main_submenu(MDGUI_Context *ctx, const char *text) {
   if (!ctx || !ctx->in_main_menu || !text || ctx->main_menu_build_stack.empty())
     return 0;
@@ -2688,7 +2719,7 @@ int mdgui_begin_main_submenu(MDGUI_Context *ctx, const char *text) {
   const int item_needed_w = item_text_w + 20;
   if (item_needed_w > parent.w)
     parent.w = item_needed_w;
-  parent.items.push_back({text, -1});
+  parent.items.push_back({text, -1, false});
   const int item_index = (int)parent.items.size() - 1;
   const int item_y = parent.y + (item_index * item_h);
 
