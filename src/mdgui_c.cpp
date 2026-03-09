@@ -176,6 +176,13 @@ struct MDGUI_Context {
   int combo_overlay_item_count;
   int combo_overlay_selected;
   const char **combo_overlay_items;
+  bool combo_capture_active;
+  bool combo_capture_seen_this_frame;
+  int combo_capture_window;
+  int combo_capture_x;
+  int combo_capture_y;
+  int combo_capture_w;
+  int combo_capture_h;
 
   bool file_browser_open;
   std::string file_browser_cwd;
@@ -292,6 +299,16 @@ static bool point_in_menu_popup_chain(
 
 static int top_window_at_point(const MDGUI_Context *ctx, int px, int py,
                                int margin = 0) {
+  if (ctx->combo_capture_active && ctx->combo_capture_window >= 0 &&
+      ctx->combo_capture_window < (int)ctx->windows.size()) {
+    const auto &ow = ctx->windows[ctx->combo_capture_window];
+    if (!ow.closed && point_in_rect(px, py, ctx->combo_capture_x,
+                                    ctx->combo_capture_y, ctx->combo_capture_w,
+                                    ctx->combo_capture_h)) {
+      return ctx->combo_capture_window;
+    }
+  }
+
   int best = -1;
   int best_z = -2147483647;
   for (int i = 0; i < (int)ctx->windows.size(); ++i) {
@@ -1213,6 +1230,13 @@ MDGUI_Context *mdgui_create_with_backend(const MDGUI_RenderBackend *backend) {
   ctx->combo_overlay_item_count = 0;
   ctx->combo_overlay_selected = -1;
   ctx->combo_overlay_items = nullptr;
+  ctx->combo_capture_active = false;
+  ctx->combo_capture_seen_this_frame = false;
+  ctx->combo_capture_window = -1;
+  ctx->combo_capture_x = 0;
+  ctx->combo_capture_y = 0;
+  ctx->combo_capture_w = 0;
+  ctx->combo_capture_h = 0;
   ctx->file_browser_open = false;
   ctx->file_browser_cwd = ".";
   ctx->file_browser_selected = -1;
@@ -1269,6 +1293,7 @@ void mdgui_begin_frame(MDGUI_Context *ctx, const MDGUI_Input *input) {
   mdgui_backend_set_alpha_mod(255);
   mdgui_backend_begin_frame();
   ctx->input = *input;
+  ctx->combo_capture_seen_this_frame = false;
   const bool main_menu_modal = !ctx->open_main_menu_path.empty();
   if (ctx->custom_cursor_enabled && ctx->cursor_anim_count > 1) {
     const unsigned long long ticks = mdgui_backend_get_ticks_ms();
@@ -1371,6 +1396,15 @@ void mdgui_end_frame(MDGUI_Context *ctx) {
   }
 
   draw_open_main_menu_overlay(ctx);
+
+  if (ctx->combo_capture_active && !ctx->combo_capture_seen_this_frame) {
+    ctx->combo_capture_active = false;
+    ctx->combo_capture_window = -1;
+    ctx->combo_capture_x = 0;
+    ctx->combo_capture_y = 0;
+    ctx->combo_capture_w = 0;
+    ctx->combo_capture_h = 0;
+  }
 
   ctx->current_window = -1;
   ctx->in_menu_bar = false;
@@ -1708,6 +1742,13 @@ void mdgui_end_window(MDGUI_Context *ctx) {
     const int item_h = ctx->combo_overlay_item_h;
     const int item_count = ctx->combo_overlay_item_count;
     const int popup_h = item_count * item_h;
+    ctx->combo_capture_active = true;
+    ctx->combo_capture_seen_this_frame = true;
+    ctx->combo_capture_window = ctx->current_window;
+    ctx->combo_capture_x = ix;
+    ctx->combo_capture_y = popup_y;
+    ctx->combo_capture_w = w;
+    ctx->combo_capture_h = popup_h;
     mdgui_draw_frame_idx(nullptr, CLR_TEXT_DARK, ix - 1, popup_y - 1, ix + w + 1,
             popup_y + popup_h + 1);
     mdgui_fill_rect_idx(nullptr, CLR_MENU_BG, ix, popup_y, w, popup_h);
