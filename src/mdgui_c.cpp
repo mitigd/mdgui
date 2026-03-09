@@ -32,7 +32,7 @@ constexpr int CLR_MSG_BAR = 244;
 constexpr int CLR_ACCENT = 247;
 constexpr int CLR_WINDOW_BORDER = 248;
 constexpr int MENU_POPUP_GAP_Y = 2;
-constexpr int STATUS_BAR_DEFAULT_H = 10;
+constexpr int STATUS_BAR_DEFAULT_H = 12;
 
 struct MDGUI_Window {
   struct CollapsingState {
@@ -1072,7 +1072,7 @@ static void draw_status_bar(MDGUI_Context *ctx) {
   mdgui_draw_hline_idx(nullptr, CLR_WINDOW_BORDER, 0, bar_y, rw - 1);
   if (mdgui_fonts[1] && !ctx->status_bar_text.empty()) {
     mdgui_fonts[1]->drawText(ctx->status_bar_text.c_str(), nullptr, 3,
-                             bar_y + 1, CLR_MENU_TEXT);
+                             bar_y + 2, CLR_MENU_TEXT);
   }
 }
 
