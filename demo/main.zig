@@ -37,6 +37,15 @@ fn clamp01(v: f32) f32 {
     return v;
 }
 
+fn alphaByteFromFloat(v: f32) u8 {
+    const clamped = clamp01(v);
+    return @as(u8, @intFromFloat(clamped * 255.0 + 0.5));
+}
+
+fn alphaFloatFromByte(v: u8) f32 {
+    return @as(f32, @floatFromInt(v)) / 255.0;
+}
+
 fn analyticsPush(a: *Analytics, frame_ms: f32) void {
     const clamped_ms = if (frame_ms < 0.01) 0.01 else frame_ms;
     const fps = 1000.0 / clamped_ms;
@@ -163,8 +172,8 @@ fn drawAnalyticsWindow(ctx: ?*c.MDGUI_Context, analytics: *Analytics) void {
     c.mdgui_end_window(ctx);
 }
 
-fn drawMainWindow(ctx: ?*c.MDGUI_Context, running: *bool, open_file_browser: *bool) void {
-    if (c.mdgui_begin_window(ctx, "MDGUI", 10, 10, 190, 130) != 0) {
+fn drawMainWindow(ctx: ?*c.MDGUI_Context, running: *bool, open_file_browser: *bool, windows_alpha: *f32) void {
+    if (c.mdgui_begin_window(ctx, "MDGUI", 10, 10, 220, 170) != 0) {
         c.mdgui_begin_menu_bar(ctx);
         if (c.mdgui_begin_menu(ctx, "FILE") != 0) {
             if (c.mdgui_begin_submenu(ctx, "OPEN RECENT") != 0) {
@@ -185,6 +194,19 @@ fn drawMainWindow(ctx: ?*c.MDGUI_Context, running: *bool, open_file_browser: *bo
         c.mdgui_label(ctx, "Demo window is draggable.", 8, 6);
         if (c.mdgui_button(ctx, "LOAD ROM", 10, 20, 90, 20) != 0) open_file_browser.* = true;
         _ = c.mdgui_button(ctx, "OPTIONS", 10, 45, 90, 20);
+        c.mdgui_spacer(ctx, 70);
+
+        c.mdgui_label(ctx, "Window transparency", 10, 2);
+        var slider_alpha = windows_alpha.*;
+        _ = c.mdgui_slider(ctx, null, &slider_alpha, 0.0, 1.0, 10, 2, -16);
+        slider_alpha = clamp01(slider_alpha);
+        windows_alpha.* = slider_alpha;
+        c.mdgui_set_windows_alpha(ctx, alphaByteFromFloat(slider_alpha));
+
+        var alpha_line: [64]u8 = undefined;
+        const alpha_pct = @as(c_int, @intFromFloat(slider_alpha * 100.0 + 0.5));
+        const alpha_txt = std.fmt.bufPrintZ(&alpha_line, "Window alpha: {d}%", .{alpha_pct}) catch "Window alpha";
+        c.mdgui_label(ctx, alpha_txt.ptr, 10, 4);
         c.mdgui_end_window(ctx);
     }
 }
@@ -213,13 +235,15 @@ fn drawWindowApiDemo(ctx: ?*c.MDGUI_Context, renderer: ?*c.SDL_Renderer, show_wi
         &view_w,
         &view_h,
     ) != 0) {
+        const window_alpha = c.mdgui_get_window_alpha(ctx, render_api_window_title);
+        _ = c.SDL_SetRenderDrawBlendMode(renderer, c.SDL_BLENDMODE_BLEND);
         var bg = c.SDL_FRect{
             .x = @floatFromInt(view_x),
             .y = @floatFromInt(view_y),
             .w = @floatFromInt(view_w),
             .h = @floatFromInt(view_h),
         };
-        _ = c.SDL_SetRenderDrawColor(renderer, 0x12, 0x12, 0x12, 0xff);
+        _ = c.SDL_SetRenderDrawColor(renderer, 0x12, 0x12, 0x12, window_alpha);
         _ = c.SDL_RenderFillRect(renderer, &bg);
 
         // Get accent color from current theme
@@ -244,9 +268,9 @@ fn drawWindowApiDemo(ctx: ?*c.MDGUI_Context, renderer: ?*c.SDL_Renderer, show_wi
             var tx: c_int = 0;
             while (tx < view_w) : (tx += tile_w) {
                 if (@mod(@divTrunc(tx, tile_w) + @divTrunc(ty, tile_h), @as(c_int, 2)) == 0) {
-                    _ = c.SDL_SetRenderDrawColor(renderer, light_r, light_g, light_b, 0xff);
+                    _ = c.SDL_SetRenderDrawColor(renderer, light_r, light_g, light_b, window_alpha);
                 } else {
-                    _ = c.SDL_SetRenderDrawColor(renderer, dark_r, dark_g, dark_b, 0xff);
+                    _ = c.SDL_SetRenderDrawColor(renderer, dark_r, dark_g, dark_b, window_alpha);
                 }
                 const cw: c_int = @min(tile_w, view_w - tx);
                 const ch: c_int = @min(tile_h, view_h - ty);
@@ -408,6 +432,7 @@ pub fn main() !void {
     var selected_rom_buf: [512]u8 = [_]u8{0} ** 512;
     var has_selected_rom = false;
     var analytics = Analytics{};
+    var windows_alpha = alphaFloatFromByte(c.mdgui_get_windows_alpha(ctx));
     c.mdgui_set_tile_manager_enabled(ctx, if (startup_tile_windows) 1 else 0);
     const perf_freq = c.SDL_GetPerformanceFrequency();
     var last_counter = c.SDL_GetPerformanceCounter();
@@ -585,6 +610,7 @@ pub fn main() !void {
             c.mdgui_end_main_menu(ctx);
         }
         c.mdgui_end_main_menu_bar(ctx);
+        c.mdgui_set_windows_alpha(ctx, alphaByteFromFloat(windows_alpha));
 
         const DrawKind = enum { main_window, demo, perf_analytics, emu_view, perf_graph };
         var draw_kinds: [5]DrawKind = undefined;
@@ -633,7 +659,7 @@ pub fn main() !void {
         i = 0;
         while (i < draw_count) : (i += 1) {
             switch (draw_kinds[i]) {
-                .main_window => drawMainWindow(ctx, &running, &open_file_browser),
+                .main_window => drawMainWindow(ctx, &running, &open_file_browser, &windows_alpha),
                 .demo => drawDemoWindow(ctx, show_demo),
                 .perf_analytics => drawAnalyticsWindow(ctx, &analytics),
                 .emu_view => drawWindowApiDemo(ctx, renderer, show_window_api_menu),

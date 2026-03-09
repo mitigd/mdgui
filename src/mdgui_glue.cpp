@@ -20,6 +20,7 @@ Color g_palette[256];
 Color g_custom_palette[256];
 bool g_has_custom_palette[256];
 int g_theme_id = MDGUI_THEME_DEFAULT;
+unsigned char g_alpha_mod = 0xff;
 
 bool backend_ready() {
   return g_has_backend && g_backend.set_clip_rect && g_backend.fill_rect_rgba &&
@@ -172,6 +173,11 @@ void rebuild_palette() {
 
 Color palette_color(unsigned char idx) { return g_palette[idx]; }
 
+unsigned char apply_alpha_mod(unsigned char a) {
+  return (unsigned char)(((unsigned int)a * (unsigned int)g_alpha_mod + 127u) /
+                         255u);
+}
+
 void draw_glyph_bits(const unsigned char *glyph, int x, int y,
                     unsigned char color_idx) {
   if (!backend_ready())
@@ -181,7 +187,8 @@ void draw_glyph_bits(const unsigned char *glyph, int x, int y,
     const unsigned char row = glyph[py];
     for (int px = 0; px < 8; px++) {
       if (row & (1u << px)) {
-        g_backend.draw_point_rgba(g_backend.user_data, c.r, c.g, c.b, c.a,
+        g_backend.draw_point_rgba(g_backend.user_data, c.r, c.g, c.b,
+                                  apply_alpha_mod(c.a),
                                   x + px, y + py);
       }
     }
@@ -193,7 +200,7 @@ bool draw_glyph_fast(unsigned char glyph, int x, int y, unsigned char color_idx)
     return false;
   const Color c = palette_color(color_idx);
   return g_backend.draw_glyph_rgba(g_backend.user_data, glyph, x, y, c.r, c.g,
-                                   c.b, c.a) != 0;
+                                   c.b, apply_alpha_mod(c.a)) != 0;
 }
 
 const unsigned char *glyph_for_char(unsigned char c) {
@@ -227,11 +234,13 @@ void mdgui_bind_backend(const MDGUI_RenderBackend *backend) {
   if (!backend) {
     g_has_backend = false;
     memset(&g_backend, 0, sizeof(g_backend));
+    g_alpha_mod = 0xff;
     rebuild_palette();
     return;
   }
   g_backend = *backend;
   g_has_backend = true;
+  g_alpha_mod = 0xff;
   rebuild_palette();
 }
 
@@ -250,6 +259,10 @@ void mdgui_backend_set_clip_rect(int enabled, int x, int y, int w, int h) {
     return;
   g_backend.set_clip_rect(g_backend.user_data, enabled, x, y, w, h);
 }
+
+void mdgui_backend_set_alpha_mod(unsigned char alpha) { g_alpha_mod = alpha; }
+
+unsigned char mdgui_backend_get_alpha_mod(void) { return g_alpha_mod; }
 
 int mdgui_backend_get_render_size(int *out_w, int *out_h) {
   if (!backend_ready()) {
@@ -312,15 +325,16 @@ void mdgui_fill_rect_idx(char *d, int idx, int x, int y, int w, int h) {
   if (!backend_ready())
     return;
   const Color c = palette_color((unsigned char)idx);
-  g_backend.fill_rect_rgba(g_backend.user_data, c.r, c.g, c.b, c.a, x, y, w,
-                           h);
+  g_backend.fill_rect_rgba(g_backend.user_data, c.r, c.g, c.b,
+                           apply_alpha_mod(c.a), x, y, w, h);
 }
 
 void mdgui_draw_hline_idx(char *d, int idx, int x1, int y, int x2) {
   if (!backend_ready())
     return;
   const Color c = palette_color((unsigned char)idx);
-  g_backend.draw_line_rgba(g_backend.user_data, c.r, c.g, c.b, c.a, x1, y,
+  g_backend.draw_line_rgba(g_backend.user_data, c.r, c.g, c.b,
+                           apply_alpha_mod(c.a), x1, y,
                            x2 - 1, y);
 }
 
@@ -328,7 +342,8 @@ void mdgui_draw_vline_idx(char *d, int idx, int x, int y1, int y2) {
   if (!backend_ready())
     return;
   const Color c = palette_color((unsigned char)idx);
-  g_backend.draw_line_rgba(g_backend.user_data, c.r, c.g, c.b, c.a, x, y1, x,
+  g_backend.draw_line_rgba(g_backend.user_data, c.r, c.g, c.b,
+                           apply_alpha_mod(c.a), x, y1, x,
                            y2 - 1);
 }
 
@@ -351,7 +366,8 @@ void mdgui_draw_line_idx(char *d, int idx, int x1, int y1, int x2, int y2) {
   if (!backend_ready())
     return;
   const Color c = palette_color((unsigned char)idx);
-  g_backend.draw_line_rgba(g_backend.user_data, c.r, c.g, c.b, c.a, x1, y1,
+  g_backend.draw_line_rgba(g_backend.user_data, c.r, c.g, c.b,
+                           apply_alpha_mod(c.a), x1, y1,
                            x2, y2);
 }
 }

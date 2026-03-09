@@ -135,6 +135,11 @@ int mdgui_is_window_open(MDGUI_Context *ctx, const char *title);
 void mdgui_focus_window(MDGUI_Context *ctx, const char *title);
 void mdgui_set_window_rect(MDGUI_Context *ctx, const char *title, int x, int y,
                           int w, int h);
+void mdgui_set_window_alpha(MDGUI_Context *ctx, const char *title,
+                            unsigned char alpha);
+unsigned char mdgui_get_window_alpha(MDGUI_Context *ctx, const char *title);
+void mdgui_set_windows_alpha(MDGUI_Context *ctx, unsigned char alpha);
+unsigned char mdgui_get_windows_alpha(MDGUI_Context *ctx);
 void mdgui_set_windows_locked(MDGUI_Context *ctx, int locked);
 int mdgui_is_windows_locked(MDGUI_Context *ctx);
 void mdgui_set_tile_manager_enabled(MDGUI_Context *ctx, int enabled);

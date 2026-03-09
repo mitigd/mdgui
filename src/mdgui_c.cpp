@@ -56,6 +56,7 @@ struct MDGUI_Window {
   bool disallow_maximize;
   int tile_weight;
   int tile_side;
+  unsigned char alpha;
 };
 
 struct FileBrowserEntry {
@@ -144,6 +145,7 @@ struct MDGUI_Context {
   bool window_has_nonlabel_widget;
   bool windows_locked;
   bool tile_manager_enabled;
+  unsigned char default_window_alpha;
 
   bool combo_overlay_pending;
   int combo_overlay_window;
@@ -806,6 +808,7 @@ static int find_or_create_window(MDGUI_Context *ctx, const char *title, int x,
   nw.disallow_maximize = false;
   nw.tile_weight = 1;
   nw.tile_side = MDGUI_TILE_SIDE_AUTO;
+  nw.alpha = ctx->default_window_alpha;
   ctx->windows.push_back(nw);
   return (int)ctx->windows.size() - 1;
 }
@@ -1124,6 +1127,7 @@ MDGUI_Context *mdgui_create_with_backend(const MDGUI_RenderBackend *backend) {
   ctx->window_has_nonlabel_widget = false;
   ctx->windows_locked = false;
   ctx->tile_manager_enabled = false;
+  ctx->default_window_alpha = 255;
   ctx->combo_overlay_pending = false;
   ctx->combo_overlay_window = -1;
   ctx->combo_overlay_x = 0;
@@ -1186,6 +1190,7 @@ void mdgui_begin_frame(MDGUI_Context *ctx, const MDGUI_Input *input) {
   if (!ctx || !input)
     return;
   mdgui_bind_backend(&ctx->backend);
+  mdgui_backend_set_alpha_mod(255);
   mdgui_backend_begin_frame();
   ctx->input = *input;
   const bool main_menu_modal = !ctx->open_main_menu_path.empty();
@@ -1496,6 +1501,9 @@ int mdgui_begin_window(MDGUI_Context *ctx, const char *title, int x, int y, int 
   const int focused = (top_window_at_point(ctx, ctx->input.mouse_x,
                                            ctx->input.mouse_y) == idx) ||
                       (win.z == ctx->z_counter);
+  (void)focused;
+
+  mdgui_backend_set_alpha_mod(win.alpha);
 
   mdgui_fill_rect_idx(nullptr, CLR_BOX_TITLE, win.x, win.y, win.w, title_h);
   mdgui_fill_rect_idx(nullptr, CLR_BOX_BODY, win.x, win.y + title_h, win.w,
@@ -1715,6 +1723,7 @@ void mdgui_end_window(MDGUI_Context *ctx) {
   ctx->has_menu_bar = false;
   ctx->menu_defs.clear();
   ctx->menu_build_stack.clear();
+  mdgui_backend_set_alpha_mod(255);
 }
 
 int mdgui_button(MDGUI_Context *ctx, const char *text, int x, int y, int w,
@@ -1997,15 +2006,34 @@ int mdgui_slider(MDGUI_Context *ctx, const char *text, float *val, float min,
     result = 1;
   }
 
-  if (text && mdgui_fonts[1]) {
-    mdgui_fonts[1]->drawText(text, nullptr, ix + w + 4, iy + 1, CLR_TEXT_LIGHT);
-  }
   const int text_w = (text && mdgui_fonts[1]) ? mdgui_fonts[1]->measureTextWidth(text) : 0;
+  int label_right = ix + w;
+  if (text && mdgui_fonts[1] && text_w > 0) {
+    const int content_left = win.x + 2;
+    const int content_right = win.x + win.w - 4;
+    const int right_label_x = ix + w + 4;
+    const int right_room = content_right - right_label_x;
+    int label_x = right_label_x;
+    int label_y = iy + 1;
+
+    // Prefer right-side labels, but if they don't fit then place above slider.
+    if (text_w > right_room) {
+      label_x = ix;
+      label_y = iy - 9;
+    }
+    if (label_x < content_left)
+      label_x = content_left;
+    if (label_x + text_w > content_right)
+      label_x = std::max(content_left, content_right - text_w);
+
+    mdgui_fonts[1]->drawText(text, nullptr, label_x, label_y, CLR_TEXT_LIGHT);
+    label_right = label_x + text_w;
+  }
   int intrinsic_slider_w = w;
   if (requested_w <= 0)
     intrinsic_slider_w = 24;
-  note_content_bounds(ctx, ix + intrinsic_slider_w + 4 + text_w,
-                      logical_y + thumb_h);
+  const int slider_right = ix + intrinsic_slider_w;
+  note_content_bounds(ctx, std::max(slider_right, label_right), logical_y + thumb_h);
 
   const int bottom_margin = 4;
   ctx->content_y += std::max(y, top_margin) + thumb_h + bottom_margin;
@@ -2961,6 +2989,45 @@ int mdgui_is_windows_locked(MDGUI_Context *ctx) {
   if (!ctx)
     return 0;
   return ctx->windows_locked ? 1 : 0;
+}
+
+void mdgui_set_window_alpha(MDGUI_Context *ctx, const char *title,
+                            unsigned char alpha) {
+  if (!ctx || !title)
+    return;
+  for (int i = 0; i < (int)ctx->windows.size(); ++i) {
+    auto &win = ctx->windows[i];
+    if (win.id != title)
+      continue;
+    win.alpha = alpha;
+    return;
+  }
+}
+
+unsigned char mdgui_get_window_alpha(MDGUI_Context *ctx, const char *title) {
+  if (!ctx || !title)
+    return 255;
+  for (int i = 0; i < (int)ctx->windows.size(); ++i) {
+    const auto &win = ctx->windows[i];
+    if (win.id == title)
+      return win.alpha;
+  }
+  return 255;
+}
+
+void mdgui_set_windows_alpha(MDGUI_Context *ctx, unsigned char alpha) {
+  if (!ctx)
+    return;
+  ctx->default_window_alpha = alpha;
+  for (int i = 0; i < (int)ctx->windows.size(); ++i) {
+    ctx->windows[i].alpha = alpha;
+  }
+}
+
+unsigned char mdgui_get_windows_alpha(MDGUI_Context *ctx) {
+  if (!ctx)
+    return 255;
+  return ctx->default_window_alpha;
 }
 
 void mdgui_set_tile_manager_enabled(MDGUI_Context *ctx, int enabled) {

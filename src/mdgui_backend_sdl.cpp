@@ -119,6 +119,7 @@ void sdl_fill_rect_rgba(void *user_data, unsigned char r, unsigned char g,
   SDL_Renderer *renderer = (SDL_Renderer *)user_data;
   if (!renderer)
     return;
+  SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
   SDL_SetRenderDrawColor(renderer, r, g, b, a);
   SDL_FRect rect = {(float)x, (float)y, (float)w, (float)h};
   SDL_RenderFillRect(renderer, &rect);
@@ -130,6 +131,7 @@ void sdl_draw_line_rgba(void *user_data, unsigned char r, unsigned char g,
   SDL_Renderer *renderer = (SDL_Renderer *)user_data;
   if (!renderer)
     return;
+  SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
   SDL_SetRenderDrawColor(renderer, r, g, b, a);
   SDL_RenderLine(renderer, (float)x1, (float)y1, (float)x2, (float)y2);
 }
@@ -139,6 +141,7 @@ void sdl_draw_point_rgba(void *user_data, unsigned char r, unsigned char g,
   SDL_Renderer *renderer = (SDL_Renderer *)user_data;
   if (!renderer)
     return;
+  SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
   SDL_SetRenderDrawColor(renderer, r, g, b, a);
   SDL_RenderPoint(renderer, (float)x, (float)y);
 }
