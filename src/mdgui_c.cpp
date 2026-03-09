@@ -297,6 +297,22 @@ static bool point_in_menu_popup_chain(
   return false;
 }
 
+static void reposition_child_menu_chain(
+    std::vector<MDGUI_Context::MenuDef> &defs, int menu_index, int item_h) {
+  if (menu_index < 0 || menu_index >= (int)defs.size() || item_h <= 0)
+    return;
+  auto &parent = defs[menu_index];
+  for (int i = 0; i < (int)parent.items.size(); ++i) {
+    const int child_idx = parent.items[i].child_menu_index;
+    if (child_idx < 0 || child_idx >= (int)defs.size())
+      continue;
+    auto &child = defs[child_idx];
+    child.x = parent.x + parent.w + MENU_POPUP_GAP_Y;
+    child.y = parent.y + (i * item_h);
+    reposition_child_menu_chain(defs, child_idx, item_h);
+  }
+}
+
 static int top_window_at_point(const MDGUI_Context *ctx, int px, int py,
                                int margin = 0) {
   if (ctx->combo_capture_active && ctx->combo_capture_window >= 0 &&
@@ -884,7 +900,8 @@ static void draw_open_menu_overlay(MDGUI_Context *ctx) {
     return;
 
   const int item_h = ctx->current_menu_h;
-  for (int menu_idx : win.open_menu_path) {
+  for (int depth = 0; depth < (int)win.open_menu_path.size(); ++depth) {
+    const int menu_idx = win.open_menu_path[depth];
     if (menu_idx < 0 || menu_idx >= (int)ctx->menu_defs.size())
       continue;
     auto &def = ctx->menu_defs[menu_idx];
@@ -912,6 +929,20 @@ static void draw_open_menu_overlay(MDGUI_Context *ctx) {
                                         def.x, iy, def.w, item_h);
       if (hovered) {
         mdgui_fill_rect_idx(nullptr, CLR_ACCENT, def.x, iy, def.w, item_h);
+        if (def.items[i].child_menu_index >= 0) {
+          const int child_idx = def.items[i].child_menu_index;
+          const int want_size = depth + 2;
+          if ((int)win.open_menu_path.size() < want_size) {
+            win.open_menu_path.resize((size_t)want_size);
+          }
+          win.open_menu_path[depth + 1] = child_idx;
+          win.open_menu_index =
+              win.open_menu_path.empty() ? -1 : win.open_menu_path[0];
+        } else if ((int)win.open_menu_path.size() > depth + 1) {
+          win.open_menu_path.resize((size_t)depth + 1);
+          win.open_menu_index =
+              win.open_menu_path.empty() ? -1 : win.open_menu_path[0];
+        }
       }
       if (mdgui_fonts[1]) {
         mdgui_fonts[1]->drawText(def.items[i].text.c_str(), nullptr, def.x + 4, iy + 1,
@@ -1105,7 +1136,8 @@ static void draw_open_main_menu_overlay(MDGUI_Context *ctx) {
     return;
 
   const int item_h = ctx->current_menu_h;
-  for (int menu_idx : ctx->open_main_menu_path) {
+  for (int depth = 0; depth < (int)ctx->open_main_menu_path.size(); ++depth) {
+    const int menu_idx = ctx->open_main_menu_path[depth];
     if (menu_idx < 0 || menu_idx >= (int)ctx->main_menu_defs.size())
       continue;
     auto &def = ctx->main_menu_defs[menu_idx];
@@ -1131,8 +1163,25 @@ static void draw_open_main_menu_overlay(MDGUI_Context *ctx) {
       }
       const int hovered = point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y,
                                         def.x, iy, def.w, item_h);
-      if (hovered)
+      if (hovered) {
         mdgui_fill_rect_idx(nullptr, CLR_ACCENT, def.x, iy, def.w, item_h);
+        if (def.items[i].child_menu_index >= 0) {
+          const int child_idx = def.items[i].child_menu_index;
+          const int want_size = depth + 2;
+          if ((int)ctx->open_main_menu_path.size() < want_size) {
+            ctx->open_main_menu_path.resize((size_t)want_size);
+          }
+          ctx->open_main_menu_path[depth + 1] = child_idx;
+          ctx->open_main_menu_index = ctx->open_main_menu_path.empty()
+                                          ? -1
+                                          : ctx->open_main_menu_path[0];
+        } else if ((int)ctx->open_main_menu_path.size() > depth + 1) {
+          ctx->open_main_menu_path.resize((size_t)depth + 1);
+          ctx->open_main_menu_index = ctx->open_main_menu_path.empty()
+                                          ? -1
+                                          : ctx->open_main_menu_path[0];
+        }
+      }
       if (mdgui_fonts[1]) {
         mdgui_fonts[1]->drawText(def.items[i].text.c_str(), nullptr, def.x + 4, iy + 1,
                       CLR_MENU_TEXT);
@@ -1712,8 +1761,7 @@ void mdgui_end_window(MDGUI_Context *ctx) {
   auto &win = ctx->windows[ctx->current_window];
   mdgui_backend_set_clip_rect(0, 0, 0, 0, 0);
 
-  if (!win.open_menu_path.empty() && ctx->input.mouse_pressed &&
-      win.z == ctx->z_counter) {
+  if (!win.open_menu_path.empty() && ctx->input.mouse_pressed) {
     bool in_menu_bar = false;
 
     if (ctx->has_menu_bar) {
@@ -2615,6 +2663,8 @@ int mdgui_begin_menu(MDGUI_Context *ctx, const char *text) {
   const int y = ctx->content_y - 12;
   const int hovered =
       point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y, x, y, item_w, 10);
+  const bool menu_interactable =
+      (win.z == ctx->z_counter) || !win.open_menu_path.empty();
 
   if ((int)ctx->menu_defs.size() <= ctx->menu_index) {
     ctx->menu_defs.resize(ctx->menu_index + 1);
@@ -2627,13 +2677,14 @@ int mdgui_begin_menu(MDGUI_Context *ctx, const char *text) {
   def.parent_item_index = -1;
   def.items.clear();
 
-  if (!win.open_menu_path.empty() && hovered && win.z == ctx->z_counter) {
+  if (!win.open_menu_path.empty() && hovered && menu_interactable) {
     win.open_menu_path.resize(1);
     win.open_menu_path[0] = ctx->menu_index;
     win.open_menu_index = ctx->menu_index;
   }
 
-  if (ctx->input.mouse_pressed && hovered && win.z == ctx->z_counter) {
+  if (ctx->input.mouse_pressed && hovered && menu_interactable) {
+    win.z = ++ctx->z_counter;
     if (win.open_menu_path.size() == 1 && win.open_menu_path[0] == ctx->menu_index) {
       clear_window_menu_path(win);
     } else {
@@ -2641,6 +2692,7 @@ int mdgui_begin_menu(MDGUI_Context *ctx, const char *text) {
       win.open_menu_path[0] = ctx->menu_index;
       win.open_menu_index = ctx->menu_index;
     }
+    ctx->input.mouse_pressed = 0;
   }
 
   const int open = (!win.open_menu_path.empty() && win.open_menu_path[0] == ctx->menu_index);
@@ -2673,19 +2725,33 @@ int mdgui_menu_item(MDGUI_Context *ctx, const char *text) {
   if (!ctx || !ctx->in_menu || !text || ctx->menu_build_stack.empty())
     return 0;
   auto &win = ctx->windows[ctx->current_window];
-  auto &def = ctx->menu_defs[ctx->menu_build_stack.back()];
+  const bool menu_interactable =
+      (win.z == ctx->z_counter) || !win.open_menu_path.empty();
+  const int menu_idx = ctx->menu_build_stack.back();
+  auto &def = ctx->menu_defs[menu_idx];
   const int item_text_w = mdgui_fonts[1] ? mdgui_fonts[1]->measureTextWidth(text) : 40;
   const int item_needed_w = item_text_w + 12;
-  if (item_needed_w > def.w)
+  if (item_needed_w > def.w) {
     def.w = item_needed_w;
+    reposition_child_menu_chain(ctx->menu_defs, menu_idx, ctx->current_menu_h);
+  }
   def.items.push_back({text, -1, false});
   const int item_index = (int)def.items.size() - 1;
   const int item_y = def.y + (item_index * ctx->current_menu_h);
 
   const int hovered = point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y,
                                     def.x, item_y, def.w, ctx->current_menu_h);
-  if (hovered && ctx->input.mouse_pressed && win.z == ctx->z_counter) {
+  const int submenu_depth = (int)ctx->menu_build_stack.size();
+  if (hovered && menu_interactable &&
+      menu_path_prefix_matches(win.open_menu_path, ctx->menu_build_stack) &&
+      (int)win.open_menu_path.size() > submenu_depth) {
+    win.open_menu_path.resize(submenu_depth);
+    win.open_menu_index = win.open_menu_path.empty() ? -1 : win.open_menu_path[0];
+  }
+  if (hovered && ctx->input.mouse_pressed && menu_interactable) {
+    win.z = ++ctx->z_counter;
     clear_window_menu_path(win);
+    ctx->input.mouse_pressed = 0;
     return 1;
   }
   return 0;
@@ -2703,36 +2769,46 @@ int mdgui_begin_submenu(MDGUI_Context *ctx, const char *text) {
       ctx->current_window < 0)
     return 0;
   auto &win = ctx->windows[ctx->current_window];
-  auto &parent = ctx->menu_defs[ctx->menu_build_stack.back()];
+  const bool menu_interactable =
+      (win.z == ctx->z_counter) || !win.open_menu_path.empty();
+  const int parent_menu_index = ctx->menu_build_stack.back();
+  auto &parent = ctx->menu_defs[parent_menu_index];
   const int item_h = ctx->current_menu_h;
   const int item_text_w = mdgui_fonts[1] ? mdgui_fonts[1]->measureTextWidth(text) : 40;
   const int item_needed_w = item_text_w + 20;
-  if (item_needed_w > parent.w)
+  if (item_needed_w > parent.w) {
     parent.w = item_needed_w;
+    reposition_child_menu_chain(ctx->menu_defs, parent_menu_index, item_h);
+  }
   parent.items.push_back({text, -1, false});
   const int item_index = (int)parent.items.size() - 1;
   const int item_y = parent.y + (item_index * item_h);
 
   const int child_menu_index = (int)ctx->menu_defs.size();
   parent.items[item_index].child_menu_index = child_menu_index;
+  const int parent_x = parent.x;
+  const int parent_w = parent.w;
   ctx->menu_defs.push_back({});
   auto &child = ctx->menu_defs.back();
-  child.x = parent.x + parent.w + MENU_POPUP_GAP_Y;
+  child.x = parent_x + parent_w + MENU_POPUP_GAP_Y;
   child.y = item_y;
   child.w = (item_text_w + 40 < 120) ? 120 : (item_text_w + 40);
-  child.parent_menu_index = ctx->menu_build_stack.back();
+  child.parent_menu_index = parent_menu_index;
   child.parent_item_index = item_index;
   child.items.clear();
 
+  const auto &parent_after = ctx->menu_defs[parent_menu_index];
+
   const int hovered =
-      point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y, parent.x, item_y,
-                    parent.w, item_h);
+      point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y, parent_after.x,
+                    item_y, parent_after.w, item_h);
   const int submenu_depth = (int)ctx->menu_build_stack.size();
   const bool was_open =
       menu_path_prefix_matches(win.open_menu_path, ctx->menu_build_stack) &&
       (int)win.open_menu_path.size() > submenu_depth &&
       win.open_menu_path[submenu_depth] == child_menu_index;
-  if (ctx->input.mouse_pressed && hovered && win.z == ctx->z_counter) {
+  if (ctx->input.mouse_pressed && hovered && menu_interactable) {
+    win.z = ++ctx->z_counter;
     if (was_open && (int)win.open_menu_path.size() == submenu_depth + 1) {
       win.open_menu_path.resize(submenu_depth);
       win.open_menu_index = win.open_menu_path.empty() ? -1 : win.open_menu_path[0];
@@ -2743,7 +2819,8 @@ int mdgui_begin_submenu(MDGUI_Context *ctx, const char *text) {
       win.open_menu_path[submenu_depth] = child_menu_index;
       win.open_menu_index = win.open_menu_path.empty() ? -1 : win.open_menu_path[0];
     }
-  } else if (hovered && win.z == ctx->z_counter) {
+    ctx->input.mouse_pressed = 0;
+  } else if (hovered && menu_interactable) {
     win.open_menu_path.resize((size_t)submenu_depth + 1);
     for (int i = 0; i < submenu_depth; ++i)
       win.open_menu_path[i] = ctx->menu_build_stack[i];
@@ -2873,16 +2950,27 @@ int mdgui_main_menu_item(MDGUI_Context *ctx, const char *text) {
   if (!ctx || !ctx->in_main_menu || !text || ctx->main_menu_build_stack.empty())
     return 0;
 
-  auto &def = ctx->main_menu_defs[ctx->main_menu_build_stack.back()];
+  const int menu_idx = ctx->main_menu_build_stack.back();
+  auto &def = ctx->main_menu_defs[menu_idx];
   const int item_text_w = mdgui_fonts[1] ? mdgui_fonts[1]->measureTextWidth(text) : 40;
   const int item_needed_w = item_text_w + 12;
-  if (item_needed_w > def.w)
+  if (item_needed_w > def.w) {
     def.w = item_needed_w;
+    reposition_child_menu_chain(ctx->main_menu_defs, menu_idx, ctx->current_menu_h);
+  }
   def.items.push_back({text, -1, false});
   const int item_index = (int)def.items.size() - 1;
   const int item_y = def.y + (item_index * ctx->current_menu_h);
   const int hovered = point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y,
                                     def.x, item_y, def.w, ctx->current_menu_h);
+  const int submenu_depth = (int)ctx->main_menu_build_stack.size();
+  if (hovered &&
+      menu_path_prefix_matches(ctx->open_main_menu_path, ctx->main_menu_build_stack) &&
+      (int)ctx->open_main_menu_path.size() > submenu_depth) {
+    ctx->open_main_menu_path.resize(submenu_depth);
+    ctx->open_main_menu_index =
+        ctx->open_main_menu_path.empty() ? -1 : ctx->open_main_menu_path[0];
+  }
 
   if (hovered && ctx->input.mouse_pressed) {
     ctx->open_main_menu_path.clear();
@@ -2902,30 +2990,37 @@ void mdgui_main_menu_separator(MDGUI_Context *ctx) {
 int mdgui_begin_main_submenu(MDGUI_Context *ctx, const char *text) {
   if (!ctx || !ctx->in_main_menu || !text || ctx->main_menu_build_stack.empty())
     return 0;
-  auto &parent = ctx->main_menu_defs[ctx->main_menu_build_stack.back()];
+  const int parent_menu_index = ctx->main_menu_build_stack.back();
+  auto &parent = ctx->main_menu_defs[parent_menu_index];
   const int item_h = ctx->current_menu_h;
   const int item_text_w = mdgui_fonts[1] ? mdgui_fonts[1]->measureTextWidth(text) : 40;
   const int item_needed_w = item_text_w + 20;
-  if (item_needed_w > parent.w)
+  if (item_needed_w > parent.w) {
     parent.w = item_needed_w;
+    reposition_child_menu_chain(ctx->main_menu_defs, parent_menu_index, item_h);
+  }
   parent.items.push_back({text, -1, false});
   const int item_index = (int)parent.items.size() - 1;
   const int item_y = parent.y + (item_index * item_h);
 
   const int child_menu_index = (int)ctx->main_menu_defs.size();
   parent.items[item_index].child_menu_index = child_menu_index;
+  const int parent_x = parent.x;
+  const int parent_w = parent.w;
   ctx->main_menu_defs.push_back({});
   auto &child = ctx->main_menu_defs.back();
-  child.x = parent.x + parent.w + MENU_POPUP_GAP_Y;
+  child.x = parent_x + parent_w + MENU_POPUP_GAP_Y;
   child.y = item_y;
   child.w = (item_text_w + 40 < 120) ? 120 : (item_text_w + 40);
-  child.parent_menu_index = ctx->main_menu_build_stack.back();
+  child.parent_menu_index = parent_menu_index;
   child.parent_item_index = item_index;
   child.items.clear();
 
+  const auto &parent_after = ctx->main_menu_defs[parent_menu_index];
+
   const int hovered =
-      point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y, parent.x, item_y,
-                    parent.w, item_h);
+      point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y, parent_after.x,
+                    item_y, parent_after.w, item_h);
   const int submenu_depth = (int)ctx->main_menu_build_stack.size();
   const bool was_open =
       menu_path_prefix_matches(ctx->open_main_menu_path, ctx->main_menu_build_stack) &&
