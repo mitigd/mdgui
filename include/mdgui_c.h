@@ -198,6 +198,10 @@ void mdgui_clear_all_theme_colors(void);
 int mdgui_begin_render_window(MDGUI_Context *ctx, const char *title, int x, int y,
                              int w, int h, int show_menu, int *out_x,
                              int *out_y, int *out_w, int *out_h);
+int mdgui_begin_render_window_ex(MDGUI_Context *ctx, const char *title, int x,
+                                 int y, int w, int h, int show_menu,
+                                 int flags, int *out_x, int *out_y,
+                                 int *out_w, int *out_h);
 void mdgui_run_window_pass(MDGUI_Context *ctx, const MDGUI_WindowPassItem *items,
                           int item_count);
 void mdgui_set_window_fullscreen(MDGUI_Context *ctx, const char *title,

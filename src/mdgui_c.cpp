@@ -3227,12 +3227,12 @@ int mdgui_is_custom_cursor_enabled(MDGUI_Context *ctx) {
   return ctx->custom_cursor_enabled ? 1 : 0;
 }
 
-int mdgui_begin_render_window(MDGUI_Context *ctx, const char *title, int x, int y,
-                             int w, int h, int show_menu, int *out_x,
-                             int *out_y, int *out_w, int *out_h) {
+int mdgui_begin_render_window_ex(MDGUI_Context *ctx, const char *title, int x,
+                                 int y, int w, int h, int show_menu, int flags,
+                                 int *out_x, int *out_y, int *out_w, int *out_h) {
   if (!ctx)
     return 0;
-  if (!mdgui_begin_window(ctx, title, x, y, w, h))
+  if (!mdgui_begin_window_ex(ctx, title, x, y, w, h, flags))
     return 0;
   if (show_menu) {
     mdgui_begin_menu_bar(ctx);
@@ -3258,6 +3258,14 @@ int mdgui_begin_render_window(MDGUI_Context *ctx, const char *title, int x, int 
   if (out_h)
     *out_h = ch;
   return 1;
+}
+
+int mdgui_begin_render_window(MDGUI_Context *ctx, const char *title, int x,
+                              int y, int w, int h, int show_menu, int *out_x,
+                              int *out_y, int *out_w, int *out_h) {
+  return mdgui_begin_render_window_ex(ctx, title, x, y, w, h, show_menu,
+                                      MDGUI_WINDOW_FLAG_NONE, out_x, out_y,
+                                      out_w, out_h);
 }
 
 void mdgui_run_window_pass(MDGUI_Context *ctx, const MDGUI_WindowPassItem *items,
