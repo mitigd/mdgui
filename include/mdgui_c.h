@@ -118,6 +118,9 @@ int mdgui_checkbox(MDGUI_Context *ctx, const char *text, bool *checked, int x,
                   int y);
 int mdgui_slider(MDGUI_Context *ctx, const char *text, float *val, float min,
                 float max, int x, int y, int w);
+int mdgui_collapsing_header(MDGUI_Context *ctx, const char *id,
+                            const char *text, int x, int y, int w,
+                            int default_open);
 void mdgui_separator(MDGUI_Context *ctx, int x, int y, int w);
 int mdgui_listbox(MDGUI_Context *ctx, const char **items, int item_count,
                  int *selected, int x, int y, int w, int rows);

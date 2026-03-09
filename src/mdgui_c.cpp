@@ -33,6 +33,11 @@ constexpr int CLR_WINDOW_BORDER = 248;
 constexpr int MENU_POPUP_GAP_Y = 2;
 
 struct MDGUI_Window {
+  struct CollapsingState {
+    std::string id;
+    bool open;
+  };
+
   std::string id;
   std::string title;
   int x;
@@ -57,6 +62,9 @@ struct MDGUI_Window {
   int tile_weight;
   int tile_side;
   unsigned char alpha;
+  int chrome_min_w;
+  int chrome_min_h;
+  std::vector<CollapsingState> collapsing_states;
 };
 
 struct FileBrowserEntry {
@@ -253,6 +261,17 @@ static bool menu_path_prefix_matches(const std::vector<int> &path,
 static void clear_window_menu_path(MDGUI_Window &win) {
   win.open_menu_index = -1;
   win.open_menu_path.clear();
+}
+
+static bool *find_or_create_collapsing_state(MDGUI_Window &win, const char *id,
+                                             bool default_open) {
+  const char *key = (id && id[0]) ? id : "__default";
+  for (auto &st : win.collapsing_states) {
+    if (st.id == key)
+      return &st.open;
+  }
+  win.collapsing_states.push_back({key, default_open});
+  return &win.collapsing_states.back().open;
 }
 
 static bool point_in_menu_popup_chain(
@@ -1792,13 +1811,13 @@ void mdgui_end_window(MDGUI_Context *ctx) {
   // Dynamic minimum size based on hard content only (widgets/interactive UI).
   if (!win.fixed_rect) {
     const int measured_min_w = (ctx->content_req_right - win.x) + 4;
-    const int measured_min_h = (ctx->content_req_bottom - win.y) + 4;
     if (ctx->window_has_nonlabel_widget) {
       if (measured_min_w > win.min_w)
         win.min_w = measured_min_w;
-      if (measured_min_h > win.min_h)
-        win.min_h = measured_min_h;
     }
+    // Keep vertical resize floor to chrome minimum only; overflowing content
+    // should rely on scrollbars, not force taller windows.
+    win.min_h = win.chrome_min_h;
     if (win.w < win.min_w)
       win.w = win.min_w;
     if (win.h < win.min_h)
@@ -2127,6 +2146,63 @@ int mdgui_slider(MDGUI_Context *ctx, const char *text, float *val, float min,
   const int bottom_margin = 4;
   ctx->content_y += std::max(y, top_margin) + thumb_h + bottom_margin;
   return result;
+}
+
+int mdgui_collapsing_header(MDGUI_Context *ctx, const char *id,
+                            const char *text, int x, int y, int w,
+                            int default_open) {
+  if (!ctx || ctx->current_window < 0 || !text || !mdgui_fonts[1])
+    return 0;
+  ctx->window_has_nonlabel_widget = true;
+  auto &win = ctx->windows[ctx->current_window];
+
+  const int requested_w = w;
+  w = resolve_dynamic_width(ctx, x, w, 24);
+  const int ix = ctx->origin_x + x;
+  const int top_margin = 2;
+  const int logical_y = ctx->content_y + std::max(y, top_margin);
+  const int iy = logical_y - win.text_scroll;
+  const int row_h = 12;
+  const int topmost = is_current_window_topmost(ctx);
+  const int hovered =
+      topmost &&
+      point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y, ix, iy, w, row_h);
+
+  bool *open = find_or_create_collapsing_state(win, id ? id : text,
+                                                default_open != 0);
+  if (hovered && ctx->input.mouse_pressed) {
+    *open = !*open;
+  }
+
+  const int bg = hovered ? CLR_BUTTON_LIGHT : CLR_BUTTON_SURFACE;
+  mdgui_fill_rect_idx(nullptr, bg, ix, iy, w, row_h);
+  mdgui_draw_hline_idx(nullptr, CLR_BUTTON_LIGHT, ix, iy, ix + w);
+  mdgui_draw_vline_idx(nullptr, CLR_BUTTON_LIGHT, ix + w - 1, iy, iy + row_h);
+  mdgui_draw_hline_idx(nullptr, CLR_BUTTON_DARK, ix, iy + row_h - 1, ix + w);
+  mdgui_draw_vline_idx(nullptr, CLR_BUTTON_DARK, ix, iy, iy + row_h);
+
+  mdgui_fonts[1]->drawText(*open ? "v" : ">", nullptr, ix + 3, iy + 2,
+                           CLR_TEXT_LIGHT);
+  mdgui_fonts[1]->drawText(text, nullptr, ix + 12, iy + 2, CLR_TEXT_LIGHT);
+
+  int intrinsic_w = w;
+  const int text_w = mdgui_fonts[1]->measureTextWidth(text);
+  const int text_right = ix + 12 + text_w;
+  const int needed_w = 12 + text_w + 4;
+  if (requested_w <= 0) {
+    // Dynamic width: derive requirement from content, not resolved width.
+    intrinsic_w = (needed_w > 24) ? needed_w : 24;
+  } else if (needed_w > intrinsic_w) {
+    intrinsic_w = needed_w;
+  }
+  int right_needed = ix + intrinsic_w;
+  if (requested_w > 0)
+    right_needed = std::max(right_needed, text_right);
+  if (requested_w <= 0)
+    right_needed += 14; // match resolve_dynamic_width right gutter reserve
+  note_content_bounds(ctx, right_needed, logical_y + row_h);
+  ctx->content_y += std::max(y, top_margin) + row_h + 2;
+  return *open ? 1 : 0;
 }
 
 void mdgui_separator(MDGUI_Context *ctx, int x, int y, int w) {
@@ -3718,56 +3794,43 @@ void mdgui_show_demo_window(MDGUI_Context *ctx) {
     return;
 
   if (mdgui_begin_window(ctx, "MDGUI Demo Window", 20, 20, 220, 220)) {
-
-    mdgui_separator(ctx, 10, 5, 0);
-    mdgui_label(ctx, "Aesthetics & Widgets", 10, 5);
-    mdgui_spacer(ctx, 4);
-    mdgui_separator(ctx, 10, 0, 0);
-
     static bool check1 = true;
     static bool check2 = false;
-    mdgui_checkbox(ctx, "Enable Sound", &check1, 10, 5);
-    mdgui_checkbox(ctx, "Turbo Mode", &check2, 10, 5);
-
-    mdgui_separator(ctx, 10, 5, 0);
-    mdgui_label(ctx, "Volumes", 10, 5);
-    mdgui_separator(ctx, 10, 5, 0);
-
     static float vol1 = 0.5f;
     static float vol2 = 0.8f;
-    mdgui_slider(ctx, "Master", &vol1, 0.0f, 1.0f, 10, 5, -54);
-    mdgui_slider(ctx, "Music", &vol2, 0.0f, 1.0f, 10, 5, -46);
 
-    mdgui_separator(ctx, 10, 5, 0);
-    mdgui_label(ctx, "Renderer", 10, 5);
-    mdgui_separator(ctx, 10, 5, 0);
-    mdgui_spacer(ctx, 4);
-
-    mdgui_listbox(ctx, quality_items, 3, &quality_idx, 10, 3, -16, 3);
-
-    //ctx->content_y += 8; // hard spacer: keep combo clear of renderer listbox
-
-    mdgui_separator(ctx, 10, 5, 0);
-    mdgui_label(ctx, "Filter Combo", 10, 5);
-    mdgui_separator(ctx, 10, 5, 0);
-
-    mdgui_combo(ctx, nullptr, quality_items, 3, &quality_idx, 10, 2, -16);
-
-    mdgui_separator(ctx, 10, 5, 0);
-    mdgui_label(ctx, "Theme", 10, 5);
-    mdgui_separator(ctx, 10, 5, 0);
-
-    theme_idx = mdgui_get_theme();
-    if (mdgui_combo(ctx, nullptr, theme_items, 6, &theme_idx, 10, 2, -16)) {
-      mdgui_set_theme(theme_idx);
+    if (mdgui_collapsing_header(ctx, "demo.widgets", "Aesthetics & Widgets", 10,
+                                5, -16, 1)) {
+      mdgui_checkbox(ctx, "Enable Sound", &check1, 10, 5);
+      mdgui_checkbox(ctx, "Turbo Mode", &check2, 10, 5);
     }
 
-    mdgui_label(ctx, "Frame Progress", 10, 5);
-    mdgui_progress_bar(ctx, progress, 10, 3, -16, 10, nullptr);
-    if (mdgui_button(ctx, "Step", 10, 5, 56, 12)) {
-      progress += 0.1f;
-      if (progress > 1.0f)
-        progress = 0.0f;
+    if (mdgui_collapsing_header(ctx, "demo.volumes", "Audio Volumes", 10, 4,
+                                -16, 1)) {
+      mdgui_slider(ctx, "Master", &vol1, 0.0f, 1.0f, 10, 5, -54);
+      mdgui_slider(ctx, "Music", &vol2, 0.0f, 1.0f, 10, 5, -46);
+    }
+
+    if (mdgui_collapsing_header(ctx, "demo.renderer", "Renderer Options", 10, 4,
+                                -16, 1)) {
+      mdgui_listbox(ctx, quality_items, 3, &quality_idx, 10, 3, -16, 3);
+
+      mdgui_label(ctx, "Filter Combo", 10, 5);
+      mdgui_combo(ctx, nullptr, quality_items, 3, &quality_idx, 10, 2, -16);
+
+      mdgui_label(ctx, "Theme", 10, 5);
+      theme_idx = mdgui_get_theme();
+      if (mdgui_combo(ctx, nullptr, theme_items, 6, &theme_idx, 10, 2, -16)) {
+        mdgui_set_theme(theme_idx);
+      }
+
+      mdgui_label(ctx, "Frame Progress", 10, 5);
+      mdgui_progress_bar(ctx, progress, 10, 3, -16, 10, nullptr);
+      if (mdgui_button(ctx, "Step", 10, 5, 56, 12)) {
+        progress += 0.1f;
+        if (progress > 1.0f)
+          progress = 0.0f;
+      }
     }
 
     // Reserve footer space, but only show the close action when scrolled near
@@ -3798,4 +3861,3 @@ void mdgui_show_demo_window(MDGUI_Context *ctx) {
   }
 }
 }
-
