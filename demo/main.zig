@@ -180,6 +180,7 @@ fn drawMainWindow(
     windows_alpha: *f32,
     show_nested_test_area: bool,
     demo_text: *[128]u8,
+    demo_text_multiline: *[1024]u8,
 ) void {
     if (c.mdgui_begin_window(ctx, "MDGUI", 10, 10, 220, 170) != 0) {
         c.mdgui_begin_menu_bar(ctx);
@@ -210,6 +211,18 @@ fn drawMainWindow(
             c.mdgui_set_status_bar_text(ctx, @ptrCast(&demo_text[0]));
         }
         c.mdgui_spacer(ctx, 4);
+        _ = c.mdgui_input_text_multiline(
+            ctx,
+            "Quick note (multiline)",
+            @ptrCast(&demo_text_multiline[0]),
+            demo_text_multiline.len,
+            10,
+            4,
+            -16,
+            56,
+            c.MDGUI_INPUT_TEXT_MULTILINE_NONE,
+        );
+        c.mdgui_spacer(ctx, 2);
 
         c.mdgui_label(ctx, "Window transparency", 10, 2);
         var slider_alpha = windows_alpha.*;
@@ -493,6 +506,8 @@ pub fn main() !void {
         .key_enter = 0,
         .key_left = 0,
         .key_right = 0,
+        .key_up = 0,
+        .key_down = 0,
         .key_home = 0,
         .key_end = 0,
     };
@@ -506,6 +521,7 @@ pub fn main() !void {
     var analytics = Analytics{};
     var windows_alpha = alphaFloatFromByte(c.mdgui_get_windows_alpha(ctx));
     var demo_text: [128]u8 = [_]u8{0} ** 128;
+    var demo_text_multiline: [1024]u8 = [_]u8{0} ** 1024;
     c.mdgui_set_tile_manager_enabled(ctx, if (startup_tile_windows) 1 else 0);
     const perf_freq = c.SDL_GetPerformanceFrequency();
     var last_counter = c.SDL_GetPerformanceCounter();
@@ -538,6 +554,8 @@ pub fn main() !void {
         input.key_enter = 0;
         input.key_left = 0;
         input.key_right = 0;
+        input.key_up = 0;
+        input.key_down = 0;
         input.key_home = 0;
         input.key_end = 0;
         var event: c.SDL_Event = undefined;
@@ -564,6 +582,8 @@ pub fn main() !void {
                 if (event.key.scancode == c.SDL_SCANCODE_RETURN or event.key.scancode == c.SDL_SCANCODE_KP_ENTER) input.key_enter = 1;
                 if (event.key.scancode == c.SDL_SCANCODE_LEFT) input.key_left = 1;
                 if (event.key.scancode == c.SDL_SCANCODE_RIGHT) input.key_right = 1;
+                if (event.key.scancode == c.SDL_SCANCODE_UP) input.key_up = 1;
+                if (event.key.scancode == c.SDL_SCANCODE_DOWN) input.key_down = 1;
                 if (event.key.scancode == c.SDL_SCANCODE_HOME) input.key_home = 1;
                 if (event.key.scancode == c.SDL_SCANCODE_END) input.key_end = 1;
                 const keycode = event.key.key;
@@ -817,6 +837,7 @@ pub fn main() !void {
                     &windows_alpha,
                     show_nested_test_area,
                     &demo_text,
+                    &demo_text_multiline,
                 ),
                 .demo => drawDemoWindow(ctx, show_demo),
                 .perf_analytics => drawAnalyticsWindow(ctx, &analytics),

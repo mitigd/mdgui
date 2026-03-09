@@ -3,12 +3,12 @@
 #include "mdgui_primitives.h"
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_mouse.h>
-#include <string.h>
 #include <algorithm>
-#include <cmath>
 #include <cctype>
+#include <cmath>
 #include <cstdint>
 #include <filesystem>
+#include <string.h>
 #include <string>
 #include <vector>
 
@@ -195,6 +195,8 @@ struct MDGUI_Context {
   int active_text_input_sel_start;
   int active_text_input_sel_end;
   bool active_text_input_drag_select;
+  bool active_text_input_multiline;
+  int active_text_input_scroll_y;
 
   bool file_browser_open;
   std::string file_browser_cwd;
@@ -258,8 +260,7 @@ static void drawrect_rgb(MDGUI_Context *ctx, uint8_t r, uint8_t g, uint8_t b,
     return;
   if (!ctx->backend.fill_rect_rgba)
     return;
-  ctx->backend.fill_rect_rgba(ctx->backend.user_data, r, g, b, 255, x, y, w,
-                              h);
+  ctx->backend.fill_rect_rgba(ctx->backend.user_data, r, g, b, 255, x, y, w, h);
 }
 
 static int point_in_rect(int px, int py, int x, int y, int w, int h) {
@@ -293,9 +294,10 @@ static bool *find_or_create_collapsing_state(MDGUI_Window &win, const char *id,
   return &win.collapsing_states.back().open;
 }
 
-static bool point_in_menu_popup_chain(
-    const std::vector<MDGUI_Context::MenuDef> &defs,
-    const std::vector<int> &path, int item_h, int px, int py) {
+static bool
+point_in_menu_popup_chain(const std::vector<MDGUI_Context::MenuDef> &defs,
+                          const std::vector<int> &path, int item_h, int px,
+                          int py) {
   for (int menu_idx : path) {
     if (menu_idx < 0 || menu_idx >= (int)defs.size())
       continue;
@@ -309,8 +311,9 @@ static bool point_in_menu_popup_chain(
   return false;
 }
 
-static void reposition_child_menu_chain(
-    std::vector<MDGUI_Context::MenuDef> &defs, int menu_index, int item_h) {
+static void
+reposition_child_menu_chain(std::vector<MDGUI_Context::MenuDef> &defs,
+                            int menu_index, int item_h) {
   if (menu_index < 0 || menu_index >= (int)defs.size() || item_h <= 0)
     return;
   auto &parent = defs[menu_index];
@@ -330,9 +333,9 @@ static int top_window_at_point(const MDGUI_Context *ctx, int px, int py,
   if (ctx->combo_capture_active && ctx->combo_capture_window >= 0 &&
       ctx->combo_capture_window < (int)ctx->windows.size()) {
     const auto &ow = ctx->windows[ctx->combo_capture_window];
-    if (!ow.closed && point_in_rect(px, py, ctx->combo_capture_x,
-                                    ctx->combo_capture_y, ctx->combo_capture_w,
-                                    ctx->combo_capture_h)) {
+    if (!ow.closed &&
+        point_in_rect(px, py, ctx->combo_capture_x, ctx->combo_capture_y,
+                      ctx->combo_capture_w, ctx->combo_capture_h)) {
       return ctx->combo_capture_window;
     }
   }
@@ -435,7 +438,8 @@ static void tile_windows_grid(MDGUI_Context *ctx, const std::vector<int> &order,
   }
 }
 
-static int sum_tile_weights(MDGUI_Context *ctx, const std::vector<int> &indices) {
+static int sum_tile_weights(MDGUI_Context *ctx,
+                            const std::vector<int> &indices) {
   if (!ctx)
     return 0;
   int sum = 0;
@@ -447,25 +451,24 @@ static int sum_tile_weights(MDGUI_Context *ctx, const std::vector<int> &indices)
   return sum;
 }
 
-static void sort_by_weight_then_z(MDGUI_Context *ctx, std::vector<int> &indices) {
+static void sort_by_weight_then_z(MDGUI_Context *ctx,
+                                  std::vector<int> &indices) {
   if (!ctx)
     return;
-  std::stable_sort(indices.begin(), indices.end(),
-                   [ctx](int a, int b) {
-                     const auto &wa = ctx->windows[a];
-                     const auto &wb = ctx->windows[b];
-                     const int wgt_a = normalize_tile_weight(wa.tile_weight);
-                     const int wgt_b = normalize_tile_weight(wb.tile_weight);
-                     if (wgt_a != wgt_b)
-                       return wgt_a > wgt_b;
-                     return wa.z > wb.z;
-                   });
+  std::stable_sort(indices.begin(), indices.end(), [ctx](int a, int b) {
+    const auto &wa = ctx->windows[a];
+    const auto &wb = ctx->windows[b];
+    const int wgt_a = normalize_tile_weight(wa.tile_weight);
+    const int wgt_b = normalize_tile_weight(wb.tile_weight);
+    if (wgt_a != wgt_b)
+      return wgt_a > wgt_b;
+    return wa.z > wb.z;
+  });
 }
 
 static void tile_windows_vertical_weighted(MDGUI_Context *ctx,
-                                           const std::vector<int> &order,
-                                           int x, int y, int w, int h,
-                                           int gap) {
+                                           const std::vector<int> &order, int x,
+                                           int y, int w, int h, int gap) {
   if (!ctx || order.empty() || w <= 0 || h <= 0)
     return;
   if ((int)order.size() == 1) {
@@ -490,8 +493,8 @@ static void tile_windows_vertical_weighted(MDGUI_Context *ctx,
     int cell_h = available_h;
     if (i < (int)order.size() - 1 && remaining_weight > 0) {
       const int wgt = normalize_tile_weight(ctx->windows[idx].tile_weight);
-      int proportional = (int)((double)available_h * (double)wgt /
-                               (double)remaining_weight);
+      int proportional =
+          (int)((double)available_h * (double)wgt / (double)remaining_weight);
       int max_for_this = available_h - (items_left - 1) * min_h;
       if (max_for_this < min_h)
         max_for_this = min_h;
@@ -534,8 +537,8 @@ static void tile_windows_horizontal_weighted(MDGUI_Context *ctx,
     int cell_w = available_w;
     if (i < (int)order.size() - 1 && remaining_weight > 0) {
       const int wgt = normalize_tile_weight(ctx->windows[idx].tile_weight);
-      int proportional = (int)((double)available_w * (double)wgt /
-                               (double)remaining_weight);
+      int proportional =
+          (int)((double)available_w * (double)wgt / (double)remaining_weight);
       int max_for_this = available_w - (items_left - 1) * min_w;
       if (max_for_this < min_w)
         max_for_this = min_w;
@@ -592,7 +595,8 @@ static void tile_windows_weighted_cluster(MDGUI_Context *ctx,
 
   int secondary_weight_sum = 0;
   for (int idx : secondary) {
-    secondary_weight_sum += normalize_tile_weight(ctx->windows[idx].tile_weight);
+    secondary_weight_sum +=
+        normalize_tile_weight(ctx->windows[idx].tile_weight);
   }
   if (secondary_weight_sum < 1)
     secondary_weight_sum = (int)secondary.size();
@@ -600,8 +604,8 @@ static void tile_windows_weighted_cluster(MDGUI_Context *ctx,
   const float split_raw =
       (float)best_weight / (float)(best_weight + secondary_weight_sum);
   const float split_ratio = std::max(0.34f, std::min(0.75f, split_raw));
-  const int side = (content_w >= content_h) ? MDGUI_TILE_SIDE_LEFT
-                                             : MDGUI_TILE_SIDE_TOP;
+  const int side =
+      (content_w >= content_h) ? MDGUI_TILE_SIDE_LEFT : MDGUI_TILE_SIDE_TOP;
 
   int px = left;
   int py = top;
@@ -757,8 +761,8 @@ static void tile_windows_internal(MDGUI_Context *ctx) {
       int reserve_right = right_group.empty() ? 0 : (min_side_w + gap);
       int max_left_w = center_w - min_center_w - reserve_right;
       if (max_left_w >= min_side_w) {
-        int raw = (int)((double)center_w * (double)left_sum /
-                        (double)total_w_weight);
+        int raw =
+            (int)((double)center_w * (double)left_sum / (double)total_w_weight);
         left_w_px = clampi(raw, min_side_w, max_left_w);
       }
     }
@@ -791,7 +795,8 @@ static void tile_windows_internal(MDGUI_Context *ctx) {
                                      content_h, gap);
       center_w -= right_w_px + gap;
     } else {
-      auto_group.insert(auto_group.end(), right_group.begin(), right_group.end());
+      auto_group.insert(auto_group.end(), right_group.begin(),
+                        right_group.end());
       right_group.clear();
       auto_sum = sum_tile_weights(ctx, auto_group);
     }
@@ -804,8 +809,8 @@ static void tile_windows_internal(MDGUI_Context *ctx) {
       int reserve_bottom = bottom_group.empty() ? 0 : (min_side_h + gap);
       int max_top_h = center_h - min_center_h - reserve_bottom;
       if (max_top_h >= min_side_h) {
-        int raw = (int)((double)center_h * (double)top_sum /
-                        (double)total_h_weight);
+        int raw =
+            (int)((double)center_h * (double)top_sum / (double)total_h_weight);
         top_h_px = clampi(raw, min_side_h, max_top_h);
       }
     }
@@ -833,8 +838,8 @@ static void tile_windows_internal(MDGUI_Context *ctx) {
     }
     if (bottom_h_px > 0) {
       const int by = center_y + center_h - bottom_h_px;
-      tile_windows_horizontal_weighted(ctx, bottom_group, center_x, by, center_w,
-                                       bottom_h_px, gap);
+      tile_windows_horizontal_weighted(ctx, bottom_group, center_x, by,
+                                       center_w, bottom_h_px, gap);
       center_h -= bottom_h_px + gap;
     } else {
       auto_group.insert(auto_group.end(), bottom_group.begin(),
@@ -844,8 +849,8 @@ static void tile_windows_internal(MDGUI_Context *ctx) {
 
     if (!auto_group.empty()) {
       sort_by_weight_then_z(ctx, auto_group);
-      tile_windows_weighted_cluster(ctx, auto_group, center_x, center_y, center_w,
-                                    center_h, gap);
+      tile_windows_weighted_cluster(ctx, auto_group, center_x, center_y,
+                                    center_w, center_h, gap);
     }
     return;
   }
@@ -925,10 +930,14 @@ static void draw_open_menu_overlay(MDGUI_Context *ctx) {
     if (total_h <= 0)
       continue;
 
-    mdgui_draw_hline_idx(nullptr, CLR_WINDOW_BORDER, def.x - 1, def.y - 1, def.x + def.w + 1);
-    mdgui_draw_hline_idx(nullptr, CLR_WINDOW_BORDER, def.x - 1, def.y + total_h, def.x + def.w + 1);
-    mdgui_draw_vline_idx(nullptr, CLR_WINDOW_BORDER, def.x - 1, def.y - 1, def.y + total_h + 1);
-    mdgui_draw_vline_idx(nullptr, CLR_WINDOW_BORDER, def.x + def.w, def.y - 1, def.y + total_h + 1);
+    mdgui_draw_hline_idx(nullptr, CLR_WINDOW_BORDER, def.x - 1, def.y - 1,
+                         def.x + def.w + 1);
+    mdgui_draw_hline_idx(nullptr, CLR_WINDOW_BORDER, def.x - 1, def.y + total_h,
+                         def.x + def.w + 1);
+    mdgui_draw_vline_idx(nullptr, CLR_WINDOW_BORDER, def.x - 1, def.y - 1,
+                         def.y + total_h + 1);
+    mdgui_draw_vline_idx(nullptr, CLR_WINDOW_BORDER, def.x + def.w, def.y - 1,
+                         def.y + total_h + 1);
     mdgui_fill_rect_idx(nullptr, CLR_MENU_BG, def.x, def.y, def.w, total_h);
 
     for (int i = 0; i < (int)def.items.size(); ++i) {
@@ -961,10 +970,11 @@ static void draw_open_menu_overlay(MDGUI_Context *ctx) {
         }
       }
       if (mdgui_fonts[1]) {
-        mdgui_fonts[1]->drawText(def.items[i].text.c_str(), nullptr, def.x + 4, iy + 1,
-                      CLR_MENU_TEXT);
+        mdgui_fonts[1]->drawText(def.items[i].text.c_str(), nullptr, def.x + 4,
+                                 iy + 1, CLR_MENU_TEXT);
         if (def.items[i].child_menu_index >= 0) {
-          mdgui_fonts[1]->drawText(">", nullptr, def.x + def.w - 8, iy + 1, CLR_MENU_TEXT);
+          mdgui_fonts[1]->drawText(">", nullptr, def.x + def.w - 8, iy + 1,
+                                   CLR_MENU_TEXT);
         }
       }
     }
@@ -1061,12 +1071,13 @@ static void draw_status_bar(MDGUI_Context *ctx) {
   mdgui_fill_rect_idx(nullptr, CLR_MENU_BG, 0, bar_y, rw, bar_h);
   mdgui_draw_hline_idx(nullptr, CLR_WINDOW_BORDER, 0, bar_y, rw - 1);
   if (mdgui_fonts[1] && !ctx->status_bar_text.empty()) {
-    mdgui_fonts[1]->drawText(ctx->status_bar_text.c_str(), nullptr, 3, bar_y + 1,
-                             CLR_MENU_TEXT);
+    mdgui_fonts[1]->drawText(ctx->status_bar_text.c_str(), nullptr, 3,
+                             bar_y + 1, CLR_MENU_TEXT);
   }
 }
 
-static void center_window_rect_menu_aware(MDGUI_Context *ctx, MDGUI_Window &win) {
+static void center_window_rect_menu_aware(MDGUI_Context *ctx,
+                                          MDGUI_Window &win) {
   const int screen_w = get_logical_render_w(ctx);
   const int top = get_work_area_top(ctx);
   const int bottom = get_work_area_bottom(ctx);
@@ -1203,19 +1214,19 @@ static void file_browser_open_path(MDGUI_Context *ctx, const char *path) {
     }
   }
 
-  std::sort(dirs.begin(), dirs.end(), [](const FileBrowserEntry &a,
-                                         const FileBrowserEntry &b) {
-    return ci_less(a.label, b.label);
-  });
-  std::sort(files.begin(), files.end(), [](const FileBrowserEntry &a,
-                                           const FileBrowserEntry &b) {
-    return ci_less(a.label, b.label);
-  });
+  std::sort(dirs.begin(), dirs.end(),
+            [](const FileBrowserEntry &a, const FileBrowserEntry &b) {
+              return ci_less(a.label, b.label);
+            });
+  std::sort(files.begin(), files.end(),
+            [](const FileBrowserEntry &a, const FileBrowserEntry &b) {
+              return ci_less(a.label, b.label);
+            });
 
-  ctx->file_browser_entries.insert(ctx->file_browser_entries.end(), dirs.begin(),
-                                   dirs.end());
-  ctx->file_browser_entries.insert(ctx->file_browser_entries.end(), files.begin(),
-                                   files.end());
+  ctx->file_browser_entries.insert(ctx->file_browser_entries.end(),
+                                   dirs.begin(), dirs.end());
+  ctx->file_browser_entries.insert(ctx->file_browser_entries.end(),
+                                   files.begin(), files.end());
   if (!ctx->file_browser_entries.empty())
     ctx->file_browser_selected = 0;
 }
@@ -1236,10 +1247,14 @@ static void draw_open_main_menu_overlay(MDGUI_Context *ctx) {
     if (total_h <= 0)
       continue;
 
-    mdgui_draw_hline_idx(nullptr, CLR_WINDOW_BORDER, def.x - 1, def.y - 1, def.x + def.w + 1);
-    mdgui_draw_hline_idx(nullptr, CLR_WINDOW_BORDER, def.x - 1, def.y + total_h, def.x + def.w + 1);
-    mdgui_draw_vline_idx(nullptr, CLR_WINDOW_BORDER, def.x - 1, def.y - 1, def.y + total_h + 1);
-    mdgui_draw_vline_idx(nullptr, CLR_WINDOW_BORDER, def.x + def.w, def.y - 1, def.y + total_h + 1);
+    mdgui_draw_hline_idx(nullptr, CLR_WINDOW_BORDER, def.x - 1, def.y - 1,
+                         def.x + def.w + 1);
+    mdgui_draw_hline_idx(nullptr, CLR_WINDOW_BORDER, def.x - 1, def.y + total_h,
+                         def.x + def.w + 1);
+    mdgui_draw_vline_idx(nullptr, CLR_WINDOW_BORDER, def.x - 1, def.y - 1,
+                         def.y + total_h + 1);
+    mdgui_draw_vline_idx(nullptr, CLR_WINDOW_BORDER, def.x + def.w, def.y - 1,
+                         def.y + total_h + 1);
     mdgui_fill_rect_idx(nullptr, CLR_MENU_BG, def.x, def.y, def.w, total_h);
 
     for (int i = 0; i < (int)def.items.size(); ++i) {
@@ -1274,10 +1289,11 @@ static void draw_open_main_menu_overlay(MDGUI_Context *ctx) {
         }
       }
       if (mdgui_fonts[1]) {
-        mdgui_fonts[1]->drawText(def.items[i].text.c_str(), nullptr, def.x + 4, iy + 1,
-                      CLR_MENU_TEXT);
+        mdgui_fonts[1]->drawText(def.items[i].text.c_str(), nullptr, def.x + 4,
+                                 iy + 1, CLR_MENU_TEXT);
         if (def.items[i].child_menu_index >= 0) {
-          mdgui_fonts[1]->drawText(">", nullptr, def.x + def.w - 8, iy + 1, CLR_MENU_TEXT);
+          mdgui_fonts[1]->drawText(">", nullptr, def.x + def.w - 8, iy + 1,
+                                   CLR_MENU_TEXT);
         }
       }
     }
@@ -1354,7 +1370,8 @@ MDGUI_Context *mdgui_create_with_backend(const MDGUI_RenderBackend *backend) {
   ctx->cursors[6] = SDL_CreateSystemCursor((SDL_SystemCursor)6); // NESW
   ctx->cursors[7] = SDL_CreateSystemCursor((SDL_SystemCursor)7); // EW
   ctx->cursors[8] = SDL_CreateSystemCursor((SDL_SystemCursor)8); // NS
-  ctx->cursors[9] = SDL_CreateSystemCursor((SDL_SystemCursor)0); // default arrow
+  ctx->cursors[9] =
+      SDL_CreateSystemCursor((SDL_SystemCursor)0); // default arrow
   ctx->custom_cursor_enabled = false;
   ctx->cursor_request_idx = 9;
   ctx->current_cursor_idx = -1;
@@ -1380,6 +1397,15 @@ MDGUI_Context *mdgui_create_with_backend(const MDGUI_RenderBackend *backend) {
   ctx->combo_capture_y = 0;
   ctx->combo_capture_w = 0;
   ctx->combo_capture_h = 0;
+  ctx->active_text_input_window = -1;
+  ctx->active_text_input_id = 0;
+  ctx->active_text_input_cursor = 0;
+  ctx->active_text_input_sel_anchor = 0;
+  ctx->active_text_input_sel_start = 0;
+  ctx->active_text_input_sel_end = 0;
+  ctx->active_text_input_drag_select = false;
+  ctx->active_text_input_multiline = false;
+  ctx->active_text_input_scroll_y = 0;
   ctx->file_browser_open = false;
   ctx->file_browser_cwd = ".";
   ctx->file_browser_selected = -1;
@@ -1440,8 +1466,8 @@ void mdgui_begin_frame(MDGUI_Context *ctx, const MDGUI_Input *input) {
   const bool main_menu_modal = !ctx->open_main_menu_path.empty();
   if (ctx->custom_cursor_enabled && ctx->cursor_anim_count > 1) {
     const unsigned long long ticks = mdgui_backend_get_ticks_ms();
-    const int anim_phase = (int)((ticks / 90ull) %
-                                 (unsigned long long)ctx->cursor_anim_count);
+    const int anim_phase =
+        (int)((ticks / 90ull) % (unsigned long long)ctx->cursor_anim_count);
     ctx->cursor_request_idx = anim_phase;
   } else if (ctx->custom_cursor_enabled) {
     ctx->cursor_request_idx = 0;
@@ -1495,13 +1521,15 @@ void mdgui_begin_frame(MDGUI_Context *ctx, const MDGUI_Input *input) {
   if (ctx->active_text_input_window >= 0 &&
       (ctx->active_text_input_window >= (int)ctx->windows.size() ||
        ctx->windows[ctx->active_text_input_window].closed)) {
-  ctx->active_text_input_window = -1;
-  ctx->active_text_input_id = 0;
-  ctx->active_text_input_cursor = 0;
-  ctx->active_text_input_sel_anchor = 0;
-  ctx->active_text_input_sel_start = 0;
-  ctx->active_text_input_sel_end = 0;
-  ctx->active_text_input_drag_select = false;
+    ctx->active_text_input_window = -1;
+    ctx->active_text_input_id = 0;
+    ctx->active_text_input_cursor = 0;
+    ctx->active_text_input_sel_anchor = 0;
+    ctx->active_text_input_sel_start = 0;
+    ctx->active_text_input_sel_end = 0;
+    ctx->active_text_input_drag_select = false;
+    ctx->active_text_input_multiline = false;
+    ctx->active_text_input_scroll_y = 0;
   }
 
   if (ctx->tile_manager_enabled) {
@@ -1681,7 +1709,8 @@ int mdgui_begin_window_ex(MDGUI_Context *ctx, const char *title, int x, int y,
   const int close_y = win.y + 1;
   const int max_x = close_x - btn_w - 2;
   const int max_y = win.y + 1;
-  const int title_text_w = (title && mdgui_fonts[1]) ? mdgui_fonts[1]->measureTextWidth(title) : 0;
+  const int title_text_w =
+      (title && mdgui_fonts[1]) ? mdgui_fonts[1]->measureTextWidth(title) : 0;
   int chrome_min_w = 26;
   if (title_text_w > 0) {
     const int title_need = 5 + title_text_w + 6 + btn_w + 2 + btn_w + 2;
@@ -1697,51 +1726,51 @@ int mdgui_begin_window_ex(MDGUI_Context *ctx, const char *title, int x, int y,
     if (win.open_combo_id != -1) {
       win.z = ++ctx->z_counter;
     } else {
-    // Check Close button
-    if (point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y, close_x, close_y,
-                      btn_w, btn_h)) {
-      win.closed = true;
-      return 0;
-    }
-    // Check Maximize button
-    if (move_resize_allowed && can_maximize &&
-        point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y, max_x, max_y,
-                      btn_w, btn_h)) {
-      win.fixed_rect = false;
-      win.is_maximized = !win.is_maximized;
-      if (win.is_maximized) {
-        win.restored_x = win.x;
-        win.restored_y = win.y;
-        win.restored_w = win.w;
-        win.restored_h = win.h;
-      } else {
-        win.x = win.restored_x;
-        win.y = win.restored_y;
-        win.w = win.restored_w;
-        win.h = win.restored_h;
+      // Check Close button
+      if (point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y, close_x,
+                        close_y, btn_w, btn_h)) {
+        win.closed = true;
+        return 0;
       }
-    }
+      // Check Maximize button
+      if (move_resize_allowed && can_maximize &&
+          point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y, max_x, max_y,
+                        btn_w, btn_h)) {
+        win.fixed_rect = false;
+        win.is_maximized = !win.is_maximized;
+        if (win.is_maximized) {
+          win.restored_x = win.x;
+          win.restored_y = win.y;
+          win.restored_w = win.w;
+          win.restored_h = win.h;
+        } else {
+          win.x = win.restored_x;
+          win.y = win.restored_y;
+          win.w = win.restored_w;
+          win.h = win.restored_h;
+        }
+      }
 
-    win.z = ++ctx->z_counter;
+      win.z = ++ctx->z_counter;
 
-    if (move_resize_allowed && edge_mask != 0) {
-      win.fixed_rect = false;
-      ctx->resizing_window = idx;
-      ctx->resize_edge_mask = edge_mask;
-      ctx->m_start_x = ctx->input.mouse_x;
-      ctx->m_start_y = ctx->input.mouse_y;
-      ctx->w_start_x = win.x;
-      ctx->w_start_y = win.y;
-      ctx->w_start_w = win.w;
-      ctx->w_start_h = win.h;
-    } else if (move_resize_allowed && !win.is_maximized &&
-               point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y, win.x,
-                             win.y, win.w, title_h)) {
-      win.fixed_rect = false;
-      ctx->dragging_window = idx;
-      ctx->drag_off_x = ctx->input.mouse_x - win.x;
-      ctx->drag_off_y = ctx->input.mouse_y - win.y;
-    }
+      if (move_resize_allowed && edge_mask != 0) {
+        win.fixed_rect = false;
+        ctx->resizing_window = idx;
+        ctx->resize_edge_mask = edge_mask;
+        ctx->m_start_x = ctx->input.mouse_x;
+        ctx->m_start_y = ctx->input.mouse_y;
+        ctx->w_start_x = win.x;
+        ctx->w_start_y = win.y;
+        ctx->w_start_w = win.w;
+        ctx->w_start_h = win.h;
+      } else if (move_resize_allowed && !win.is_maximized &&
+                 point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y, win.x,
+                               win.y, win.w, title_h)) {
+        win.fixed_rect = false;
+        ctx->dragging_window = idx;
+        ctx->drag_off_x = ctx->input.mouse_x - win.x;
+        ctx->drag_off_y = ctx->input.mouse_y - win.y;
+      }
     }
   }
 
@@ -1789,36 +1818,44 @@ int mdgui_begin_window_ex(MDGUI_Context *ctx, const char *title, int x, int y,
 
   mdgui_fill_rect_idx(nullptr, CLR_BOX_TITLE, win.x, win.y, win.w, title_h);
   mdgui_fill_rect_idx(nullptr, CLR_BOX_BODY, win.x, win.y + title_h, win.w,
-           win.h - title_h - 2);
-  mdgui_fill_rect_idx(nullptr, CLR_BOX_BODY, win.x, win.y + win.h - 2, win.w, 2);
+                      win.h - title_h - 2);
+  mdgui_fill_rect_idx(nullptr, CLR_BOX_BODY, win.x, win.y + win.h - 2, win.w,
+                      2);
 
   // Draw 3D-style Close button
-  mdgui_fill_rect_idx(nullptr, CLR_BUTTON_SURFACE, close_x, close_y, btn_w, btn_h);
+  mdgui_fill_rect_idx(nullptr, CLR_BUTTON_SURFACE, close_x, close_y, btn_w,
+                      btn_h);
   // Draw X as two diagonal lines with margin
   mdgui_draw_line_idx(nullptr, CLR_TEXT_LIGHT, close_x + 2, close_y + 2,
-             close_x + 6, close_y + 6);
+                      close_x + 6, close_y + 6);
   mdgui_draw_line_idx(nullptr, CLR_TEXT_LIGHT, close_x + 6, close_y + 2,
-             close_x + 2, close_y + 6);
+                      close_x + 2, close_y + 6);
 
   // Draw 3D-style Maximize button when allowed for this window.
   if (can_maximize) {
-    mdgui_fill_rect_idx(nullptr, CLR_BUTTON_SURFACE, max_x, max_y, btn_w, btn_h);
-    mdgui_fill_rect_idx(nullptr, CLR_TEXT_LIGHT, max_x + 2, max_y + 2, btn_w - 4,
-             btn_h - 4);
-    mdgui_fill_rect_idx(nullptr, CLR_BUTTON_SURFACE, max_x + 3, max_y + 4, btn_w - 6,
-             btn_h - 7);
+    mdgui_fill_rect_idx(nullptr, CLR_BUTTON_SURFACE, max_x, max_y, btn_w,
+                        btn_h);
+    mdgui_fill_rect_idx(nullptr, CLR_TEXT_LIGHT, max_x + 2, max_y + 2,
+                        btn_w - 4, btn_h - 4);
+    mdgui_fill_rect_idx(nullptr, CLR_BUTTON_SURFACE, max_x + 3, max_y + 4,
+                        btn_w - 6, btn_h - 7);
   }
 
   if (title && mdgui_fonts[1]) {
     const int title_text_y = win.y + ((title_h - 8) / 2);
-    mdgui_fonts[1]->drawText(title, nullptr, win.x + 5, title_text_y, CLR_TEXT_LIGHT);
+    mdgui_fonts[1]->drawText(title, nullptr, win.x + 5, title_text_y,
+                             CLR_TEXT_LIGHT);
   }
 
   // Draw border after fills so it renders on top
-  mdgui_draw_hline_idx(nullptr, CLR_WINDOW_BORDER, win.x - 1, win.y - 1, win.x + win.w + 1);
-  mdgui_draw_hline_idx(nullptr, CLR_WINDOW_BORDER, win.x - 1, win.y + win.h - 1, win.x + win.w + 1);
-  mdgui_draw_vline_idx(nullptr, CLR_WINDOW_BORDER, win.x - 1, win.y - 1, win.y + win.h);
-  mdgui_draw_vline_idx(nullptr, CLR_WINDOW_BORDER, win.x + win.w, win.y - 1, win.y + win.h);
+  mdgui_draw_hline_idx(nullptr, CLR_WINDOW_BORDER, win.x - 1, win.y - 1,
+                       win.x + win.w + 1);
+  mdgui_draw_hline_idx(nullptr, CLR_WINDOW_BORDER, win.x - 1, win.y + win.h - 1,
+                       win.x + win.w + 1);
+  mdgui_draw_vline_idx(nullptr, CLR_WINDOW_BORDER, win.x - 1, win.y - 1,
+                       win.y + win.h);
+  mdgui_draw_vline_idx(nullptr, CLR_WINDOW_BORDER, win.x + win.w, win.y - 1,
+                       win.y + win.h);
 
   ctx->origin_x = win.x + 2;
   ctx->origin_y = win.y + title_h + 2;
@@ -1865,8 +1902,8 @@ void mdgui_end_window(MDGUI_Context *ctx) {
         std::max(ctx->content_req_right, nested.parent_content_req_right);
     ctx->content_req_bottom =
         std::max(ctx->content_req_bottom, nested.parent_content_req_bottom);
-    ctx->window_has_nonlabel_widget =
-        ctx->window_has_nonlabel_widget || nested.parent_window_has_nonlabel_widget;
+    ctx->window_has_nonlabel_widget = ctx->window_has_nonlabel_widget ||
+                                      nested.parent_window_has_nonlabel_widget;
     mdgui_backend_set_alpha_mod(nested.parent_alpha_mod);
     set_content_clip(ctx);
     return;
@@ -1911,18 +1948,18 @@ void mdgui_end_window(MDGUI_Context *ctx) {
     ctx->combo_capture_y = popup_y;
     ctx->combo_capture_w = w;
     ctx->combo_capture_h = popup_h;
-    mdgui_draw_frame_idx(nullptr, CLR_TEXT_DARK, ix - 1, popup_y - 1, ix + w + 1,
-            popup_y + popup_h + 1);
+    mdgui_draw_frame_idx(nullptr, CLR_TEXT_DARK, ix - 1, popup_y - 1,
+                         ix + w + 1, popup_y + popup_h + 1);
     mdgui_fill_rect_idx(nullptr, CLR_MENU_BG, ix, popup_y, w, popup_h);
     for (int i = 0; i < item_count; i++) {
       const int ry = popup_y + (i * item_h);
-      const int row_hover = point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y,
-                                          ix, ry, w, item_h);
+      const int row_hover = point_in_rect(
+          ctx->input.mouse_x, ctx->input.mouse_y, ix, ry, w, item_h);
       if (i == ctx->combo_overlay_selected || row_hover)
         mdgui_fill_rect_idx(nullptr, CLR_ACCENT, ix, ry, w, item_h);
       if (mdgui_fonts[1] && ctx->combo_overlay_items[i]) {
-        mdgui_fonts[1]->drawText(ctx->combo_overlay_items[i], nullptr, ix + 2, ry + 1,
-                      CLR_MENU_TEXT);
+        mdgui_fonts[1]->drawText(ctx->combo_overlay_items[i], nullptr, ix + 2,
+                                 ry + 1, CLR_MENU_TEXT);
       }
     }
     ctx->combo_overlay_pending = false;
@@ -1937,15 +1974,14 @@ void mdgui_end_window(MDGUI_Context *ctx) {
     int total_h = ctx->content_y - ctx->origin_y;
     if (total_h < 0)
       total_h = 0;
-    const int max_scroll = (viewport_h > 0 && total_h > viewport_h)
-                               ? (total_h - viewport_h)
-                               : 0;
+    const int max_scroll =
+        (viewport_h > 0 && total_h > viewport_h) ? (total_h - viewport_h) : 0;
 
     const int content_x = win.x + 2;
     const int content_w = win.w - 4;
-    const int over_content = point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y,
-                                           content_x, viewport_top, content_w,
-                                           (viewport_h > 0) ? viewport_h : 1);
+    const int over_content = point_in_rect(
+        ctx->input.mouse_x, ctx->input.mouse_y, content_x, viewport_top,
+        content_w, (viewport_h > 0) ? viewport_h : 1);
     if (over_content && ctx->input.mouse_wheel != 0 && max_scroll > 0 &&
         !win.text_scroll_dragging) {
       const int prev = win.text_scroll;
@@ -1968,19 +2004,20 @@ void mdgui_end_window(MDGUI_Context *ctx) {
       const int sb_w = 8;
       const int sb_x = win.x + win.w - sb_w - 2;
       const int sb_y = viewport_top;
-      mdgui_fill_rect_idx(nullptr, CLR_BUTTON_SURFACE, sb_x, sb_y, sb_w, viewport_h);
+      mdgui_fill_rect_idx(nullptr, CLR_BUTTON_SURFACE, sb_x, sb_y, sb_w,
+                          viewport_h);
       int thumb_h = (viewport_h * viewport_h) / (total_h > 0 ? total_h : 1);
       if (thumb_h < 10)
         thumb_h = 10;
       if (thumb_h > viewport_h)
         thumb_h = viewport_h;
       const int travel = viewport_h - thumb_h;
-      const int thumb_y = sb_y + ((travel > 0)
-                                      ? ((win.text_scroll * travel) / max_scroll)
-                                      : 0);
-      mdgui_fill_rect_idx(nullptr, CLR_ACCENT, sb_x + 1, thumb_y, sb_w - 2, thumb_h);
-      const int over_scrollbar = point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y,
-                                               sb_x, sb_y, sb_w, viewport_h);
+      const int thumb_y =
+          sb_y + ((travel > 0) ? ((win.text_scroll * travel) / max_scroll) : 0);
+      mdgui_fill_rect_idx(nullptr, CLR_ACCENT, sb_x + 1, thumb_y, sb_w - 2,
+                          thumb_h);
+      const int over_scrollbar = point_in_rect(
+          ctx->input.mouse_x, ctx->input.mouse_y, sb_x, sb_y, sb_w, viewport_h);
       if (ctx->input.mouse_pressed && over_scrollbar &&
           is_current_window_topmost(ctx)) {
         if (ctx->input.mouse_y >= thumb_y &&
@@ -2045,7 +2082,8 @@ static int clamp_text_cursor(int cursor, int len) {
   return cursor;
 }
 
-static int text_cursor_from_pixel_x(const char *buffer, int len, int target_px) {
+static int text_cursor_from_pixel_x(const char *buffer, int len,
+                                    int target_px) {
   if (!mdgui_fonts[1] || !buffer)
     return len;
   if (target_px < 0)
@@ -2064,7 +2102,7 @@ static int text_cursor_from_pixel_x(const char *buffer, int len, int target_px) 
 }
 
 int mdgui_button(MDGUI_Context *ctx, const char *text, int x, int y, int w,
-                int h) {
+                 int h) {
   if (!ctx || ctx->current_window < 0)
     return 0;
   ctx->window_has_nonlabel_widget = true;
@@ -2084,15 +2122,19 @@ int mdgui_button(MDGUI_Context *ctx, const char *text, int x, int y, int w,
   if (depressed) {
     mdgui_fill_rect_idx(nullptr, CLR_BUTTON_PRESSED, abs_x, abs_y, w, h);
     mdgui_draw_hline_idx(nullptr, CLR_BUTTON_DARK, abs_x, abs_y, abs_x + w);
-    mdgui_draw_vline_idx(nullptr, CLR_BUTTON_DARK, abs_x + w - 1, abs_y, abs_y + h);
+    mdgui_draw_vline_idx(nullptr, CLR_BUTTON_DARK, abs_x + w - 1, abs_y,
+                         abs_y + h);
     mdgui_draw_vline_idx(nullptr, CLR_BUTTON_LIGHT, abs_x, abs_y, abs_y + h);
-    mdgui_draw_hline_idx(nullptr, CLR_BUTTON_LIGHT, abs_x, abs_y + h - 1, abs_x + w);
+    mdgui_draw_hline_idx(nullptr, CLR_BUTTON_LIGHT, abs_x, abs_y + h - 1,
+                         abs_x + w);
   } else {
     mdgui_fill_rect_idx(nullptr, CLR_BUTTON_SURFACE, abs_x, abs_y, w, h);
     mdgui_draw_hline_idx(nullptr, CLR_BUTTON_LIGHT, abs_x, abs_y, abs_x + w);
-    mdgui_draw_vline_idx(nullptr, CLR_BUTTON_LIGHT, abs_x + w - 1, abs_y, abs_y + h);
+    mdgui_draw_vline_idx(nullptr, CLR_BUTTON_LIGHT, abs_x + w - 1, abs_y,
+                         abs_y + h);
     mdgui_draw_vline_idx(nullptr, CLR_BUTTON_DARK, abs_x, abs_y, abs_y + h);
-    mdgui_draw_hline_idx(nullptr, CLR_BUTTON_DARK, abs_x, abs_y + h - 1, abs_x + w);
+    mdgui_draw_hline_idx(nullptr, CLR_BUTTON_DARK, abs_x, abs_y + h - 1,
+                         abs_x + w);
   }
 
   if (text && mdgui_fonts[1]) {
@@ -2122,7 +2164,8 @@ void mdgui_label(MDGUI_Context *ctx, const char *text, int x, int y) {
   const int logical_y = ctx->content_y + y;
   const int abs_y = logical_y - win.text_scroll;
   mdgui_fonts[1]->drawText(text, nullptr, abs_x, abs_y, CLR_TEXT_LIGHT);
-  note_content_bounds(ctx, abs_x + mdgui_fonts[1]->measureTextWidth(text), logical_y + 12);
+  note_content_bounds(ctx, abs_x + mdgui_fonts[1]->measureTextWidth(text),
+                      logical_y + 12);
   ctx->content_y += 12; // Advance content Y
 }
 
@@ -2146,7 +2189,8 @@ void mdgui_label_wrapped(MDGUI_Context *ctx, const char *text, int x, int y,
 
   auto draw_line = [&](const std::string &line) {
     const int abs_y = (logical_y + lines_drawn * line_h) - win.text_scroll;
-    mdgui_fonts[1]->drawText(line.c_str(), nullptr, draw_x, abs_y, CLR_TEXT_LIGHT);
+    mdgui_fonts[1]->drawText(line.c_str(), nullptr, draw_x, abs_y,
+                             CLR_TEXT_LIGHT);
     const int line_w = mdgui_fonts[1]->measureTextWidth(line.c_str());
     if (draw_x + line_w > max_right)
       max_right = draw_x + line_w;
@@ -2164,7 +2208,8 @@ void mdgui_label_wrapped(MDGUI_Context *ctx, const char *text, int x, int y,
       size_t limit = word.size() - offset;
       for (size_t n = 1; n <= limit; ++n) {
         const std::string candidate = word.substr(offset, n);
-        if (mdgui_fonts[1]->measureTextWidth(candidate.c_str()) <= inner_wrap_w) {
+        if (mdgui_fonts[1]->measureTextWidth(candidate.c_str()) <=
+            inner_wrap_w) {
           best = n;
         } else {
           break;
@@ -2204,7 +2249,8 @@ void mdgui_label_wrapped(MDGUI_Context *ctx, const char *text, int x, int y,
         const std::string candidate =
             current.empty() ? word : (current + " " + word);
 
-        if (mdgui_fonts[1]->measureTextWidth(candidate.c_str()) <= inner_wrap_w) {
+        if (mdgui_fonts[1]->measureTextWidth(candidate.c_str()) <=
+            inner_wrap_w) {
           current = candidate;
           continue;
         }
@@ -2250,7 +2296,7 @@ void mdgui_spacer(MDGUI_Context *ctx, int pixels) {
 }
 
 int mdgui_checkbox(MDGUI_Context *ctx, const char *text, bool *checked, int x,
-                  int y) {
+                   int y) {
   if (!ctx || !checked || ctx->current_window < 0)
     return 0;
   ctx->window_has_nonlabel_widget = true;
@@ -2263,21 +2309,25 @@ int mdgui_checkbox(MDGUI_Context *ctx, const char *text, bool *checked, int x,
   // 3D-drawn checkbox
   mdgui_fill_rect_idx(nullptr, CLR_BUTTON_SURFACE, ix, iy, box_size, box_size);
   mdgui_draw_hline_idx(nullptr, CLR_ACCENT, ix, iy, ix + box_size);
-  mdgui_draw_hline_idx(nullptr, CLR_ACCENT, ix, iy + box_size - 1, ix + box_size);
+  mdgui_draw_hline_idx(nullptr, CLR_ACCENT, ix, iy + box_size - 1,
+                       ix + box_size);
   mdgui_draw_vline_idx(nullptr, CLR_ACCENT, ix, iy, iy + box_size);
-  mdgui_draw_vline_idx(nullptr, CLR_ACCENT, ix + box_size - 1, iy, iy + box_size);
+  mdgui_draw_vline_idx(nullptr, CLR_ACCENT, ix + box_size - 1, iy,
+                       iy + box_size);
 
   if (*checked) {
-    mdgui_draw_line_idx(nullptr, CLR_TEXT_LIGHT, ix + 2, iy + 2,
-               ix + 7, iy + 7);
-    mdgui_draw_line_idx(nullptr, CLR_TEXT_LIGHT, ix + 7, iy + 2,
-               ix + 2, iy + 7);
+    mdgui_draw_line_idx(nullptr, CLR_TEXT_LIGHT, ix + 2, iy + 2, ix + 7,
+                        iy + 7);
+    mdgui_draw_line_idx(nullptr, CLR_TEXT_LIGHT, ix + 7, iy + 2, ix + 2,
+                        iy + 7);
   }
 
   if (text && mdgui_fonts[1]) {
-    mdgui_fonts[1]->drawText(text, nullptr, ix + box_size + 4, iy + 1, CLR_TEXT_LIGHT);
+    mdgui_fonts[1]->drawText(text, nullptr, ix + box_size + 4, iy + 1,
+                             CLR_TEXT_LIGHT);
   }
-  const int label_w = (text && mdgui_fonts[1]) ? mdgui_fonts[1]->measureTextWidth(text) : 0;
+  const int label_w =
+      (text && mdgui_fonts[1]) ? mdgui_fonts[1]->measureTextWidth(text) : 0;
   note_content_bounds(ctx, ix + box_size + 4 + label_w, logical_y + box_size);
 
   int result = 0;
@@ -2293,7 +2343,7 @@ int mdgui_checkbox(MDGUI_Context *ctx, const char *text, bool *checked, int x,
 }
 
 int mdgui_slider(MDGUI_Context *ctx, const char *text, float *val, float min,
-                float max, int x, int y, int w) {
+                 float max, int x, int y, int w) {
   if (!ctx || !val || ctx->current_window < 0)
     return 0;
   ctx->window_has_nonlabel_widget = true;
@@ -2312,8 +2362,10 @@ int mdgui_slider(MDGUI_Context *ctx, const char *text, float *val, float min,
   mdgui_fill_rect_idx(nullptr, CLR_BUTTON_SURFACE, ix, iy + 3, w, track_h);
   mdgui_draw_hline_idx(nullptr, CLR_BUTTON_DARK, ix, iy + 3, ix + w);
   mdgui_draw_vline_idx(nullptr, CLR_BUTTON_DARK, ix, iy + 3, iy + 3 + track_h);
-  mdgui_draw_hline_idx(nullptr, CLR_BUTTON_LIGHT, ix, iy + 3 + track_h - 1, ix + w);
-  mdgui_draw_vline_idx(nullptr, CLR_BUTTON_LIGHT, ix + w - 1, iy + 3, iy + 3 + track_h);
+  mdgui_draw_hline_idx(nullptr, CLR_BUTTON_LIGHT, ix, iy + 3 + track_h - 1,
+                       ix + w);
+  mdgui_draw_vline_idx(nullptr, CLR_BUTTON_LIGHT, ix + w - 1, iy + 3,
+                       iy + 3 + track_h);
 
   float ratio = (*val - min) / (max - min);
   if (ratio < 0)
@@ -2327,8 +2379,10 @@ int mdgui_slider(MDGUI_Context *ctx, const char *text, float *val, float min,
   mdgui_fill_rect_idx(nullptr, CLR_BUTTON_SURFACE, tx, iy, thumb_w, thumb_h);
   mdgui_draw_hline_idx(nullptr, CLR_BUTTON_LIGHT, tx, iy, tx + thumb_w);
   mdgui_draw_vline_idx(nullptr, CLR_BUTTON_LIGHT, tx, iy, iy + thumb_h);
-  mdgui_draw_hline_idx(nullptr, CLR_BUTTON_DARK, tx, iy + thumb_h - 1, tx + thumb_w);
-  mdgui_draw_vline_idx(nullptr, CLR_BUTTON_DARK, tx + thumb_w - 1, iy, iy + thumb_h);
+  mdgui_draw_hline_idx(nullptr, CLR_BUTTON_DARK, tx, iy + thumb_h - 1,
+                       tx + thumb_w);
+  mdgui_draw_vline_idx(nullptr, CLR_BUTTON_DARK, tx + thumb_w - 1, iy,
+                       iy + thumb_h);
 
   int result = 0;
   if (ctx->input.mouse_down && is_current_window_topmost(ctx) &&
@@ -2343,7 +2397,8 @@ int mdgui_slider(MDGUI_Context *ctx, const char *text, float *val, float min,
     result = 1;
   }
 
-  const int text_w = (text && mdgui_fonts[1]) ? mdgui_fonts[1]->measureTextWidth(text) : 0;
+  const int text_w =
+      (text && mdgui_fonts[1]) ? mdgui_fonts[1]->measureTextWidth(text) : 0;
   int label_right = ix + w;
   if (text && mdgui_fonts[1] && text_w > 0) {
     const int content_left = win.x + 2;
@@ -2370,7 +2425,8 @@ int mdgui_slider(MDGUI_Context *ctx, const char *text, float *val, float min,
   if (requested_w <= 0)
     intrinsic_slider_w = 24;
   const int slider_right = ix + intrinsic_slider_w;
-  note_content_bounds(ctx, std::max(slider_right, label_right), logical_y + thumb_h);
+  note_content_bounds(ctx, std::max(slider_right, label_right),
+                      logical_y + thumb_h);
 
   const int bottom_margin = 4;
   ctx->content_y += std::max(y, top_margin) + thumb_h + bottom_margin;
@@ -2397,8 +2453,8 @@ int mdgui_collapsing_header(MDGUI_Context *ctx, const char *id,
       topmost &&
       point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y, ix, iy, w, row_h);
 
-  bool *open = find_or_create_collapsing_state(win, id ? id : text,
-                                                default_open != 0);
+  bool *open =
+      find_or_create_collapsing_state(win, id ? id : text, default_open != 0);
   if (hovered && ctx->input.mouse_pressed) {
     *open = !*open;
   }
@@ -2452,7 +2508,7 @@ void mdgui_separator(MDGUI_Context *ctx, int x, int y, int w) {
 }
 
 int mdgui_listbox(MDGUI_Context *ctx, const char **items, int item_count,
-                 int *selected, int x, int y, int w, int rows) {
+                  int *selected, int x, int y, int w, int rows) {
   if (!ctx || !selected || !items || item_count <= 0)
     return 0;
   ctx->window_has_nonlabel_widget = true;
@@ -2470,9 +2526,12 @@ int mdgui_listbox(MDGUI_Context *ctx, const char **items, int item_count,
   const int topmost = is_current_window_topmost(ctx);
 
   mdgui_draw_hline_idx(nullptr, CLR_WINDOW_BORDER, ix - 1, iy - 1, ix + w + 1);
-  mdgui_draw_hline_idx(nullptr, CLR_WINDOW_BORDER, ix - 1, iy + box_h + 1, ix + w + 1);
-  mdgui_draw_vline_idx(nullptr, CLR_WINDOW_BORDER, ix - 1, iy - 1, iy + box_h + 1);
-  mdgui_draw_vline_idx(nullptr, CLR_WINDOW_BORDER, ix + w + 1, iy - 1, iy + box_h + 1);
+  mdgui_draw_hline_idx(nullptr, CLR_WINDOW_BORDER, ix - 1, iy + box_h + 1,
+                       ix + w + 1);
+  mdgui_draw_vline_idx(nullptr, CLR_WINDOW_BORDER, ix - 1, iy - 1,
+                       iy + box_h + 1);
+  mdgui_draw_vline_idx(nullptr, CLR_WINDOW_BORDER, ix + w + 1, iy - 1,
+                       iy + box_h + 1);
   mdgui_fill_rect_idx(nullptr, CLR_BOX_BODY, ix, iy, w, box_h);
 
   int clicked = 0;
@@ -2481,14 +2540,16 @@ int mdgui_listbox(MDGUI_Context *ctx, const char **items, int item_count,
     if (item_idx >= item_count)
       break;
     const int ry = iy + (i * row_h);
-    const int hovered = topmost && point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y,
-                                                 ix, ry, w, row_h);
+    const int hovered =
+        topmost &&
+        point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y, ix, ry, w, row_h);
     if (item_idx == *selected)
       mdgui_fill_rect_idx(nullptr, CLR_ACCENT, ix, ry, w, row_h);
     else if (hovered)
       mdgui_fill_rect_idx(nullptr, CLR_BUTTON_SURFACE, ix, ry, w, row_h);
     if (mdgui_fonts[1] && items[item_idx]) {
-      mdgui_fonts[1]->drawText(items[item_idx], nullptr, ix + 2, ry + 1, CLR_MENU_TEXT);
+      mdgui_fonts[1]->drawText(items[item_idx], nullptr, ix + 2, ry + 1,
+                               CLR_MENU_TEXT);
     }
     if (hovered && ctx->input.mouse_pressed) {
       *selected = item_idx;
@@ -2506,7 +2567,7 @@ int mdgui_listbox(MDGUI_Context *ctx, const char **items, int item_count,
 }
 
 int mdgui_combo(MDGUI_Context *ctx, const char *label, const char **items,
-               int item_count, int *selected, int x, int y, int w) {
+                int item_count, int *selected, int x, int y, int w) {
   if (!ctx || !selected || !items || item_count <= 0 || ctx->current_window < 0)
     return 0;
   ctx->window_has_nonlabel_widget = true;
@@ -2529,31 +2590,35 @@ int mdgui_combo(MDGUI_Context *ctx, const char *label, const char **items,
   const int open = (win.open_combo_id == combo_id);
 
   mdgui_draw_hline_idx(nullptr, CLR_WINDOW_BORDER, ix - 1, iy - 1, ix + w + 1);
-  mdgui_draw_hline_idx(nullptr, CLR_WINDOW_BORDER, ix - 1, iy + box_h + 1, ix + w + 1);
-  mdgui_draw_vline_idx(nullptr, CLR_WINDOW_BORDER, ix - 1, iy - 1, iy + box_h + 1);
-  mdgui_draw_vline_idx(nullptr, CLR_WINDOW_BORDER, ix + w + 1, iy - 1, iy + box_h + 1);
+  mdgui_draw_hline_idx(nullptr, CLR_WINDOW_BORDER, ix - 1, iy + box_h + 1,
+                       ix + w + 1);
+  mdgui_draw_vline_idx(nullptr, CLR_WINDOW_BORDER, ix - 1, iy - 1,
+                       iy + box_h + 1);
+  mdgui_draw_vline_idx(nullptr, CLR_WINDOW_BORDER, ix + w + 1, iy - 1,
+                       iy + box_h + 1);
   mdgui_fill_rect_idx(nullptr, CLR_BOX_BODY, ix, iy, w, box_h);
   mdgui_draw_vline_idx(nullptr, CLR_BUTTON_DARK, ix + w - 12, iy, iy + box_h);
   if (mdgui_fonts[1] && items[*selected]) {
-    mdgui_fonts[1]->drawText(items[*selected], nullptr, ix + 2, iy + 2, CLR_MENU_TEXT);
+    mdgui_fonts[1]->drawText(items[*selected], nullptr, ix + 2, iy + 2,
+                             CLR_MENU_TEXT);
     mdgui_fonts[1]->drawText("v", nullptr, ix + w - 9, iy + 2, CLR_MENU_TEXT);
   }
   if (label && mdgui_fonts[1]) {
     mdgui_fonts[1]->drawText(label, nullptr, ix, iy - 10, CLR_TEXT_LIGHT);
   }
 
-  const int hovered = topmost &&
-                      point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y, ix, iy,
-                                    w, box_h);
+  const int hovered =
+      topmost &&
+      point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y, ix, iy, w, box_h);
   if (hovered && ctx->input.mouse_pressed) {
     win.open_combo_id = open ? -1 : combo_id;
     win.z = ++ctx->z_counter;
-    ctx->input.mouse_pressed = 0; // consume click so underlying widgets don't also fire
+    ctx->input.mouse_pressed =
+        0; // consume click so underlying widgets don't also fire
   } else if (ctx->input.mouse_pressed && open) {
     const int popup_h = item_count * item_h;
-    const int in_popup =
-        point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y, ix, iy + box_h, w,
-                      popup_h);
+    const int in_popup = point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y,
+                                       ix, iy + box_h, w, popup_h);
     if (!in_popup)
       win.open_combo_id = -1;
   }
@@ -2563,7 +2628,8 @@ int mdgui_combo(MDGUI_Context *ctx, const char *label, const char **items,
   if (requested_w <= 0) {
     intrinsic_w = 40;
     if (mdgui_fonts[1] && items[*selected]) {
-      const int text_need = mdgui_fonts[1]->measureTextWidth(items[*selected]) + 14;
+      const int text_need =
+          mdgui_fonts[1]->measureTextWidth(items[*selected]) + 14;
       if (text_need > intrinsic_w)
         intrinsic_w = text_need;
     }
@@ -2574,8 +2640,9 @@ int mdgui_combo(MDGUI_Context *ctx, const char *label, const char **items,
     const int popup_h = item_count * item_h;
     for (int i = 0; i < item_count; i++) {
       const int ry = popup_y + (i * item_h);
-      const int row_hover = topmost && point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y,
-                                                     ix, ry, w, item_h);
+      const int row_hover =
+          topmost && point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y, ix,
+                                   ry, w, item_h);
       if (row_hover && ctx->input.mouse_pressed) {
         if (*selected != i) {
           *selected = i;
@@ -2605,7 +2672,7 @@ int mdgui_combo(MDGUI_Context *ctx, const char *label, const char **items,
 }
 
 int mdgui_input_text(MDGUI_Context *ctx, const char *label, char *buffer,
-                    int buffer_size, int x, int y, int w) {
+                     int buffer_size, int x, int y, int w) {
   if (!ctx || !buffer || buffer_size <= 1 || ctx->current_window < 0)
     return 0;
   ctx->window_has_nonlabel_widget = true;
@@ -2620,20 +2687,20 @@ int mdgui_input_text(MDGUI_Context *ctx, const char *label, char *buffer,
   const int logical_y = ctx->content_y + std::max(y, top_margin);
   const int iy = logical_y - win.text_scroll;
   const uintptr_t buf_addr = (uintptr_t)buffer;
-  const int input_id =
-      (int)(((buf_addr >> 3) & 0x7fffffff) ^ ((x & 0xffff) << 16) ^
-            (y & 0xffff) ^ 0x54455854);
+  const int input_id = (int)(((buf_addr >> 3) & 0x7fffffff) ^
+                             ((x & 0xffff) << 16) ^ (y & 0xffff) ^ 0x54455854);
   const bool focused = (ctx->active_text_input_window == ctx->current_window &&
                         ctx->active_text_input_id == input_id);
 
-  const int hovered = topmost &&
-                      point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y, ix, iy,
-                                    w, box_h);
+  const int hovered =
+      topmost &&
+      point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y, ix, iy, w, box_h);
   int len = 0;
   while (len < (buffer_size - 1) && buffer[len] != '\0')
     len++;
   buffer[len] = '\0';
-  int pre_cursor = focused ? clamp_text_cursor(ctx->active_text_input_cursor, len) : len;
+  int pre_cursor =
+      focused ? clamp_text_cursor(ctx->active_text_input_cursor, len) : len;
   int pre_scroll_px = 0;
   if (mdgui_fonts[1]) {
     std::string pre_prefix(buffer, (size_t)pre_cursor);
@@ -2645,6 +2712,8 @@ int mdgui_input_text(MDGUI_Context *ctx, const char *label, char *buffer,
   if (hovered && ctx->input.mouse_pressed) {
     ctx->active_text_input_window = ctx->current_window;
     ctx->active_text_input_id = input_id;
+    ctx->active_text_input_multiline = false;
+    ctx->active_text_input_scroll_y = 0;
     const int text_x = ix + 3;
     const int target_px = ctx->input.mouse_x - text_x + pre_scroll_px;
     const int click_cursor = text_cursor_from_pixel_x(buffer, len, target_px);
@@ -2652,10 +2721,11 @@ int mdgui_input_text(MDGUI_Context *ctx, const char *label, char *buffer,
     ctx->active_text_input_sel_anchor = click_cursor;
     ctx->active_text_input_sel_start = click_cursor;
     ctx->active_text_input_sel_end = click_cursor;
-    ctx->active_text_input_drag_select = true;
+    ctx->active_text_input_drag_select = ctx->input.mouse_down != 0;
     ctx->input.mouse_pressed = 0;
   } else if (ctx->input.mouse_pressed && focused && topmost &&
-             !point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y, ix, iy, w, box_h)) {
+             !point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y, ix, iy, w,
+                            box_h)) {
     ctx->active_text_input_window = -1;
     ctx->active_text_input_id = 0;
     ctx->active_text_input_cursor = 0;
@@ -2663,23 +2733,34 @@ int mdgui_input_text(MDGUI_Context *ctx, const char *label, char *buffer,
     ctx->active_text_input_sel_start = 0;
     ctx->active_text_input_sel_end = 0;
     ctx->active_text_input_drag_select = false;
+    ctx->active_text_input_multiline = false;
+    ctx->active_text_input_scroll_y = 0;
   }
 
   const bool active = (ctx->active_text_input_window == ctx->current_window &&
                        ctx->active_text_input_id == input_id);
   int flags = 0;
-  ctx->active_text_input_cursor = clamp_text_cursor(ctx->active_text_input_cursor, len);
-  ctx->active_text_input_sel_anchor = clamp_text_cursor(ctx->active_text_input_sel_anchor, len);
-  ctx->active_text_input_sel_start = clamp_text_cursor(ctx->active_text_input_sel_start, len);
-  ctx->active_text_input_sel_end = clamp_text_cursor(ctx->active_text_input_sel_end, len);
+  if (active) {
+    ctx->active_text_input_cursor =
+        clamp_text_cursor(ctx->active_text_input_cursor, len);
+    ctx->active_text_input_sel_anchor =
+        clamp_text_cursor(ctx->active_text_input_sel_anchor, len);
+    ctx->active_text_input_sel_start =
+        clamp_text_cursor(ctx->active_text_input_sel_start, len);
+    ctx->active_text_input_sel_end =
+        clamp_text_cursor(ctx->active_text_input_sel_end, len);
+  }
 
-  if (active && ctx->active_text_input_drag_select && ctx->input.mouse_down && hovered) {
+  if (active && ctx->active_text_input_drag_select && ctx->input.mouse_down &&
+      hovered) {
     const int text_x = ix + 3;
     const int target_px = ctx->input.mouse_x - text_x + pre_scroll_px;
     const int drag_cursor = text_cursor_from_pixel_x(buffer, len, target_px);
     ctx->active_text_input_cursor = drag_cursor;
-    ctx->active_text_input_sel_start = std::min(ctx->active_text_input_sel_anchor, drag_cursor);
-    ctx->active_text_input_sel_end = std::max(ctx->active_text_input_sel_anchor, drag_cursor);
+    ctx->active_text_input_sel_start =
+        std::min(ctx->active_text_input_sel_anchor, drag_cursor);
+    ctx->active_text_input_sel_end =
+        std::max(ctx->active_text_input_sel_anchor, drag_cursor);
   }
   if (active && !ctx->input.mouse_down) {
     ctx->active_text_input_drag_select = false;
@@ -2717,20 +2798,24 @@ int mdgui_input_text(MDGUI_Context *ctx, const char *label, char *buffer,
       ctx->active_text_input_sel_start = len;
       ctx->active_text_input_sel_end = len;
     }
-    ctx->active_text_input_cursor = clamp_text_cursor(ctx->active_text_input_cursor, len);
+    ctx->active_text_input_cursor =
+        clamp_text_cursor(ctx->active_text_input_cursor, len);
 
     const int sel_start = ctx->active_text_input_sel_start;
     const int sel_end = ctx->active_text_input_sel_end;
     const bool has_selection_now = sel_end > sel_start;
 
-    if (ctx->input.key_backspace && (has_selection_now || ctx->active_text_input_cursor > 0)) {
+    if (ctx->input.key_backspace &&
+        (has_selection_now || ctx->active_text_input_cursor > 0)) {
       if (has_selection_now) {
-        memmove(buffer + sel_start, buffer + sel_end, (size_t)(len - sel_end + 1));
+        memmove(buffer + sel_start, buffer + sel_end,
+                (size_t)(len - sel_end + 1));
         len -= (sel_end - sel_start);
         ctx->active_text_input_cursor = sel_start;
       } else {
         const int remove_idx = ctx->active_text_input_cursor - 1;
-        memmove(buffer + remove_idx, buffer + remove_idx + 1, (size_t)(len - remove_idx));
+        memmove(buffer + remove_idx, buffer + remove_idx + 1,
+                (size_t)(len - remove_idx));
         len -= 1;
         ctx->active_text_input_cursor -= 1;
       }
@@ -2738,14 +2823,17 @@ int mdgui_input_text(MDGUI_Context *ctx, const char *label, char *buffer,
       ctx->active_text_input_sel_end = ctx->active_text_input_cursor;
       flags |= MDGUI_INPUT_TEXT_CHANGED;
     }
-    if (ctx->input.key_delete && (has_selection_now || ctx->active_text_input_cursor < len)) {
+    if (ctx->input.key_delete &&
+        (has_selection_now || ctx->active_text_input_cursor < len)) {
       if (has_selection_now) {
-        memmove(buffer + sel_start, buffer + sel_end, (size_t)(len - sel_end + 1));
+        memmove(buffer + sel_start, buffer + sel_end,
+                (size_t)(len - sel_end + 1));
         len -= (sel_end - sel_start);
         ctx->active_text_input_cursor = sel_start;
       } else {
         const int remove_idx = ctx->active_text_input_cursor;
-        memmove(buffer + remove_idx, buffer + remove_idx + 1, (size_t)(len - remove_idx));
+        memmove(buffer + remove_idx, buffer + remove_idx + 1,
+                (size_t)(len - remove_idx));
         len -= 1;
       }
       ctx->active_text_input_sel_start = ctx->active_text_input_cursor;
@@ -2768,7 +2856,8 @@ int mdgui_input_text(MDGUI_Context *ctx, const char *label, char *buffer,
         if (ch < 32 || ch > 126)
           continue;
         const int insert_at = ctx->active_text_input_cursor;
-        memmove(buffer + insert_at + 1, buffer + insert_at, (size_t)(len - insert_at + 1));
+        memmove(buffer + insert_at + 1, buffer + insert_at,
+                (size_t)(len - insert_at + 1));
         buffer[insert_at] = (char)ch;
         len += 1;
         ctx->active_text_input_cursor += 1;
@@ -2783,9 +2872,11 @@ int mdgui_input_text(MDGUI_Context *ctx, const char *label, char *buffer,
 
   const int border_color = active ? CLR_ACCENT : CLR_WINDOW_BORDER;
   mdgui_draw_hline_idx(nullptr, border_color, ix - 1, iy - 1, ix + w + 1);
-  mdgui_draw_hline_idx(nullptr, border_color, ix - 1, iy + box_h + 1, ix + w + 1);
+  mdgui_draw_hline_idx(nullptr, border_color, ix - 1, iy + box_h + 1,
+                       ix + w + 1);
   mdgui_draw_vline_idx(nullptr, border_color, ix - 1, iy - 1, iy + box_h + 1);
-  mdgui_draw_vline_idx(nullptr, border_color, ix + w + 1, iy - 1, iy + box_h + 1);
+  mdgui_draw_vline_idx(nullptr, border_color, ix + w + 1, iy - 1,
+                       iy + box_h + 1);
   mdgui_fill_rect_idx(nullptr, CLR_BOX_BODY, ix, iy, w, box_h);
 
   const int text_x = ix + 3;
@@ -2799,24 +2890,31 @@ int mdgui_input_text(MDGUI_Context *ctx, const char *label, char *buffer,
     if (cursor_text_x > view_w - 2)
       scroll_px = cursor_text_x - (view_w - 2);
 
-    mdgui_backend_set_clip_rect(1, ix + 1, iy + 1, std::max(1, w - 2), std::max(1, box_h - 2));
-    if (active && ctx->active_text_input_sel_end > ctx->active_text_input_sel_start) {
+    mdgui_backend_set_clip_rect(1, ix + 1, iy + 1, std::max(1, w - 2),
+                                std::max(1, box_h - 2));
+    if (active &&
+        ctx->active_text_input_sel_end > ctx->active_text_input_sel_start) {
       std::string sel_prefix(buffer, (size_t)ctx->active_text_input_sel_start);
       std::string sel_text(buffer + ctx->active_text_input_sel_start,
-                           (size_t)(ctx->active_text_input_sel_end - ctx->active_text_input_sel_start));
-      const int sel_x0 =
-          text_x + mdgui_fonts[1]->measureTextWidth(sel_prefix.c_str()) - scroll_px;
+                           (size_t)(ctx->active_text_input_sel_end -
+                                    ctx->active_text_input_sel_start));
+      const int sel_x0 = text_x +
+                         mdgui_fonts[1]->measureTextWidth(sel_prefix.c_str()) -
+                         scroll_px;
       const int sel_w = mdgui_fonts[1]->measureTextWidth(sel_text.c_str());
       if (sel_w > 0)
-        mdgui_fill_rect_idx(nullptr, CLR_ACCENT, sel_x0, iy + 1, sel_w, box_h - 2);
+        mdgui_fill_rect_idx(nullptr, CLR_ACCENT, sel_x0, iy + 1, sel_w,
+                            box_h - 2);
     }
-    mdgui_fonts[1]->drawText(buffer, nullptr, text_x - scroll_px, text_y, CLR_MENU_TEXT);
+    mdgui_fonts[1]->drawText(buffer, nullptr, text_x - scroll_px, text_y,
+                             CLR_MENU_TEXT);
 
     if (active) {
       const unsigned long long ticks = mdgui_backend_get_ticks_ms();
       if (((ticks / 500ull) % 2ull) == 0ull) {
         const int cx = text_x + cursor_text_x - scroll_px;
-        mdgui_draw_vline_idx(nullptr, CLR_MENU_TEXT, cx, iy + 2, iy + box_h - 2);
+        mdgui_draw_vline_idx(nullptr, CLR_MENU_TEXT, cx, iy + 2,
+                             iy + box_h - 2);
       }
     }
     set_content_clip(ctx);
@@ -2835,8 +2933,424 @@ int mdgui_input_text(MDGUI_Context *ctx, const char *label, char *buffer,
   return flags;
 }
 
+int mdgui_input_text_multiline(MDGUI_Context *ctx, const char *label,
+                               char *buffer, int buffer_size, int x, int y,
+                               int w, int h, int flags) {
+  if (!ctx || !buffer || buffer_size <= 1 || ctx->current_window < 0)
+    return 0;
+  ctx->window_has_nonlabel_widget = true;
+  auto &win = ctx->windows[ctx->current_window];
+  const int topmost = is_current_window_topmost(ctx);
+  const int requested_w = w;
+  w = resolve_dynamic_width(ctx, x, w, 40);
+  if (h < 24)
+    h = 24;
+
+  const int ix = ctx->origin_x + x;
+  const int top_margin = 10;
+  const int logical_y = ctx->content_y + std::max(y, top_margin);
+  const int iy = logical_y - win.text_scroll;
+
+  int len = 0;
+  while (len < (buffer_size - 1) && buffer[len] != '\0')
+    len++;
+  buffer[len] = '\0';
+
+  std::vector<int> line_starts;
+  line_starts.reserve(16);
+  line_starts.push_back(0);
+  for (int i = 0; i < len; ++i) {
+    if (buffer[i] == '\n')
+      line_starts.push_back(i + 1);
+  }
+  const int line_count = (int)line_starts.size();
+  auto line_end = [&](int line_idx) {
+    if (line_idx < 0)
+      return 0;
+    if (line_idx >= line_count)
+      return len;
+    if (line_idx + 1 < line_count)
+      return line_starts[line_idx + 1] - 1;
+    return len;
+  };
+
+  const int line_h = 12;
+  const int content_h = line_count * line_h + 4;
+  if ((flags & MDGUI_INPUT_TEXT_MULTILINE_AUTO_HEIGHT) != 0 && content_h > h)
+    h = content_h;
+
+  const uintptr_t buf_addr = (uintptr_t)buffer;
+  const int input_id = (int)(((buf_addr >> 3) & 0x7fffffff) ^
+                             ((x & 0xffff) << 16) ^ (y & 0xffff) ^ 0x4d4c5449);
+  const bool focused = (ctx->active_text_input_window == ctx->current_window &&
+                        ctx->active_text_input_id == input_id);
+  if (focused && !ctx->active_text_input_multiline) {
+    ctx->active_text_input_scroll_y = 0;
+    ctx->active_text_input_multiline = true;
+  }
+
+  const int hovered =
+      topmost &&
+      point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y, ix, iy, w, h);
+
+  auto cursor_line_for = [&](int cursor_pos) {
+    int line_idx = 0;
+    for (int i = 0; i < line_count; ++i) {
+      if (line_starts[i] <= cursor_pos)
+        line_idx = i;
+      else
+        break;
+    }
+    return line_idx;
+  };
+
+  auto cursor_from_mouse = [&](int mouse_x, int mouse_y) {
+    int scroll_y = focused ? ctx->active_text_input_scroll_y : 0;
+    if (scroll_y < 0)
+      scroll_y = 0;
+    const int text_x = ix + 3;
+    const int text_y = iy + 2;
+    int line_idx = (mouse_y - text_y + scroll_y) / line_h;
+    if (line_idx < 0)
+      line_idx = 0;
+    if (line_idx >= line_count)
+      line_idx = line_count - 1;
+    const int ls = line_starts[line_idx];
+    const int le = line_end(line_idx);
+    const int local_x = mouse_x - text_x;
+    return ls + text_cursor_from_pixel_x(buffer + ls, le - ls, local_x);
+  };
+
+  if (hovered && ctx->input.mouse_pressed) {
+    const int click_cursor =
+        cursor_from_mouse(ctx->input.mouse_x, ctx->input.mouse_y);
+    ctx->active_text_input_window = ctx->current_window;
+    ctx->active_text_input_id = input_id;
+    ctx->active_text_input_cursor = click_cursor;
+    ctx->active_text_input_sel_anchor = click_cursor;
+    ctx->active_text_input_sel_start = click_cursor;
+    ctx->active_text_input_sel_end = click_cursor;
+    ctx->active_text_input_drag_select = true;
+    ctx->active_text_input_multiline = true;
+    ctx->input.mouse_pressed = 0;
+  } else if (ctx->input.mouse_pressed && focused && topmost &&
+             !point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y, ix, iy, w,
+                            h)) {
+    ctx->active_text_input_window = -1;
+    ctx->active_text_input_id = 0;
+    ctx->active_text_input_cursor = 0;
+    ctx->active_text_input_sel_anchor = 0;
+    ctx->active_text_input_sel_start = 0;
+    ctx->active_text_input_sel_end = 0;
+    ctx->active_text_input_drag_select = false;
+    ctx->active_text_input_multiline = false;
+    ctx->active_text_input_scroll_y = 0;
+  }
+
+  const bool active = (ctx->active_text_input_window == ctx->current_window &&
+                       ctx->active_text_input_id == input_id);
+  int result_flags = 0;
+  if (active) {
+    ctx->active_text_input_cursor =
+        clamp_text_cursor(ctx->active_text_input_cursor, len);
+    ctx->active_text_input_sel_anchor =
+        clamp_text_cursor(ctx->active_text_input_sel_anchor, len);
+    ctx->active_text_input_sel_start =
+        clamp_text_cursor(ctx->active_text_input_sel_start, len);
+    ctx->active_text_input_sel_end =
+        clamp_text_cursor(ctx->active_text_input_sel_end, len);
+  }
+  if (active &&
+      (ctx->input.text_input || ctx->input.key_backspace ||
+       ctx->input.key_delete || ctx->input.key_left || ctx->input.key_right ||
+       ctx->input.key_up || ctx->input.key_down || ctx->input.key_home ||
+       ctx->input.key_end || ctx->input.key_enter)) {
+    ctx->active_text_input_drag_select = false;
+  }
+  if (ctx->active_text_input_scroll_y < 0)
+    ctx->active_text_input_scroll_y = 0;
+
+  if (active && ctx->active_text_input_drag_select && ctx->input.mouse_down &&
+      hovered) {
+    const int drag_cursor =
+        cursor_from_mouse(ctx->input.mouse_x, ctx->input.mouse_y);
+    ctx->active_text_input_cursor = drag_cursor;
+    ctx->active_text_input_sel_start =
+        std::min(ctx->active_text_input_sel_anchor, drag_cursor);
+    ctx->active_text_input_sel_end =
+        std::max(ctx->active_text_input_sel_anchor, drag_cursor);
+  }
+  if (active && !ctx->input.mouse_down) {
+    ctx->active_text_input_drag_select = false;
+  }
+
+  if (active && hovered && ctx->input.mouse_wheel != 0) {
+    const int view_h = std::max(1, h - 4);
+    const int max_scroll = std::max(0, content_h - view_h);
+    ctx->active_text_input_scroll_y -= ctx->input.mouse_wheel * 12;
+    if (ctx->active_text_input_scroll_y < 0)
+      ctx->active_text_input_scroll_y = 0;
+    if (ctx->active_text_input_scroll_y > max_scroll)
+      ctx->active_text_input_scroll_y = max_scroll;
+  }
+
+  if (active && topmost) {
+    const bool has_selection =
+        ctx->active_text_input_sel_end > ctx->active_text_input_sel_start;
+    const int cursor_line = cursor_line_for(ctx->active_text_input_cursor);
+    const int cursor_line_start = line_starts[cursor_line];
+    const int cursor_line_end = line_end(cursor_line);
+    const int cursor_col_chars =
+        std::max(0, std::min(ctx->active_text_input_cursor - cursor_line_start,
+                             cursor_line_end - cursor_line_start));
+
+    if (ctx->input.key_left) {
+      if (has_selection) {
+        ctx->active_text_input_cursor = ctx->active_text_input_sel_start;
+      } else {
+        ctx->active_text_input_cursor -= 1;
+      }
+      ctx->active_text_input_sel_start = ctx->active_text_input_cursor;
+      ctx->active_text_input_sel_end = ctx->active_text_input_cursor;
+    }
+    if (ctx->input.key_right) {
+      if (has_selection) {
+        ctx->active_text_input_cursor = ctx->active_text_input_sel_end;
+      } else {
+        ctx->active_text_input_cursor += 1;
+      }
+      ctx->active_text_input_sel_start = ctx->active_text_input_cursor;
+      ctx->active_text_input_sel_end = ctx->active_text_input_cursor;
+    }
+    if (ctx->input.key_home) {
+      ctx->active_text_input_cursor = cursor_line_start;
+      ctx->active_text_input_sel_start = ctx->active_text_input_cursor;
+      ctx->active_text_input_sel_end = ctx->active_text_input_cursor;
+    }
+    if (ctx->input.key_end) {
+      ctx->active_text_input_cursor = cursor_line_end;
+      ctx->active_text_input_sel_start = ctx->active_text_input_cursor;
+      ctx->active_text_input_sel_end = ctx->active_text_input_cursor;
+    }
+    if (ctx->input.key_up && cursor_line > 0) {
+      const int ls = line_starts[cursor_line - 1];
+      const int le = line_end(cursor_line - 1);
+      ctx->active_text_input_cursor =
+          ls + std::min(cursor_col_chars, std::max(0, le - ls));
+      ctx->active_text_input_sel_start = ctx->active_text_input_cursor;
+      ctx->active_text_input_sel_end = ctx->active_text_input_cursor;
+    }
+    if (ctx->input.key_down && cursor_line + 1 < line_count) {
+      const int ls = line_starts[cursor_line + 1];
+      const int le = line_end(cursor_line + 1);
+      ctx->active_text_input_cursor =
+          ls + std::min(cursor_col_chars, std::max(0, le - ls));
+      ctx->active_text_input_sel_start = ctx->active_text_input_cursor;
+      ctx->active_text_input_sel_end = ctx->active_text_input_cursor;
+    }
+
+    ctx->active_text_input_cursor =
+        clamp_text_cursor(ctx->active_text_input_cursor, len);
+    const int sel_start = ctx->active_text_input_sel_start;
+    const int sel_end = ctx->active_text_input_sel_end;
+    const bool has_selection_now = sel_end > sel_start;
+
+    if (ctx->input.key_backspace &&
+        (has_selection_now || ctx->active_text_input_cursor > 0)) {
+      if (has_selection_now) {
+        memmove(buffer + sel_start, buffer + sel_end,
+                (size_t)(len - sel_end + 1));
+        len -= (sel_end - sel_start);
+        ctx->active_text_input_cursor = sel_start;
+      } else {
+        const int remove_idx = ctx->active_text_input_cursor - 1;
+        memmove(buffer + remove_idx, buffer + remove_idx + 1,
+                (size_t)(len - remove_idx));
+        len -= 1;
+        ctx->active_text_input_cursor -= 1;
+      }
+      ctx->active_text_input_sel_start = ctx->active_text_input_cursor;
+      ctx->active_text_input_sel_end = ctx->active_text_input_cursor;
+      result_flags |= MDGUI_INPUT_TEXT_CHANGED;
+    }
+    if (ctx->input.key_delete &&
+        (has_selection_now || ctx->active_text_input_cursor < len)) {
+      if (has_selection_now) {
+        memmove(buffer + sel_start, buffer + sel_end,
+                (size_t)(len - sel_end + 1));
+        len -= (sel_end - sel_start);
+        ctx->active_text_input_cursor = sel_start;
+      } else {
+        const int remove_idx = ctx->active_text_input_cursor;
+        memmove(buffer + remove_idx, buffer + remove_idx + 1,
+                (size_t)(len - remove_idx));
+        len -= 1;
+      }
+      ctx->active_text_input_sel_start = ctx->active_text_input_cursor;
+      ctx->active_text_input_sel_end = ctx->active_text_input_cursor;
+      result_flags |= MDGUI_INPUT_TEXT_CHANGED;
+    }
+
+    if (ctx->input.key_enter && len < (buffer_size - 1)) {
+      if (ctx->active_text_input_sel_end > ctx->active_text_input_sel_start) {
+        const int s0 = ctx->active_text_input_sel_start;
+        const int s1 = ctx->active_text_input_sel_end;
+        memmove(buffer + s0, buffer + s1, (size_t)(len - s1 + 1));
+        len -= (s1 - s0);
+        ctx->active_text_input_cursor = s0;
+      }
+      const int at = ctx->active_text_input_cursor;
+      memmove(buffer + at + 1, buffer + at, (size_t)(len - at + 1));
+      buffer[at] = '\n';
+      len += 1;
+      ctx->active_text_input_cursor += 1;
+      ctx->active_text_input_sel_start = ctx->active_text_input_cursor;
+      ctx->active_text_input_sel_end = ctx->active_text_input_cursor;
+      result_flags |= MDGUI_INPUT_TEXT_CHANGED;
+    }
+
+    if (ctx->input.text_input) {
+      if (ctx->active_text_input_sel_end > ctx->active_text_input_sel_start) {
+        const int s0 = ctx->active_text_input_sel_start;
+        const int s1 = ctx->active_text_input_sel_end;
+        memmove(buffer + s0, buffer + s1, (size_t)(len - s1 + 1));
+        len -= (s1 - s0);
+        ctx->active_text_input_cursor = s0;
+        ctx->active_text_input_sel_start = s0;
+        ctx->active_text_input_sel_end = s0;
+      }
+      const unsigned char *p = (const unsigned char *)ctx->input.text_input;
+      while (*p && len < (buffer_size - 1)) {
+        const unsigned char ch = *p++;
+        if (ch < 32 || ch > 126)
+          continue;
+        const int insert_at = ctx->active_text_input_cursor;
+        memmove(buffer + insert_at + 1, buffer + insert_at,
+                (size_t)(len - insert_at + 1));
+        buffer[insert_at] = (char)ch;
+        len += 1;
+        ctx->active_text_input_cursor += 1;
+        ctx->active_text_input_sel_start = ctx->active_text_input_cursor;
+        ctx->active_text_input_sel_end = ctx->active_text_input_cursor;
+        result_flags |= MDGUI_INPUT_TEXT_CHANGED;
+      }
+    }
+  }
+
+  // Recompute lines after edits.
+  line_starts.clear();
+  line_starts.push_back(0);
+  for (int i = 0; i < len; ++i) {
+    if (buffer[i] == '\n')
+      line_starts.push_back(i + 1);
+  }
+
+  const int border_color = active ? CLR_ACCENT : CLR_WINDOW_BORDER;
+  mdgui_draw_hline_idx(nullptr, border_color, ix - 1, iy - 1, ix + w + 1);
+  mdgui_draw_hline_idx(nullptr, border_color, ix - 1, iy + h + 1, ix + w + 1);
+  mdgui_draw_vline_idx(nullptr, border_color, ix - 1, iy - 1, iy + h + 1);
+  mdgui_draw_vline_idx(nullptr, border_color, ix + w + 1, iy - 1, iy + h + 1);
+  mdgui_fill_rect_idx(nullptr, CLR_BOX_BODY, ix, iy, w, h);
+
+  if (active) {
+    int lc = (int)line_starts.size();
+    if (lc < 1)
+      lc = 1;
+    int caret_line = 0;
+    for (int i = 0; i < lc; ++i) {
+      if (line_starts[i] <= ctx->active_text_input_cursor)
+        caret_line = i;
+      else
+        break;
+    }
+    const int caret_y = caret_line * line_h;
+    const int view_h = std::max(1, h - 4);
+    if (caret_y < ctx->active_text_input_scroll_y)
+      ctx->active_text_input_scroll_y = caret_y;
+    if (caret_y + line_h > ctx->active_text_input_scroll_y + view_h)
+      ctx->active_text_input_scroll_y = (caret_y + line_h) - view_h;
+    if (ctx->active_text_input_scroll_y < 0)
+      ctx->active_text_input_scroll_y = 0;
+  }
+
+  if (mdgui_fonts[1]) {
+    const int text_x = ix + 3;
+    const int text_y = iy + 2;
+    const int scroll_y = active ? ctx->active_text_input_scroll_y : 0;
+
+    mdgui_backend_set_clip_rect(1, ix + 1, iy + 1, std::max(1, w - 2),
+                                std::max(1, h - 2));
+
+    const int lc = (int)line_starts.size();
+    const int sel_start = active ? std::min(ctx->active_text_input_sel_start,
+                                            ctx->active_text_input_sel_end)
+                                 : 0;
+    const int sel_end = active ? std::max(ctx->active_text_input_sel_start,
+                                          ctx->active_text_input_sel_end)
+                               : 0;
+    for (int li = 0; li < lc; ++li) {
+      int ls = line_starts[li];
+      int le = (li + 1 < lc) ? (line_starts[li + 1] - 1) : len;
+      const int ly = text_y + li * line_h - scroll_y;
+      if (ly + line_h < iy + 1 || ly > iy + h - 2)
+        continue;
+
+      if (active && sel_end > sel_start) {
+        const int s0 = std::max(sel_start, ls);
+        const int s1 = std::min(sel_end, le);
+        if (s1 > s0) {
+          std::string left(buffer + ls, (size_t)(s0 - ls));
+          std::string mid(buffer + s0, (size_t)(s1 - s0));
+          const int sx =
+              text_x + mdgui_fonts[1]->measureTextWidth(left.c_str());
+          const int sw = mdgui_fonts[1]->measureTextWidth(mid.c_str());
+          if (sw > 0)
+            mdgui_fill_rect_idx(nullptr, CLR_ACCENT, sx, ly, sw, line_h - 1);
+        }
+      }
+
+      std::string line_text(buffer + ls, (size_t)(le - ls));
+      mdgui_fonts[1]->drawText(line_text.c_str(), nullptr, text_x, ly,
+                               CLR_MENU_TEXT);
+    }
+
+    if (active) {
+      const unsigned long long ticks = mdgui_backend_get_ticks_ms();
+      if (((ticks / 500ull) % 2ull) == 0ull) {
+        int caret_line = 0;
+        for (int i = 0; i < lc; ++i) {
+          if (line_starts[i] <= ctx->active_text_input_cursor)
+            caret_line = i;
+          else
+            break;
+        }
+        const int cls = line_starts[caret_line];
+        std::string left(buffer + cls,
+                         (size_t)(ctx->active_text_input_cursor - cls));
+        const int cx = text_x + mdgui_fonts[1]->measureTextWidth(left.c_str());
+        const int cy = text_y + caret_line * line_h - scroll_y;
+        mdgui_draw_vline_idx(nullptr, CLR_MENU_TEXT, cx, cy, cy + line_h - 1);
+      }
+    }
+
+    set_content_clip(ctx);
+  }
+
+  if (label && mdgui_fonts[1]) {
+    mdgui_fonts[1]->drawText(label, nullptr, ix, iy - 10, CLR_TEXT_LIGHT);
+  }
+
+  int intrinsic_w = w;
+  if (requested_w <= 0)
+    intrinsic_w = 40;
+  note_content_bounds(ctx, ix + intrinsic_w, logical_y + h);
+  const int bottom_margin = 4;
+  ctx->content_y += std::max(y, top_margin) + h + bottom_margin;
+  return result_flags;
+}
+
 void mdgui_progress_bar(MDGUI_Context *ctx, float value, int x, int y, int w,
-                       int h, const char *overlay_text) {
+                        int h, const char *overlay_text) {
   if (!ctx || ctx->current_window < 0)
     return;
   ctx->window_has_nonlabel_widget = true;
@@ -2857,9 +3371,11 @@ void mdgui_progress_bar(MDGUI_Context *ctx, float value, int x, int y, int w,
   const int fill_w = (int)((float)w * value);
 
   mdgui_draw_hline_idx(nullptr, CLR_WINDOW_BORDER, ix - 1, iy - 1, ix + w + 1);
-  mdgui_draw_hline_idx(nullptr, CLR_WINDOW_BORDER, ix - 1, iy + h + 1, ix + w + 1);
+  mdgui_draw_hline_idx(nullptr, CLR_WINDOW_BORDER, ix - 1, iy + h + 1,
+                       ix + w + 1);
   mdgui_draw_vline_idx(nullptr, CLR_WINDOW_BORDER, ix - 1, iy - 1, iy + h + 1);
-  mdgui_draw_vline_idx(nullptr, CLR_WINDOW_BORDER, ix + w + 1, iy - 1, iy + h + 1);
+  mdgui_draw_vline_idx(nullptr, CLR_WINDOW_BORDER, ix + w + 1, iy - 1,
+                       iy + h + 1);
   mdgui_fill_rect_idx(nullptr, CLR_BOX_BODY, ix, iy, w, h);
   if (fill_w > 0)
     mdgui_fill_rect_idx(nullptr, CLR_ACCENT, ix, iy, fill_w, h);
@@ -2867,7 +3383,7 @@ void mdgui_progress_bar(MDGUI_Context *ctx, float value, int x, int y, int w,
   if (overlay_text && mdgui_fonts[1]) {
     const int tw = mdgui_fonts[1]->measureTextWidth(overlay_text);
     mdgui_fonts[1]->drawText(overlay_text, nullptr, ix + (w - tw) / 2, iy + 1,
-                  CLR_TEXT_LIGHT);
+                             CLR_TEXT_LIGHT);
   }
   int intrinsic_w = w;
   if (requested_w <= 0) {
@@ -2884,8 +3400,8 @@ void mdgui_progress_bar(MDGUI_Context *ctx, float value, int x, int y, int w,
 }
 
 void mdgui_frame_time_graph(MDGUI_Context *ctx, const float *frame_ms_samples,
-                           int sample_count, float target_fps,
-                           float graph_max_ms, int x, int y, int w, int h) {
+                            int sample_count, float target_fps,
+                            float graph_max_ms, int x, int y, int w, int h) {
   if (!ctx || ctx->current_window < 0)
     return;
   ctx->window_has_nonlabel_widget = true;
@@ -2924,10 +3440,14 @@ void mdgui_frame_time_graph(MDGUI_Context *ctx, const float *frame_ms_samples,
     h = 12;
 
   if (!fill_mode) {
-    mdgui_draw_hline_idx(nullptr, CLR_WINDOW_BORDER, ix - 1, iy - 1, ix + w + 1);
-    mdgui_draw_hline_idx(nullptr, CLR_WINDOW_BORDER, ix - 1, iy + h + 1, ix + w + 1);
-    mdgui_draw_vline_idx(nullptr, CLR_WINDOW_BORDER, ix - 1, iy - 1, iy + h + 1);
-    mdgui_draw_vline_idx(nullptr, CLR_WINDOW_BORDER, ix + w + 1, iy - 1, iy + h + 1);
+    mdgui_draw_hline_idx(nullptr, CLR_WINDOW_BORDER, ix - 1, iy - 1,
+                         ix + w + 1);
+    mdgui_draw_hline_idx(nullptr, CLR_WINDOW_BORDER, ix - 1, iy + h + 1,
+                         ix + w + 1);
+    mdgui_draw_vline_idx(nullptr, CLR_WINDOW_BORDER, ix - 1, iy - 1,
+                         iy + h + 1);
+    mdgui_draw_vline_idx(nullptr, CLR_WINDOW_BORDER, ix + w + 1, iy - 1,
+                         iy + h + 1);
   }
   mdgui_fill_rect_idx(nullptr, CLR_BOX_BODY, ix, iy, w, h);
 
@@ -2945,7 +3465,8 @@ void mdgui_frame_time_graph(MDGUI_Context *ctx, const float *frame_ms_samples,
     if (target_ratio > 1.0f)
       target_ratio = 1.0f;
     const int target_y = plot_y + plot_h - (int)(target_ratio * (float)plot_h);
-    mdgui_draw_hline_idx(nullptr, CLR_ACCENT, plot_x, target_y, plot_x + plot_w);
+    mdgui_draw_hline_idx(nullptr, CLR_ACCENT, plot_x, target_y,
+                         plot_x + plot_w);
 
     if (frame_ms_samples && sample_count > 0) {
       for (int px = 0; px < plot_w; ++px) {
@@ -2986,8 +3507,9 @@ void mdgui_frame_time_graph(MDGUI_Context *ctx, const float *frame_ms_samples,
     intrinsic_w = 24;
 
   // In fill mode, the graph tracks current window height. Reporting that full
-  // height as required content would ratchet min_h upward and prevent shrinking.
-  // Report only a minimal intrinsic height for min-size calculations.
+  // height as required content would ratchet min_h upward and prevent
+  // shrinking. Report only a minimal intrinsic height for min-size
+  // calculations.
   const int intrinsic_h = fill_mode ? 12 : h;
   note_content_bounds(ctx, ix + intrinsic_w, logical_y + intrinsic_h);
   if (fill_mode) {
@@ -3063,7 +3585,8 @@ int mdgui_begin_menu(MDGUI_Context *ctx, const char *text) {
 
   if (ctx->input.mouse_pressed && hovered && menu_interactable) {
     win.z = ++ctx->z_counter;
-    if (win.open_menu_path.size() == 1 && win.open_menu_path[0] == ctx->menu_index) {
+    if (win.open_menu_path.size() == 1 &&
+        win.open_menu_path[0] == ctx->menu_index) {
       clear_window_menu_path(win);
     } else {
       win.open_menu_path.resize(1);
@@ -3073,7 +3596,8 @@ int mdgui_begin_menu(MDGUI_Context *ctx, const char *text) {
     ctx->input.mouse_pressed = 0;
   }
 
-  const int open = (!win.open_menu_path.empty() && win.open_menu_path[0] == ctx->menu_index);
+  const int open =
+      (!win.open_menu_path.empty() && win.open_menu_path[0] == ctx->menu_index);
   if (open || hovered) {
     mdgui_fill_rect_idx(nullptr, CLR_ACCENT, x, y, item_w, 10);
   }
@@ -3107,7 +3631,8 @@ int mdgui_menu_item(MDGUI_Context *ctx, const char *text) {
       (win.z == ctx->z_counter) || !win.open_menu_path.empty();
   const int menu_idx = ctx->menu_build_stack.back();
   auto &def = ctx->menu_defs[menu_idx];
-  const int item_text_w = mdgui_fonts[1] ? mdgui_fonts[1]->measureTextWidth(text) : 40;
+  const int item_text_w =
+      mdgui_fonts[1] ? mdgui_fonts[1]->measureTextWidth(text) : 40;
   const int item_needed_w = item_text_w + 12;
   if (item_needed_w > def.w) {
     def.w = item_needed_w;
@@ -3124,7 +3649,8 @@ int mdgui_menu_item(MDGUI_Context *ctx, const char *text) {
       menu_path_prefix_matches(win.open_menu_path, ctx->menu_build_stack) &&
       (int)win.open_menu_path.size() > submenu_depth) {
     win.open_menu_path.resize(submenu_depth);
-    win.open_menu_index = win.open_menu_path.empty() ? -1 : win.open_menu_path[0];
+    win.open_menu_index =
+        win.open_menu_path.empty() ? -1 : win.open_menu_path[0];
   }
   if (hovered && ctx->input.mouse_pressed && menu_interactable) {
     win.z = ++ctx->z_counter;
@@ -3152,7 +3678,8 @@ int mdgui_begin_submenu(MDGUI_Context *ctx, const char *text) {
   const int parent_menu_index = ctx->menu_build_stack.back();
   auto &parent = ctx->menu_defs[parent_menu_index];
   const int item_h = ctx->current_menu_h;
-  const int item_text_w = mdgui_fonts[1] ? mdgui_fonts[1]->measureTextWidth(text) : 40;
+  const int item_text_w =
+      mdgui_fonts[1] ? mdgui_fonts[1]->measureTextWidth(text) : 40;
   const int item_needed_w = item_text_w + 20;
   if (item_needed_w > parent.w) {
     parent.w = item_needed_w;
@@ -3189,13 +3716,15 @@ int mdgui_begin_submenu(MDGUI_Context *ctx, const char *text) {
     win.z = ++ctx->z_counter;
     if (was_open && (int)win.open_menu_path.size() == submenu_depth + 1) {
       win.open_menu_path.resize(submenu_depth);
-      win.open_menu_index = win.open_menu_path.empty() ? -1 : win.open_menu_path[0];
+      win.open_menu_index =
+          win.open_menu_path.empty() ? -1 : win.open_menu_path[0];
     } else {
       win.open_menu_path.resize((size_t)submenu_depth + 1);
       for (int i = 0; i < submenu_depth; ++i)
         win.open_menu_path[i] = ctx->menu_build_stack[i];
       win.open_menu_path[submenu_depth] = child_menu_index;
-      win.open_menu_index = win.open_menu_path.empty() ? -1 : win.open_menu_path[0];
+      win.open_menu_index =
+          win.open_menu_path.empty() ? -1 : win.open_menu_path[0];
     }
     ctx->input.mouse_pressed = 0;
   } else if (hovered && menu_interactable) {
@@ -3203,7 +3732,8 @@ int mdgui_begin_submenu(MDGUI_Context *ctx, const char *text) {
     for (int i = 0; i < submenu_depth; ++i)
       win.open_menu_path[i] = ctx->menu_build_stack[i];
     win.open_menu_path[submenu_depth] = child_menu_index;
-    win.open_menu_index = win.open_menu_path.empty() ? -1 : win.open_menu_path[0];
+    win.open_menu_index =
+        win.open_menu_path.empty() ? -1 : win.open_menu_path[0];
   }
 
   const bool open =
@@ -3253,8 +3783,9 @@ void mdgui_begin_main_menu_bar(MDGUI_Context *ctx) {
   ctx->main_menu_bar_w = rw;
   ctx->main_menu_bar_h = 10;
 
-  mdgui_fill_rect_idx(nullptr, CLR_MENU_BG, ctx->main_menu_bar_x, ctx->main_menu_bar_y,
-           ctx->main_menu_bar_w, ctx->main_menu_bar_h);
+  mdgui_fill_rect_idx(nullptr, CLR_MENU_BG, ctx->main_menu_bar_x,
+                      ctx->main_menu_bar_y, ctx->main_menu_bar_w,
+                      ctx->main_menu_bar_h);
   ctx->main_menu_index = 0;
   ctx->main_menu_next_x = 3;
   ctx->in_main_menu_bar = true;
@@ -3304,11 +3835,11 @@ int mdgui_begin_main_menu(MDGUI_Context *ctx, const char *text) {
     ctx->input.mouse_pressed = 0;
   }
 
-  const int open =
-      (!ctx->open_main_menu_path.empty() &&
-       ctx->open_main_menu_path[0] == ctx->main_menu_index);
+  const int open = (!ctx->open_main_menu_path.empty() &&
+                    ctx->open_main_menu_path[0] == ctx->main_menu_index);
   if (open || hovered) {
-    mdgui_fill_rect_idx(nullptr, CLR_ACCENT, x, y, item_w, ctx->main_menu_bar_h);
+    mdgui_fill_rect_idx(nullptr, CLR_ACCENT, x, y, item_w,
+                        ctx->main_menu_bar_h);
   }
   if (mdgui_fonts[1]) {
     mdgui_fonts[1]->drawText(text, nullptr, x + 3, y + 1, CLR_MENU_TEXT);
@@ -3332,11 +3863,13 @@ int mdgui_main_menu_item(MDGUI_Context *ctx, const char *text) {
 
   const int menu_idx = ctx->main_menu_build_stack.back();
   auto &def = ctx->main_menu_defs[menu_idx];
-  const int item_text_w = mdgui_fonts[1] ? mdgui_fonts[1]->measureTextWidth(text) : 40;
+  const int item_text_w =
+      mdgui_fonts[1] ? mdgui_fonts[1]->measureTextWidth(text) : 40;
   const int item_needed_w = item_text_w + 12;
   if (item_needed_w > def.w) {
     def.w = item_needed_w;
-    reposition_child_menu_chain(ctx->main_menu_defs, menu_idx, ctx->current_menu_h);
+    reposition_child_menu_chain(ctx->main_menu_defs, menu_idx,
+                                ctx->current_menu_h);
   }
   def.items.push_back({text, -1, false});
   const int item_index = (int)def.items.size() - 1;
@@ -3345,7 +3878,8 @@ int mdgui_main_menu_item(MDGUI_Context *ctx, const char *text) {
                                     def.x, item_y, def.w, ctx->current_menu_h);
   const int submenu_depth = (int)ctx->main_menu_build_stack.size();
   if (hovered &&
-      menu_path_prefix_matches(ctx->open_main_menu_path, ctx->main_menu_build_stack) &&
+      menu_path_prefix_matches(ctx->open_main_menu_path,
+                               ctx->main_menu_build_stack) &&
       (int)ctx->open_main_menu_path.size() > submenu_depth) {
     ctx->open_main_menu_path.resize(submenu_depth);
     ctx->open_main_menu_index =
@@ -3374,7 +3908,8 @@ int mdgui_begin_main_submenu(MDGUI_Context *ctx, const char *text) {
   const int parent_menu_index = ctx->main_menu_build_stack.back();
   auto &parent = ctx->main_menu_defs[parent_menu_index];
   const int item_h = ctx->current_menu_h;
-  const int item_text_w = mdgui_fonts[1] ? mdgui_fonts[1]->measureTextWidth(text) : 40;
+  const int item_text_w =
+      mdgui_fonts[1] ? mdgui_fonts[1]->measureTextWidth(text) : 40;
   const int item_needed_w = item_text_w + 20;
   if (item_needed_w > parent.w) {
     parent.w = item_needed_w;
@@ -3404,7 +3939,8 @@ int mdgui_begin_main_submenu(MDGUI_Context *ctx, const char *text) {
                     item_y, parent_after.w, item_h);
   const int submenu_depth = (int)ctx->main_menu_build_stack.size();
   const bool was_open =
-      menu_path_prefix_matches(ctx->open_main_menu_path, ctx->main_menu_build_stack) &&
+      menu_path_prefix_matches(ctx->open_main_menu_path,
+                               ctx->main_menu_build_stack) &&
       (int)ctx->open_main_menu_path.size() > submenu_depth &&
       ctx->open_main_menu_path[submenu_depth] == child_menu_index;
   if (ctx->input.mouse_pressed && hovered) {
@@ -3430,10 +3966,10 @@ int mdgui_begin_main_submenu(MDGUI_Context *ctx, const char *text) {
         ctx->open_main_menu_path.empty() ? -1 : ctx->open_main_menu_path[0];
   }
 
-  const bool open =
-      menu_path_prefix_matches(ctx->open_main_menu_path, ctx->main_menu_build_stack) &&
-      (int)ctx->open_main_menu_path.size() > submenu_depth &&
-      ctx->open_main_menu_path[submenu_depth] == child_menu_index;
+  const bool open = menu_path_prefix_matches(ctx->open_main_menu_path,
+                                             ctx->main_menu_build_stack) &&
+                    (int)ctx->open_main_menu_path.size() > submenu_depth &&
+                    ctx->open_main_menu_path[submenu_depth] == child_menu_index;
   if (open) {
     ctx->main_menu_build_stack.push_back(child_menu_index);
     ctx->building_main_menu_index = child_menu_index;
@@ -3493,8 +4029,8 @@ const char *mdgui_get_status_bar_text(MDGUI_Context *ctx) {
 }
 
 int mdgui_message_box_ex(MDGUI_Context *ctx, const char *id, const char *title,
-                        const char *text, int style, const char *button1,
-                        const char *button2, int text_align) {
+                         const char *text, int style, const char *button1,
+                         const char *button2, int text_align) {
   if (!ctx)
     return 0;
   if (!title)
@@ -3604,13 +4140,16 @@ int mdgui_message_box_ex(MDGUI_Context *ctx, const char *id, const char *title,
   if (style == MDGUI_MSGBOX_TWO_BUTTON) {
     const int b1_abs_x = win.x + (win.w / 4) - (btn_w / 2);
     const int b2_abs_x = win.x + ((win.w * 3) / 4) - (btn_w / 2);
-    if (mdgui_button(ctx, button1, b1_abs_x - ctx->origin_x, btn_y, btn_w, btn_h))
+    if (mdgui_button(ctx, button1, b1_abs_x - ctx->origin_x, btn_y, btn_w,
+                     btn_h))
       result = 1;
-    if (mdgui_button(ctx, button2, b2_abs_x - ctx->origin_x, btn_y, btn_w, btn_h))
+    if (mdgui_button(ctx, button2, b2_abs_x - ctx->origin_x, btn_y, btn_w,
+                     btn_h))
       result = 2;
   } else {
     const int b_abs_x = win.x + (win.w / 2) - (btn_w / 2);
-    if (mdgui_button(ctx, button1, b_abs_x - ctx->origin_x, btn_y, btn_w, btn_h))
+    if (mdgui_button(ctx, button1, b_abs_x - ctx->origin_x, btn_y, btn_w,
+                     btn_h))
       result = 1;
   }
 
@@ -3619,10 +4158,10 @@ int mdgui_message_box_ex(MDGUI_Context *ctx, const char *id, const char *title,
 }
 
 int mdgui_message_box(MDGUI_Context *ctx, const char *id, const char *title,
-                     const char *text, int style, const char *button1,
-                     const char *button2) {
+                      const char *text, int style, const char *button1,
+                      const char *button2) {
   return mdgui_message_box_ex(ctx, id, title, text, style, button1, button2,
-                             MDGUI_TEXT_ALIGN_LEFT);
+                              MDGUI_TEXT_ALIGN_LEFT);
 }
 
 int mdgui_get_window_z(MDGUI_Context *ctx, const char *title) {
@@ -3671,7 +4210,7 @@ void mdgui_focus_window(MDGUI_Context *ctx, const char *title) {
 }
 
 void mdgui_set_window_rect(MDGUI_Context *ctx, const char *title, int x, int y,
-                          int w, int h) {
+                           int w, int h) {
   if (!ctx || !title)
     return;
   for (int i = 0; i < (int)ctx->windows.size(); ++i) {
@@ -3819,7 +4358,7 @@ int mdgui_get_window_tile_side(MDGUI_Context *ctx, const char *title) {
 }
 
 void mdgui_set_window_fullscreen(MDGUI_Context *ctx, const char *title,
-                                int fullscreen) {
+                                 int fullscreen) {
   if (!ctx || !title)
     return;
   for (int i = 0; i < (int)ctx->windows.size(); ++i) {
@@ -3877,13 +4416,15 @@ int mdgui_is_custom_cursor_enabled(MDGUI_Context *ctx) {
 
 int mdgui_begin_render_window_ex(MDGUI_Context *ctx, const char *title, int x,
                                  int y, int w, int h, int show_menu, int flags,
-                                 int *out_x, int *out_y, int *out_w, int *out_h) {
+                                 int *out_x, int *out_y, int *out_w,
+                                 int *out_h) {
   if (!ctx)
     return 0;
 
   // Nested mode: inside an existing parent window, treat render window as a
   // clipped child viewport anchored in parent-local coordinates.
-  if (ctx->current_window >= 0 && ctx->current_window < (int)ctx->windows.size()) {
+  if (ctx->current_window >= 0 &&
+      ctx->current_window < (int)ctx->windows.size()) {
     auto &parent = ctx->windows[ctx->current_window];
     const int requested_h = h;
     w = resolve_dynamic_width(ctx, x, w, 8);
@@ -4043,8 +4584,8 @@ int mdgui_begin_render_window(MDGUI_Context *ctx, const char *title, int x,
                                       out_w, out_h);
 }
 
-void mdgui_run_window_pass(MDGUI_Context *ctx, const MDGUI_WindowPassItem *items,
-                          int item_count) {
+void mdgui_run_window_pass(MDGUI_Context *ctx,
+                           const MDGUI_WindowPassItem *items, int item_count) {
   if (!ctx || !items || item_count <= 0)
     return;
 
@@ -4059,7 +4600,8 @@ void mdgui_run_window_pass(MDGUI_Context *ctx, const MDGUI_WindowPassItem *items
     const auto &it = items[i];
     if (!it.title)
       continue;
-    const int idx = find_or_create_window(ctx, it.title, it.x, it.y, it.w, it.h);
+    const int idx =
+        find_or_create_window(ctx, it.title, it.x, it.y, it.w, it.h);
     if (idx < 0 || idx >= (int)ctx->windows.size())
       continue;
     order.push_back({i, ctx->windows[idx].z});
@@ -4075,7 +4617,7 @@ void mdgui_run_window_pass(MDGUI_Context *ctx, const MDGUI_WindowPassItem *items
     if (it.use_render_window) {
       int cx = 0, cy = 0, cw = 0, ch = 0;
       if (mdgui_begin_render_window(ctx, it.title, it.x, it.y, it.w, it.h,
-                                   it.show_menu, &cx, &cy, &cw, &ch)) {
+                                    it.show_menu, &cx, &cy, &cw, &ch)) {
         if (it.draw_fn)
           it.draw_fn(ctx, cx, cy, cw, ch, it.user_data);
         mdgui_end_window(ctx);
@@ -4123,7 +4665,7 @@ void mdgui_open_file_browser(MDGUI_Context *ctx) {
 }
 
 void mdgui_set_file_browser_filters(MDGUI_Context *ctx, const char **extensions,
-                                   int extension_count) {
+                                    int extension_count) {
   if (!ctx)
     return;
   ctx->file_browser_ext_filters.clear();
@@ -4179,15 +4721,13 @@ const char *mdgui_show_file_browser(MDGUI_Context *ctx) {
   const int content_w = list_w - scrollbar_w - 1;
   const int total = (int)ctx->file_browser_entries.size();
   const int max_scroll = (total > rows) ? (total - rows) : 0;
-  const int over_list =
-      point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y, list_x, list_y,
-                    content_w, list_h);
+  const int over_list = point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y,
+                                      list_x, list_y, content_w, list_h);
   const int over_scrollbar =
-      point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y, list_x + content_w + 1,
-                    list_y, scrollbar_w, list_h);
-  const int over_browser_pane =
-      point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y, list_x, list_y, list_w,
-                    list_h);
+      point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y,
+                    list_x + content_w + 1, list_y, scrollbar_w, list_h);
+  const int over_browser_pane = point_in_rect(
+      ctx->input.mouse_x, ctx->input.mouse_y, list_x, list_y, list_w, list_h);
   if (ctx->file_browser_scroll < 0)
     ctx->file_browser_scroll = 0;
   if (ctx->file_browser_scroll > max_scroll)
@@ -4201,8 +4741,8 @@ const char *mdgui_show_file_browser(MDGUI_Context *ctx) {
       ctx->file_browser_scroll = max_scroll;
   }
 
-  mdgui_draw_frame_idx(nullptr, CLR_TEXT_DARK, list_x - 1, list_y - 1, list_x + list_w + 1,
-          list_y + list_h + 1);
+  mdgui_draw_frame_idx(nullptr, CLR_TEXT_DARK, list_x - 1, list_y - 1,
+                       list_x + list_w + 1, list_y + list_h + 1);
   mdgui_fill_rect_idx(nullptr, CLR_BOX_BODY, list_x, list_y, list_w, list_h);
 
   // Clip row text to the virtual list viewport so long names can't bleed out.
@@ -4219,10 +4759,12 @@ const char *mdgui_show_file_browser(MDGUI_Context *ctx) {
     if (item_idx == ctx->file_browser_selected)
       mdgui_fill_rect_idx(nullptr, CLR_ACCENT, list_x, ry, content_w, row_h);
     else if (hovered)
-      mdgui_fill_rect_idx(nullptr, CLR_BUTTON_SURFACE, list_x, ry, content_w, row_h);
+      mdgui_fill_rect_idx(nullptr, CLR_BUTTON_SURFACE, list_x, ry, content_w,
+                          row_h);
     if (mdgui_fonts[1]) {
-      mdgui_fonts[1]->drawText(ctx->file_browser_entries[item_idx].label.c_str(), nullptr,
-                    list_x + 2, ry + 1, CLR_MENU_TEXT);
+      mdgui_fonts[1]->drawText(
+          ctx->file_browser_entries[item_idx].label.c_str(), nullptr,
+          list_x + 2, ry + 1, CLR_MENU_TEXT);
     }
     if (hovered && ctx->input.mouse_pressed) {
       ctx->file_browser_selected = item_idx;
@@ -4233,7 +4775,8 @@ const char *mdgui_show_file_browser(MDGUI_Context *ctx) {
   set_content_clip(ctx);
 
   const int sb_x = list_x + content_w + 1;
-  mdgui_fill_rect_idx(nullptr, CLR_BUTTON_SURFACE, sb_x, list_y, scrollbar_w, list_h);
+  mdgui_fill_rect_idx(nullptr, CLR_BUTTON_SURFACE, sb_x, list_y, scrollbar_w,
+                      list_h);
   if (max_scroll > 0) {
     int thumb_h = (rows * list_h) / total;
     if (thumb_h < 10)
@@ -4244,9 +4787,10 @@ const char *mdgui_show_file_browser(MDGUI_Context *ctx) {
     const int thumb_y =
         list_y + ((ctx->file_browser_scroll * travel) / max_scroll);
     mdgui_fill_rect_idx(nullptr, CLR_ACCENT, sb_x + 1, thumb_y, scrollbar_w - 2,
-             thumb_h);
+                        thumb_h);
     if (ctx->input.mouse_pressed && over_scrollbar) {
-      if (ctx->input.mouse_y >= thumb_y && ctx->input.mouse_y <= thumb_y + thumb_h) {
+      if (ctx->input.mouse_y >= thumb_y &&
+          ctx->input.mouse_y <= thumb_y + thumb_h) {
         ctx->file_browser_scroll_dragging = true;
         ctx->file_browser_scroll_drag_offset = ctx->input.mouse_y - thumb_y;
       } else if (ctx->input.mouse_y < thumb_y)
@@ -4259,7 +4803,8 @@ const char *mdgui_show_file_browser(MDGUI_Context *ctx) {
         ctx->file_browser_scroll = max_scroll;
     }
     if (ctx->file_browser_scroll_dragging && ctx->input.mouse_down) {
-      int desired_thumb_y = ctx->input.mouse_y - ctx->file_browser_scroll_drag_offset;
+      int desired_thumb_y =
+          ctx->input.mouse_y - ctx->file_browser_scroll_drag_offset;
       if (desired_thumb_y < list_y)
         desired_thumb_y = list_y;
       if (desired_thumb_y > list_y + travel)
@@ -4330,8 +4875,8 @@ void mdgui_show_demo_window(MDGUI_Context *ctx) {
   static int quality_idx = 0;
   static int theme_idx = MDGUI_THEME_DEFAULT;
   static const char *quality_items[] = {"Nearest", "Bilinear", "CRT Mask"};
-  static const char *theme_items[] = {"Default", "Dark", "Amber", "Graphite",
-                                      "Midnight", "Olive"};
+  static const char *theme_items[] = {"Default",  "Dark",     "Amber",
+                                      "Graphite", "Midnight", "Olive"};
   if (!show_demo)
     return;
 
@@ -4386,9 +4931,8 @@ void mdgui_show_demo_window(MDGUI_Context *ctx) {
         (viewport_h > 0 && total_h_with_footer > viewport_h)
             ? (total_h_with_footer - viewport_h)
             : 0;
-    const bool show_close =
-        (max_scroll_with_footer == 0) ||
-        (win.text_scroll >= (max_scroll_with_footer - 2));
+    const bool show_close = (max_scroll_with_footer == 0) ||
+                            (win.text_scroll >= (max_scroll_with_footer - 2));
 
     const int footer_start_y = ctx->content_y;
     mdgui_spacer(ctx, footer_h);

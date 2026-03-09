@@ -48,6 +48,8 @@ typedef struct MDGUI_Input {
   int key_enter;
   int key_left;
   int key_right;
+  int key_up;
+  int key_down;
   int key_home;
   int key_end;
 } MDGUI_Input;
@@ -81,6 +83,11 @@ enum {
 enum {
   MDGUI_INPUT_TEXT_CHANGED = 1 << 0,
   MDGUI_INPUT_TEXT_SUBMITTED = 1 << 1,
+};
+
+enum {
+  MDGUI_INPUT_TEXT_MULTILINE_NONE = 0,
+  MDGUI_INPUT_TEXT_MULTILINE_AUTO_HEIGHT = 1 << 0,
 };
 
 enum {
@@ -142,6 +149,10 @@ int mdgui_combo(MDGUI_Context *ctx, const char *label, const char **items,
 // Returns MDGUI_INPUT_TEXT_* flags.
 int mdgui_input_text(MDGUI_Context *ctx, const char *label, char *buffer,
                     int buffer_size, int x, int y, int w);
+// Returns MDGUI_INPUT_TEXT_* flags.
+int mdgui_input_text_multiline(MDGUI_Context *ctx, const char *label,
+                              char *buffer, int buffer_size, int x, int y,
+                              int w, int h, int flags);
 void mdgui_progress_bar(MDGUI_Context *ctx, float value, int x, int y, int w,
                        int h, const char *overlay_text);
 // For frame graph sizing, w/h follow widget conventions:
