@@ -149,13 +149,17 @@ int mdgui_get_window_tile_side(MDGUI_Context *ctx, const char *title);
 
 void mdgui_begin_menu_bar(MDGUI_Context *ctx);
 int mdgui_begin_menu(MDGUI_Context *ctx, const char *text);
+int mdgui_begin_submenu(MDGUI_Context *ctx, const char *text);
 int mdgui_menu_item(MDGUI_Context *ctx, const char *text);
+void mdgui_end_submenu(MDGUI_Context *ctx);
 void mdgui_end_menu(MDGUI_Context *ctx);
 void mdgui_end_menu_bar(MDGUI_Context *ctx);
 
 void mdgui_begin_main_menu_bar(MDGUI_Context *ctx);
 int mdgui_begin_main_menu(MDGUI_Context *ctx, const char *text);
+int mdgui_begin_main_submenu(MDGUI_Context *ctx, const char *text);
 int mdgui_main_menu_item(MDGUI_Context *ctx, const char *text);
+void mdgui_end_main_submenu(MDGUI_Context *ctx);
 void mdgui_end_main_menu(MDGUI_Context *ctx);
 void mdgui_end_main_menu_bar(MDGUI_Context *ctx);
 

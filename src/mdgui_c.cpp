@@ -48,6 +48,7 @@ struct MDGUI_Window {
   int min_w;
   int min_h;
   int open_combo_id;
+  std::vector<int> open_menu_path;
   int text_scroll;
   bool text_scroll_dragging;
   int text_scroll_drag_offset;
@@ -97,12 +98,19 @@ struct MDGUI_Context {
   int menu_bar_h;
 
   struct MenuDef {
+    struct ItemDef {
+      std::string text;
+      int child_menu_index;
+    };
     int x;
     int y;
     int w;
-    std::vector<std::string> items;
+    int parent_menu_index;
+    int parent_item_index;
+    std::vector<ItemDef> items;
   };
   std::vector<MenuDef> menu_defs;
+  std::vector<int> menu_build_stack;
 
   int main_menu_index;
   int main_menu_next_x;
@@ -111,6 +119,8 @@ struct MDGUI_Context {
   int open_main_menu_index;
   int building_main_menu_index;
   std::vector<MenuDef> main_menu_defs;
+  std::vector<int> main_menu_build_stack;
+  std::vector<int> open_main_menu_path;
   int main_menu_bar_x;
   int main_menu_bar_y;
   int main_menu_bar_w;
@@ -212,6 +222,38 @@ static void drawrect_rgb(MDGUI_Context *ctx, uint8_t r, uint8_t g, uint8_t b,
 
 static int point_in_rect(int px, int py, int x, int y, int w, int h) {
   return px >= x && py >= y && px < (x + w) && py < (y + h);
+}
+
+static bool menu_path_prefix_matches(const std::vector<int> &path,
+                                     const std::vector<int> &prefix) {
+  if (path.size() < prefix.size())
+    return false;
+  for (size_t i = 0; i < prefix.size(); ++i) {
+    if (path[i] != prefix[i])
+      return false;
+  }
+  return true;
+}
+
+static void clear_window_menu_path(MDGUI_Window &win) {
+  win.open_menu_index = -1;
+  win.open_menu_path.clear();
+}
+
+static bool point_in_menu_popup_chain(
+    const std::vector<MDGUI_Context::MenuDef> &defs,
+    const std::vector<int> &path, int item_h, int px, int py) {
+  for (int menu_idx : path) {
+    if (menu_idx < 0 || menu_idx >= (int)defs.size())
+      continue;
+    const auto &def = defs[menu_idx];
+    const int popup_h = (int)def.items.size() * item_h;
+    if (popup_h <= 0)
+      continue;
+    if (point_in_rect(px, py, def.x, def.y, def.w, popup_h))
+      return true;
+  }
+  return false;
 }
 
 static int top_window_at_point(const MDGUI_Context *ctx, int px, int py,
@@ -746,6 +788,7 @@ static int find_or_create_window(MDGUI_Context *ctx, const char *title, int x,
   nw.h = h;
   nw.z = ++ctx->z_counter;
   nw.open_menu_index = -1;
+  nw.open_menu_path.clear();
   nw.is_maximized = false;
   nw.closed = false;
   nw.restored_x = x;
@@ -780,32 +823,38 @@ static void draw_open_menu_overlay(MDGUI_Context *ctx) {
   if (!ctx || ctx->current_window < 0)
     return;
   auto &win = ctx->windows[ctx->current_window];
-  if (win.open_menu_index < 0 ||
-      win.open_menu_index >= (int)ctx->menu_defs.size())
+  if (win.open_menu_path.empty())
     return;
 
-  auto &def = ctx->menu_defs[win.open_menu_index];
   const int item_h = ctx->current_menu_h;
-  const int total_h = (int)def.items.size() * item_h;
-  if (total_h <= 0)
-    return;
+  for (int menu_idx : win.open_menu_path) {
+    if (menu_idx < 0 || menu_idx >= (int)ctx->menu_defs.size())
+      continue;
+    auto &def = ctx->menu_defs[menu_idx];
+    const int total_h = (int)def.items.size() * item_h;
+    if (total_h <= 0)
+      continue;
 
-  mdgui_draw_hline_idx(nullptr, CLR_WINDOW_BORDER, def.x - 1, def.y - 1, def.x + def.w + 1);
-  mdgui_draw_hline_idx(nullptr, CLR_WINDOW_BORDER, def.x - 1, def.y + total_h, def.x + def.w + 1);
-  mdgui_draw_vline_idx(nullptr, CLR_WINDOW_BORDER, def.x - 1, def.y - 1, def.y + total_h + 1);
-  mdgui_draw_vline_idx(nullptr, CLR_WINDOW_BORDER, def.x + def.w, def.y - 1, def.y + total_h + 1);
-  mdgui_fill_rect_idx(nullptr, CLR_MENU_BG, def.x, def.y, def.w, total_h);
+    mdgui_draw_hline_idx(nullptr, CLR_WINDOW_BORDER, def.x - 1, def.y - 1, def.x + def.w + 1);
+    mdgui_draw_hline_idx(nullptr, CLR_WINDOW_BORDER, def.x - 1, def.y + total_h, def.x + def.w + 1);
+    mdgui_draw_vline_idx(nullptr, CLR_WINDOW_BORDER, def.x - 1, def.y - 1, def.y + total_h + 1);
+    mdgui_draw_vline_idx(nullptr, CLR_WINDOW_BORDER, def.x + def.w, def.y - 1, def.y + total_h + 1);
+    mdgui_fill_rect_idx(nullptr, CLR_MENU_BG, def.x, def.y, def.w, total_h);
 
-  for (int i = 0; i < (int)def.items.size(); ++i) {
-    const int iy = def.y + (i * item_h);
-    const int hovered = point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y,
-                                      def.x, iy, def.w, item_h);
-    if (hovered) {
-      mdgui_fill_rect_idx(nullptr, CLR_ACCENT, def.x, iy, def.w, item_h);
-    }
-    if (mdgui_fonts[1]) {
-      mdgui_fonts[1]->drawText(def.items[i].c_str(), nullptr, def.x + 4, iy + 1,
-                    CLR_MENU_TEXT);
+    for (int i = 0; i < (int)def.items.size(); ++i) {
+      const int iy = def.y + (i * item_h);
+      const int hovered = point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y,
+                                        def.x, iy, def.w, item_h);
+      if (hovered) {
+        mdgui_fill_rect_idx(nullptr, CLR_ACCENT, def.x, iy, def.w, item_h);
+      }
+      if (mdgui_fonts[1]) {
+        mdgui_fonts[1]->drawText(def.items[i].text.c_str(), nullptr, def.x + 4, iy + 1,
+                      CLR_MENU_TEXT);
+        if (def.items[i].child_menu_index >= 0) {
+          mdgui_fonts[1]->drawText(">", nullptr, def.x + def.w - 8, iy + 1, CLR_MENU_TEXT);
+        }
+      }
     }
   }
 }
@@ -964,31 +1013,38 @@ static void file_browser_open_path(MDGUI_Context *ctx, const char *path) {
 static void draw_open_main_menu_overlay(MDGUI_Context *ctx) {
   if (!ctx)
     return;
-  if (ctx->open_main_menu_index < 0 ||
-      ctx->open_main_menu_index >= (int)ctx->main_menu_defs.size())
+  if (ctx->open_main_menu_path.empty())
     return;
 
-  auto &def = ctx->main_menu_defs[ctx->open_main_menu_index];
   const int item_h = ctx->current_menu_h;
-  const int total_h = (int)def.items.size() * item_h;
-  if (total_h <= 0)
-    return;
+  for (int menu_idx : ctx->open_main_menu_path) {
+    if (menu_idx < 0 || menu_idx >= (int)ctx->main_menu_defs.size())
+      continue;
+    auto &def = ctx->main_menu_defs[menu_idx];
+    const int total_h = (int)def.items.size() * item_h;
+    if (total_h <= 0)
+      continue;
 
-  mdgui_draw_hline_idx(nullptr, CLR_WINDOW_BORDER, def.x - 1, def.y - 1, def.x + def.w + 1);
-  mdgui_draw_hline_idx(nullptr, CLR_WINDOW_BORDER, def.x - 1, def.y + total_h, def.x + def.w + 1);
-  mdgui_draw_vline_idx(nullptr, CLR_WINDOW_BORDER, def.x - 1, def.y - 1, def.y + total_h + 1);
-  mdgui_draw_vline_idx(nullptr, CLR_WINDOW_BORDER, def.x + def.w, def.y - 1, def.y + total_h + 1);
-  mdgui_fill_rect_idx(nullptr, CLR_MENU_BG, def.x, def.y, def.w, total_h);
+    mdgui_draw_hline_idx(nullptr, CLR_WINDOW_BORDER, def.x - 1, def.y - 1, def.x + def.w + 1);
+    mdgui_draw_hline_idx(nullptr, CLR_WINDOW_BORDER, def.x - 1, def.y + total_h, def.x + def.w + 1);
+    mdgui_draw_vline_idx(nullptr, CLR_WINDOW_BORDER, def.x - 1, def.y - 1, def.y + total_h + 1);
+    mdgui_draw_vline_idx(nullptr, CLR_WINDOW_BORDER, def.x + def.w, def.y - 1, def.y + total_h + 1);
+    mdgui_fill_rect_idx(nullptr, CLR_MENU_BG, def.x, def.y, def.w, total_h);
 
-  for (int i = 0; i < (int)def.items.size(); ++i) {
-    const int iy = def.y + (i * item_h);
-    const int hovered = point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y,
-                                      def.x, iy, def.w, item_h);
-    if (hovered)
-      mdgui_fill_rect_idx(nullptr, CLR_ACCENT, def.x, iy, def.w, item_h);
-    if (mdgui_fonts[1])
-      mdgui_fonts[1]->drawText(def.items[i].c_str(), nullptr, def.x + 4, iy + 1,
-                    CLR_MENU_TEXT);
+    for (int i = 0; i < (int)def.items.size(); ++i) {
+      const int iy = def.y + (i * item_h);
+      const int hovered = point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y,
+                                        def.x, iy, def.w, item_h);
+      if (hovered)
+        mdgui_fill_rect_idx(nullptr, CLR_ACCENT, def.x, iy, def.w, item_h);
+      if (mdgui_fonts[1]) {
+        mdgui_fonts[1]->drawText(def.items[i].text.c_str(), nullptr, def.x + 4, iy + 1,
+                      CLR_MENU_TEXT);
+        if (def.items[i].child_menu_index >= 0) {
+          mdgui_fonts[1]->drawText(">", nullptr, def.x + def.w - 8, iy + 1, CLR_MENU_TEXT);
+        }
+      }
+    }
   }
 }
 
@@ -1027,12 +1083,15 @@ MDGUI_Context *mdgui_create_with_backend(const MDGUI_RenderBackend *backend) {
   ctx->menu_bar_y = 0;
   ctx->menu_bar_w = 0;
   ctx->menu_bar_h = 0;
+  ctx->menu_build_stack.clear();
   ctx->main_menu_index = 0;
   ctx->main_menu_next_x = 0;
   ctx->in_main_menu_bar = false;
   ctx->in_main_menu = false;
   ctx->open_main_menu_index = -1;
   ctx->building_main_menu_index = -1;
+  ctx->main_menu_build_stack.clear();
+  ctx->open_main_menu_path.clear();
   ctx->main_menu_bar_x = 0;
   ctx->main_menu_bar_y = 0;
   ctx->main_menu_bar_w = 0;
@@ -1129,7 +1188,7 @@ void mdgui_begin_frame(MDGUI_Context *ctx, const MDGUI_Input *input) {
   mdgui_bind_backend(&ctx->backend);
   mdgui_backend_begin_frame();
   ctx->input = *input;
-  const bool main_menu_modal = (ctx->open_main_menu_index != -1);
+  const bool main_menu_modal = !ctx->open_main_menu_path.empty();
   if (ctx->custom_cursor_enabled && ctx->cursor_anim_count > 1) {
     const unsigned long long ticks = mdgui_backend_get_ticks_ms();
     const int anim_phase = (int)((ticks / 90ull) %
@@ -1199,10 +1258,12 @@ void mdgui_begin_frame(MDGUI_Context *ctx, const MDGUI_Input *input) {
   ctx->menu_bar_w = 0;
   ctx->menu_bar_h = 0;
   ctx->menu_defs.clear();
+  ctx->menu_build_stack.clear();
   ctx->in_main_menu_bar = false;
   ctx->in_main_menu = false;
   ctx->building_main_menu_index = -1;
   ctx->main_menu_defs.clear();
+  ctx->main_menu_build_stack.clear();
   ctx->content_req_right = 0;
   ctx->content_req_bottom = 0;
   ctx->window_has_nonlabel_widget = false;
@@ -1215,19 +1276,15 @@ void mdgui_end_frame(MDGUI_Context *ctx) {
   if (!ctx)
     return;
   mdgui_bind_backend(&ctx->backend);
-  if (ctx->open_main_menu_index != -1 && ctx->input.mouse_pressed) {
+  if (!ctx->open_main_menu_path.empty() && ctx->input.mouse_pressed) {
     bool in_bar = point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y,
                                 ctx->main_menu_bar_x, ctx->main_menu_bar_y,
                                 ctx->main_menu_bar_w, ctx->main_menu_bar_h);
-    bool in_popup = false;
-    if (ctx->open_main_menu_index >= 0 &&
-        ctx->open_main_menu_index < (int)ctx->main_menu_defs.size()) {
-      const auto &def = ctx->main_menu_defs[ctx->open_main_menu_index];
-      const int popup_h = (int)def.items.size() * ctx->current_menu_h;
-      in_popup = point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y, def.x,
-                               def.y, def.w, popup_h);
-    }
+    const bool in_popup = point_in_menu_popup_chain(
+        ctx->main_menu_defs, ctx->open_main_menu_path, ctx->current_menu_h,
+        ctx->input.mouse_x, ctx->input.mouse_y);
     if (!in_bar && !in_popup) {
+      ctx->open_main_menu_path.clear();
       ctx->open_main_menu_index = -1;
     }
   }
@@ -1240,10 +1297,12 @@ void mdgui_end_frame(MDGUI_Context *ctx) {
   ctx->building_menu_index = -1;
   ctx->has_menu_bar = false;
   ctx->menu_defs.clear();
+  ctx->menu_build_stack.clear();
   ctx->in_main_menu_bar = false;
   ctx->in_main_menu = false;
   ctx->building_main_menu_index = -1;
   ctx->main_menu_defs.clear();
+  ctx->main_menu_build_stack.clear();
 
   // Apply final cursor decision once per frame to avoid visible cursor thrash.
   if (ctx->cursor_request_idx >= 0 && ctx->cursor_request_idx < 16 &&
@@ -1279,7 +1338,7 @@ int mdgui_begin_window(MDGUI_Context *ctx, const char *title, int x, int y, int 
   const int top_idx =
       top_window_at_point(ctx, ctx->input.mouse_x, ctx->input.mouse_y, 3);
   const int top_here = (top_idx == idx);
-  const bool chrome_input_allowed = (ctx->open_main_menu_index == -1);
+  const bool chrome_input_allowed = ctx->open_main_menu_path.empty();
   const bool move_resize_allowed = chrome_input_allowed && !ctx->windows_locked;
   const bool can_maximize = !win.disallow_maximize;
   const int title_h = 12;
@@ -1487,6 +1546,7 @@ int mdgui_begin_window(MDGUI_Context *ctx, const char *title, int x, int y, int 
   ctx->menu_bar_w = 0;
   ctx->menu_bar_h = 0;
   ctx->menu_defs.clear();
+  ctx->menu_build_stack.clear();
   ctx->content_req_right = win.x + 6;
   ctx->content_req_bottom = win.y + title_h + 6;
   ctx->window_has_nonlabel_widget = false;
@@ -1502,10 +1562,9 @@ void mdgui_end_window(MDGUI_Context *ctx) {
   auto &win = ctx->windows[ctx->current_window];
   mdgui_backend_set_clip_rect(0, 0, 0, 0, 0);
 
-  if (win.open_menu_index != -1 && ctx->input.mouse_pressed &&
+  if (!win.open_menu_path.empty() && ctx->input.mouse_pressed &&
       win.z == ctx->z_counter) {
     bool in_menu_bar = false;
-    bool in_menu_popup = false;
 
     if (ctx->has_menu_bar) {
       in_menu_bar =
@@ -1513,16 +1572,12 @@ void mdgui_end_window(MDGUI_Context *ctx) {
                         ctx->menu_bar_y, ctx->menu_bar_w, ctx->menu_bar_h);
     }
 
-    if (win.open_menu_index >= 0 &&
-        win.open_menu_index < (int)ctx->menu_defs.size()) {
-      const auto &def = ctx->menu_defs[win.open_menu_index];
-      const int popup_h = (int)def.items.size() * ctx->current_menu_h;
-      in_menu_popup = point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y,
-                                    def.x, def.y, def.w, popup_h);
-    }
+    const bool in_menu_popup = point_in_menu_popup_chain(
+        ctx->menu_defs, win.open_menu_path, ctx->current_menu_h,
+        ctx->input.mouse_x, ctx->input.mouse_y);
 
     if (!in_menu_bar && !in_menu_popup) {
-      win.open_menu_index = -1;
+      clear_window_menu_path(win);
     }
   }
 
@@ -1659,6 +1714,7 @@ void mdgui_end_window(MDGUI_Context *ctx) {
   ctx->building_menu_index = -1;
   ctx->has_menu_bar = false;
   ctx->menu_defs.clear();
+  ctx->menu_build_stack.clear();
 }
 
 int mdgui_button(MDGUI_Context *ctx, const char *text, int x, int y, int w,
@@ -2310,6 +2366,7 @@ void mdgui_begin_menu_bar(MDGUI_Context *ctx) {
   ctx->menu_bar_w = bar_w;
   ctx->menu_bar_h = bar_h;
   ctx->menu_defs.clear();
+  ctx->menu_build_stack.clear();
   ctx->content_y += 12;
 }
 
@@ -2332,20 +2389,27 @@ int mdgui_begin_menu(MDGUI_Context *ctx, const char *text) {
   def.x = x;
   def.y = y + 10 + MENU_POPUP_GAP_Y;
   def.w = (tw + 40 < 120) ? 120 : (tw + 40);
+  def.parent_menu_index = -1;
+  def.parent_item_index = -1;
   def.items.clear();
 
-  if (win.open_menu_index != -1 && hovered && win.z == ctx->z_counter) {
+  if (!win.open_menu_path.empty() && hovered && win.z == ctx->z_counter) {
+    win.open_menu_path.resize(1);
+    win.open_menu_path[0] = ctx->menu_index;
     win.open_menu_index = ctx->menu_index;
   }
 
   if (ctx->input.mouse_pressed && hovered && win.z == ctx->z_counter) {
-    if (win.open_menu_index == ctx->menu_index)
-      win.open_menu_index = -1;
-    else
+    if (win.open_menu_path.size() == 1 && win.open_menu_path[0] == ctx->menu_index) {
+      clear_window_menu_path(win);
+    } else {
+      win.open_menu_path.resize(1);
+      win.open_menu_path[0] = ctx->menu_index;
       win.open_menu_index = ctx->menu_index;
+    }
   }
 
-  const int open = (win.open_menu_index == ctx->menu_index);
+  const int open = (!win.open_menu_path.empty() && win.open_menu_path[0] == ctx->menu_index);
   if (open || hovered) {
     mdgui_fill_rect_idx(nullptr, CLR_ACCENT, x, y, item_w, 10);
   }
@@ -2362,6 +2426,8 @@ int mdgui_begin_menu(MDGUI_Context *ctx, const char *text) {
     ctx->current_menu_w = def.w;
     ctx->current_menu_h = 10;
     ctx->current_menu_item = 0;
+    ctx->menu_build_stack.clear();
+    ctx->menu_build_stack.push_back(ctx->menu_index);
   }
 
   ctx->menu_next_x += item_w + 2;
@@ -2370,25 +2436,99 @@ int mdgui_begin_menu(MDGUI_Context *ctx, const char *text) {
 }
 
 int mdgui_menu_item(MDGUI_Context *ctx, const char *text) {
-  if (!ctx || !ctx->in_menu || !text || ctx->building_menu_index < 0)
+  if (!ctx || !ctx->in_menu || !text || ctx->menu_build_stack.empty())
     return 0;
   auto &win = ctx->windows[ctx->current_window];
-  auto &def = ctx->menu_defs[ctx->building_menu_index];
+  auto &def = ctx->menu_defs[ctx->menu_build_stack.back()];
   const int item_text_w = mdgui_fonts[1] ? mdgui_fonts[1]->measureTextWidth(text) : 40;
   const int item_needed_w = item_text_w + 12;
   if (item_needed_w > def.w)
     def.w = item_needed_w;
-  def.items.push_back(text);
+  def.items.push_back({text, -1});
   const int item_index = (int)def.items.size() - 1;
   const int item_y = def.y + (item_index * ctx->current_menu_h);
 
   const int hovered = point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y,
                                     def.x, item_y, def.w, ctx->current_menu_h);
   if (hovered && ctx->input.mouse_pressed && win.z == ctx->z_counter) {
-    win.open_menu_index = -1;
+    clear_window_menu_path(win);
     return 1;
   }
   return 0;
+}
+
+int mdgui_begin_submenu(MDGUI_Context *ctx, const char *text) {
+  if (!ctx || !ctx->in_menu || !text || ctx->menu_build_stack.empty() ||
+      ctx->current_window < 0)
+    return 0;
+  auto &win = ctx->windows[ctx->current_window];
+  auto &parent = ctx->menu_defs[ctx->menu_build_stack.back()];
+  const int item_h = ctx->current_menu_h;
+  const int item_text_w = mdgui_fonts[1] ? mdgui_fonts[1]->measureTextWidth(text) : 40;
+  const int item_needed_w = item_text_w + 20;
+  if (item_needed_w > parent.w)
+    parent.w = item_needed_w;
+  parent.items.push_back({text, -1});
+  const int item_index = (int)parent.items.size() - 1;
+  const int item_y = parent.y + (item_index * item_h);
+
+  const int child_menu_index = (int)ctx->menu_defs.size();
+  parent.items[item_index].child_menu_index = child_menu_index;
+  ctx->menu_defs.push_back({});
+  auto &child = ctx->menu_defs.back();
+  child.x = parent.x + parent.w + MENU_POPUP_GAP_Y;
+  child.y = item_y;
+  child.w = (item_text_w + 40 < 120) ? 120 : (item_text_w + 40);
+  child.parent_menu_index = ctx->menu_build_stack.back();
+  child.parent_item_index = item_index;
+  child.items.clear();
+
+  const int hovered =
+      point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y, parent.x, item_y,
+                    parent.w, item_h);
+  const int submenu_depth = (int)ctx->menu_build_stack.size();
+  const bool was_open =
+      menu_path_prefix_matches(win.open_menu_path, ctx->menu_build_stack) &&
+      (int)win.open_menu_path.size() > submenu_depth &&
+      win.open_menu_path[submenu_depth] == child_menu_index;
+  if (ctx->input.mouse_pressed && hovered && win.z == ctx->z_counter) {
+    if (was_open && (int)win.open_menu_path.size() == submenu_depth + 1) {
+      win.open_menu_path.resize(submenu_depth);
+      win.open_menu_index = win.open_menu_path.empty() ? -1 : win.open_menu_path[0];
+    } else {
+      win.open_menu_path.resize((size_t)submenu_depth + 1);
+      for (int i = 0; i < submenu_depth; ++i)
+        win.open_menu_path[i] = ctx->menu_build_stack[i];
+      win.open_menu_path[submenu_depth] = child_menu_index;
+      win.open_menu_index = win.open_menu_path.empty() ? -1 : win.open_menu_path[0];
+    }
+  } else if (hovered && win.z == ctx->z_counter) {
+    win.open_menu_path.resize((size_t)submenu_depth + 1);
+    for (int i = 0; i < submenu_depth; ++i)
+      win.open_menu_path[i] = ctx->menu_build_stack[i];
+    win.open_menu_path[submenu_depth] = child_menu_index;
+    win.open_menu_index = win.open_menu_path.empty() ? -1 : win.open_menu_path[0];
+  }
+
+  const bool open =
+      menu_path_prefix_matches(win.open_menu_path, ctx->menu_build_stack) &&
+      (int)win.open_menu_path.size() > submenu_depth &&
+      win.open_menu_path[submenu_depth] == child_menu_index;
+  if (open) {
+    ctx->menu_build_stack.push_back(child_menu_index);
+    ctx->building_menu_index = child_menu_index;
+  }
+  return open ? 1 : 0;
+}
+
+void mdgui_end_submenu(MDGUI_Context *ctx) {
+  if (!ctx)
+    return;
+  if (ctx->menu_build_stack.size() > 1) {
+    ctx->menu_build_stack.pop_back();
+    ctx->building_menu_index =
+        ctx->menu_build_stack.empty() ? -1 : ctx->menu_build_stack.back();
+  }
 }
 
 void mdgui_end_menu(MDGUI_Context *ctx) {
@@ -2396,6 +2536,7 @@ void mdgui_end_menu(MDGUI_Context *ctx) {
     return;
   ctx->in_menu = false;
   ctx->building_menu_index = -1;
+  ctx->menu_build_stack.clear();
 }
 
 void mdgui_end_menu_bar(MDGUI_Context *ctx) {
@@ -2403,6 +2544,7 @@ void mdgui_end_menu_bar(MDGUI_Context *ctx) {
     return;
   ctx->in_menu_bar = false;
   ctx->in_menu = false;
+  ctx->menu_build_stack.clear();
 }
 
 void mdgui_begin_main_menu_bar(MDGUI_Context *ctx) {
@@ -2422,7 +2564,7 @@ void mdgui_begin_main_menu_bar(MDGUI_Context *ctx) {
   ctx->in_main_menu = false;
   ctx->building_main_menu_index = -1;
   ctx->main_menu_defs.clear();
-
+  ctx->main_menu_build_stack.clear();
 }
 
 int mdgui_begin_main_menu(MDGUI_Context *ctx, const char *text) {
@@ -2443,19 +2585,30 @@ int mdgui_begin_main_menu(MDGUI_Context *ctx, const char *text) {
   def.x = x;
   def.y = y + ctx->main_menu_bar_h + MENU_POPUP_GAP_Y;
   def.w = (tw + 40 < 120) ? 120 : (tw + 40);
+  def.parent_menu_index = -1;
+  def.parent_item_index = -1;
   def.items.clear();
 
-  if (ctx->open_main_menu_index != -1 && hovered) {
+  if (!ctx->open_main_menu_path.empty() && hovered) {
+    ctx->open_main_menu_path.resize(1);
+    ctx->open_main_menu_path[0] = ctx->main_menu_index;
     ctx->open_main_menu_index = ctx->main_menu_index;
   }
   if (ctx->input.mouse_pressed && hovered) {
-    if (ctx->open_main_menu_index == ctx->main_menu_index)
+    if (ctx->open_main_menu_path.size() == 1 &&
+        ctx->open_main_menu_path[0] == ctx->main_menu_index) {
+      ctx->open_main_menu_path.clear();
       ctx->open_main_menu_index = -1;
-    else
+    } else {
+      ctx->open_main_menu_path.resize(1);
+      ctx->open_main_menu_path[0] = ctx->main_menu_index;
       ctx->open_main_menu_index = ctx->main_menu_index;
+    }
   }
 
-  const int open = (ctx->open_main_menu_index == ctx->main_menu_index);
+  const int open =
+      (!ctx->open_main_menu_path.empty() &&
+       ctx->open_main_menu_path[0] == ctx->main_menu_index);
   if (open || hovered) {
     mdgui_fill_rect_idx(nullptr, CLR_ACCENT, x, y, item_w, ctx->main_menu_bar_h);
   }
@@ -2466,6 +2619,8 @@ int mdgui_begin_main_menu(MDGUI_Context *ctx, const char *text) {
   if (open) {
     ctx->in_main_menu = true;
     ctx->building_main_menu_index = ctx->main_menu_index;
+    ctx->main_menu_build_stack.clear();
+    ctx->main_menu_build_stack.push_back(ctx->main_menu_index);
   }
 
   ctx->main_menu_next_x += item_w + 2;
@@ -2474,25 +2629,102 @@ int mdgui_begin_main_menu(MDGUI_Context *ctx, const char *text) {
 }
 
 int mdgui_main_menu_item(MDGUI_Context *ctx, const char *text) {
-  if (!ctx || !ctx->in_main_menu || !text || ctx->building_main_menu_index < 0)
+  if (!ctx || !ctx->in_main_menu || !text || ctx->main_menu_build_stack.empty())
     return 0;
 
-  auto &def = ctx->main_menu_defs[ctx->building_main_menu_index];
+  auto &def = ctx->main_menu_defs[ctx->main_menu_build_stack.back()];
   const int item_text_w = mdgui_fonts[1] ? mdgui_fonts[1]->measureTextWidth(text) : 40;
   const int item_needed_w = item_text_w + 12;
   if (item_needed_w > def.w)
     def.w = item_needed_w;
-  def.items.push_back(text);
+  def.items.push_back({text, -1});
   const int item_index = (int)def.items.size() - 1;
   const int item_y = def.y + (item_index * ctx->current_menu_h);
   const int hovered = point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y,
                                     def.x, item_y, def.w, ctx->current_menu_h);
 
   if (hovered && ctx->input.mouse_pressed) {
+    ctx->open_main_menu_path.clear();
     ctx->open_main_menu_index = -1;
     return 1;
   }
   return 0;
+}
+
+int mdgui_begin_main_submenu(MDGUI_Context *ctx, const char *text) {
+  if (!ctx || !ctx->in_main_menu || !text || ctx->main_menu_build_stack.empty())
+    return 0;
+  auto &parent = ctx->main_menu_defs[ctx->main_menu_build_stack.back()];
+  const int item_h = ctx->current_menu_h;
+  const int item_text_w = mdgui_fonts[1] ? mdgui_fonts[1]->measureTextWidth(text) : 40;
+  const int item_needed_w = item_text_w + 20;
+  if (item_needed_w > parent.w)
+    parent.w = item_needed_w;
+  parent.items.push_back({text, -1});
+  const int item_index = (int)parent.items.size() - 1;
+  const int item_y = parent.y + (item_index * item_h);
+
+  const int child_menu_index = (int)ctx->main_menu_defs.size();
+  parent.items[item_index].child_menu_index = child_menu_index;
+  ctx->main_menu_defs.push_back({});
+  auto &child = ctx->main_menu_defs.back();
+  child.x = parent.x + parent.w + MENU_POPUP_GAP_Y;
+  child.y = item_y;
+  child.w = (item_text_w + 40 < 120) ? 120 : (item_text_w + 40);
+  child.parent_menu_index = ctx->main_menu_build_stack.back();
+  child.parent_item_index = item_index;
+  child.items.clear();
+
+  const int hovered =
+      point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y, parent.x, item_y,
+                    parent.w, item_h);
+  const int submenu_depth = (int)ctx->main_menu_build_stack.size();
+  const bool was_open =
+      menu_path_prefix_matches(ctx->open_main_menu_path, ctx->main_menu_build_stack) &&
+      (int)ctx->open_main_menu_path.size() > submenu_depth &&
+      ctx->open_main_menu_path[submenu_depth] == child_menu_index;
+  if (ctx->input.mouse_pressed && hovered) {
+    if (was_open && (int)ctx->open_main_menu_path.size() == submenu_depth + 1) {
+      ctx->open_main_menu_path.resize(submenu_depth);
+      ctx->open_main_menu_index =
+          ctx->open_main_menu_path.empty() ? -1 : ctx->open_main_menu_path[0];
+    } else {
+      ctx->open_main_menu_path.resize((size_t)submenu_depth + 1);
+      for (int i = 0; i < submenu_depth; ++i)
+        ctx->open_main_menu_path[i] = ctx->main_menu_build_stack[i];
+      ctx->open_main_menu_path[submenu_depth] = child_menu_index;
+      ctx->open_main_menu_index =
+          ctx->open_main_menu_path.empty() ? -1 : ctx->open_main_menu_path[0];
+    }
+  } else if (hovered) {
+    ctx->open_main_menu_path.resize((size_t)submenu_depth + 1);
+    for (int i = 0; i < submenu_depth; ++i)
+      ctx->open_main_menu_path[i] = ctx->main_menu_build_stack[i];
+    ctx->open_main_menu_path[submenu_depth] = child_menu_index;
+    ctx->open_main_menu_index =
+        ctx->open_main_menu_path.empty() ? -1 : ctx->open_main_menu_path[0];
+  }
+
+  const bool open =
+      menu_path_prefix_matches(ctx->open_main_menu_path, ctx->main_menu_build_stack) &&
+      (int)ctx->open_main_menu_path.size() > submenu_depth &&
+      ctx->open_main_menu_path[submenu_depth] == child_menu_index;
+  if (open) {
+    ctx->main_menu_build_stack.push_back(child_menu_index);
+    ctx->building_main_menu_index = child_menu_index;
+  }
+  return open ? 1 : 0;
+}
+
+void mdgui_end_main_submenu(MDGUI_Context *ctx) {
+  if (!ctx)
+    return;
+  if (ctx->main_menu_build_stack.size() > 1) {
+    ctx->main_menu_build_stack.pop_back();
+    ctx->building_main_menu_index = ctx->main_menu_build_stack.empty()
+                                        ? -1
+                                        : ctx->main_menu_build_stack.back();
+  }
 }
 
 void mdgui_end_main_menu(MDGUI_Context *ctx) {
@@ -2500,6 +2732,7 @@ void mdgui_end_main_menu(MDGUI_Context *ctx) {
     return;
   ctx->in_main_menu = false;
   ctx->building_main_menu_index = -1;
+  ctx->main_menu_build_stack.clear();
 }
 
 void mdgui_end_main_menu_bar(MDGUI_Context *ctx) {
@@ -2507,6 +2740,7 @@ void mdgui_end_main_menu_bar(MDGUI_Context *ctx) {
     return;
   ctx->in_main_menu_bar = false;
   ctx->in_main_menu = false;
+  ctx->main_menu_build_stack.clear();
 }
 
 int mdgui_message_box_ex(MDGUI_Context *ctx, const char *id, const char *title,

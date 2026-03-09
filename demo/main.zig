@@ -167,6 +167,11 @@ fn drawMainWindow(ctx: ?*c.MDGUI_Context, running: *bool, open_file_browser: *bo
     if (c.mdgui_begin_window(ctx, "MDGUI", 10, 10, 190, 130) != 0) {
         c.mdgui_begin_menu_bar(ctx);
         if (c.mdgui_begin_menu(ctx, "FILE") != 0) {
+            if (c.mdgui_begin_submenu(ctx, "OPEN RECENT") != 0) {
+                if (c.mdgui_menu_item(ctx, "Sonic.sms") != 0) open_file_browser.* = true;
+                if (c.mdgui_menu_item(ctx, "Tetris.gb") != 0) open_file_browser.* = true;
+                c.mdgui_end_submenu(ctx);
+            }
             if (c.mdgui_menu_item(ctx, "OPEN ROM") != 0) open_file_browser.* = true;
             if (c.mdgui_menu_item(ctx, "EXIT") != 0) running.* = false;
             c.mdgui_end_menu(ctx);
@@ -417,6 +422,11 @@ pub fn main() !void {
         }
 
         var open_file_browser = false;
+        var request_open_main_ui = false;
+        var request_open_demo_window = false;
+        var request_open_perf_analytics = false;
+        var request_open_perf_graph = false;
+        var request_open_window_api = false;
         input.mouse_pressed = 0;
         input.mouse_wheel = 0;
         var event: c.SDL_Event = undefined;
@@ -509,6 +519,11 @@ pub fn main() !void {
         c.mdgui_begin_frame(ctx, &input);
         c.mdgui_begin_main_menu_bar(ctx);
         if (c.mdgui_begin_main_menu(ctx, "FILE") != 0) {
+            if (c.mdgui_begin_main_submenu(ctx, "TOOLS") != 0) {
+                if (c.mdgui_main_menu_item(ctx, "OPEN FILE BROWSER") != 0) open_file_browser = true;
+                if (c.mdgui_main_menu_item(ctx, "ABOUT") != 0) show_about = true;
+                c.mdgui_end_main_submenu(ctx);
+            }
             if (c.mdgui_main_menu_item(ctx, "OPEN ROM") != 0) open_file_browser = true;
             if (c.mdgui_main_menu_item(ctx, "EXIT") != 0) running = false;
             c.mdgui_end_main_menu(ctx);
@@ -528,6 +543,27 @@ pub fn main() !void {
             c.mdgui_end_main_menu(ctx);
         }
         if (c.mdgui_begin_main_menu(ctx, "WINDOW") != 0) {
+            if (c.mdgui_begin_main_submenu(ctx, "OPEN WINDOW") != 0) {
+                if (c.mdgui_main_menu_item(ctx, "Main UI") != 0) {
+                    request_open_main_ui = true;
+                }
+                if (c.mdgui_main_menu_item(ctx, "Demo Window") != 0) {
+                    show_demo = true;
+                    request_open_demo_window = true;
+                }
+                if (c.mdgui_main_menu_item(ctx, "Perf Analytics") != 0) {
+                    analytics.show_window = true;
+                    request_open_perf_analytics = true;
+                }
+                if (c.mdgui_main_menu_item(ctx, "Perf Graph") != 0) {
+                    analytics.show_graph = true;
+                    request_open_perf_graph = true;
+                }
+                if (c.mdgui_main_menu_item(ctx, "Window API") != 0) {
+                    request_open_window_api = true;
+                }
+                c.mdgui_end_main_submenu(ctx);
+            }
             if (c.mdgui_is_tile_manager_enabled(ctx) != 0) {
                 if (c.mdgui_main_menu_item(ctx, "[x] Tile Manager (F2)") != 0) {
                     c.mdgui_set_tile_manager_enabled(ctx, 0);
@@ -603,6 +639,27 @@ pub fn main() !void {
                 .emu_view => drawWindowApiDemo(ctx, renderer, show_window_api_menu),
                 .perf_graph => drawPerfGraphWindow(ctx, &analytics),
             }
+        }
+
+        if (request_open_main_ui) {
+            c.mdgui_set_window_open(ctx, "MDGUI", 1);
+            c.mdgui_focus_window(ctx, "MDGUI");
+        }
+        if (request_open_demo_window) {
+            c.mdgui_set_window_open(ctx, "MDGUI Demo Window", 1);
+            c.mdgui_focus_window(ctx, "MDGUI Demo Window");
+        }
+        if (request_open_perf_analytics) {
+            c.mdgui_set_window_open(ctx, "PERF ANALYTICS", 1);
+            c.mdgui_focus_window(ctx, "PERF ANALYTICS");
+        }
+        if (request_open_perf_graph) {
+            c.mdgui_set_window_open(ctx, "PERF GRAPH", 1);
+            c.mdgui_focus_window(ctx, "PERF GRAPH");
+        }
+        if (request_open_window_api) {
+            c.mdgui_set_window_open(ctx, render_api_window_title, 1);
+            c.mdgui_focus_window(ctx, render_api_window_title);
         }
 
         if (open_file_browser) {
