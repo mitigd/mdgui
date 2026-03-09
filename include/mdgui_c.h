@@ -42,6 +42,14 @@ typedef struct MDGUI_Input {
   int mouse_down;
   int mouse_pressed;
   int mouse_wheel;
+  const char *text_input; // UTF-8 bytes typed this frame (optional)
+  int key_backspace;
+  int key_delete;
+  int key_enter;
+  int key_left;
+  int key_right;
+  int key_home;
+  int key_end;
 } MDGUI_Input;
 
 typedef void (*MDGUI_WindowDrawFn)(MDGUI_Context *ctx, int content_x,
@@ -68,6 +76,11 @@ enum {
 enum {
   MDGUI_TEXT_ALIGN_LEFT = 0,
   MDGUI_TEXT_ALIGN_CENTER = 1,
+};
+
+enum {
+  MDGUI_INPUT_TEXT_CHANGED = 1 << 0,
+  MDGUI_INPUT_TEXT_SUBMITTED = 1 << 1,
 };
 
 enum {
@@ -126,6 +139,9 @@ int mdgui_listbox(MDGUI_Context *ctx, const char **items, int item_count,
                  int *selected, int x, int y, int w, int rows);
 int mdgui_combo(MDGUI_Context *ctx, const char *label, const char **items,
                int item_count, int *selected, int x, int y, int w);
+// Returns MDGUI_INPUT_TEXT_* flags.
+int mdgui_input_text(MDGUI_Context *ctx, const char *label, char *buffer,
+                    int buffer_size, int x, int y, int w);
 void mdgui_progress_bar(MDGUI_Context *ctx, float value, int x, int y, int w,
                        int h, const char *overlay_text);
 // For frame graph sizing, w/h follow widget conventions:

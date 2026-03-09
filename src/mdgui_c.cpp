@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cctype>
+#include <cstdint>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -187,6 +188,13 @@ struct MDGUI_Context {
   int combo_capture_y;
   int combo_capture_w;
   int combo_capture_h;
+  int active_text_input_window;
+  int active_text_input_id;
+  int active_text_input_cursor;
+  int active_text_input_sel_anchor;
+  int active_text_input_sel_start;
+  int active_text_input_sel_end;
+  bool active_text_input_drag_select;
 
   bool file_browser_open;
   std::string file_browser_cwd;
@@ -1459,6 +1467,7 @@ void mdgui_begin_frame(MDGUI_Context *ctx, const MDGUI_Input *input) {
     ctx->dragging_window = -1;
     ctx->resizing_window = -1;
     ctx->file_browser_scroll_dragging = false;
+    ctx->active_text_input_drag_select = false;
     for (auto &w : ctx->windows) {
       w.text_scroll_dragging = false;
     }
@@ -1481,6 +1490,18 @@ void mdgui_begin_frame(MDGUI_Context *ctx, const MDGUI_Input *input) {
   if (ctx->windows_locked) {
     ctx->dragging_window = -1;
     ctx->resizing_window = -1;
+  }
+
+  if (ctx->active_text_input_window >= 0 &&
+      (ctx->active_text_input_window >= (int)ctx->windows.size() ||
+       ctx->windows[ctx->active_text_input_window].closed)) {
+  ctx->active_text_input_window = -1;
+  ctx->active_text_input_id = 0;
+  ctx->active_text_input_cursor = 0;
+  ctx->active_text_input_sel_anchor = 0;
+  ctx->active_text_input_sel_start = 0;
+  ctx->active_text_input_sel_end = 0;
+  ctx->active_text_input_drag_select = false;
   }
 
   if (ctx->tile_manager_enabled) {
@@ -2014,6 +2035,32 @@ void mdgui_end_window(MDGUI_Context *ctx) {
   ctx->menu_defs.clear();
   ctx->menu_build_stack.clear();
   mdgui_backend_set_alpha_mod(255);
+}
+
+static int clamp_text_cursor(int cursor, int len) {
+  if (cursor < 0)
+    return 0;
+  if (cursor > len)
+    return len;
+  return cursor;
+}
+
+static int text_cursor_from_pixel_x(const char *buffer, int len, int target_px) {
+  if (!mdgui_fonts[1] || !buffer)
+    return len;
+  if (target_px < 0)
+    target_px = 0;
+  int accum_px = 0;
+  for (int i = 0; i < len; ++i) {
+    char ch[2] = {buffer[i], '\0'};
+    int cw = mdgui_fonts[1]->measureTextWidth(ch);
+    if (cw < 1)
+      cw = 1;
+    if (target_px < accum_px + (cw / 2))
+      return i;
+    accum_px += cw;
+  }
+  return len;
 }
 
 int mdgui_button(MDGUI_Context *ctx, const char *text, int x, int y, int w,
@@ -2557,6 +2604,237 @@ int mdgui_combo(MDGUI_Context *ctx, const char *label, const char **items,
   return changed;
 }
 
+int mdgui_input_text(MDGUI_Context *ctx, const char *label, char *buffer,
+                    int buffer_size, int x, int y, int w) {
+  if (!ctx || !buffer || buffer_size <= 1 || ctx->current_window < 0)
+    return 0;
+  ctx->window_has_nonlabel_widget = true;
+  auto &win = ctx->windows[ctx->current_window];
+  const int topmost = is_current_window_topmost(ctx);
+  const int box_h = 12;
+  const int requested_w = w;
+  w = resolve_dynamic_width(ctx, x, w, 40);
+
+  const int ix = ctx->origin_x + x;
+  const int top_margin = 10;
+  const int logical_y = ctx->content_y + std::max(y, top_margin);
+  const int iy = logical_y - win.text_scroll;
+  const uintptr_t buf_addr = (uintptr_t)buffer;
+  const int input_id =
+      (int)(((buf_addr >> 3) & 0x7fffffff) ^ ((x & 0xffff) << 16) ^
+            (y & 0xffff) ^ 0x54455854);
+  const bool focused = (ctx->active_text_input_window == ctx->current_window &&
+                        ctx->active_text_input_id == input_id);
+
+  const int hovered = topmost &&
+                      point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y, ix, iy,
+                                    w, box_h);
+  int len = 0;
+  while (len < (buffer_size - 1) && buffer[len] != '\0')
+    len++;
+  buffer[len] = '\0';
+  int pre_cursor = focused ? clamp_text_cursor(ctx->active_text_input_cursor, len) : len;
+  int pre_scroll_px = 0;
+  if (mdgui_fonts[1]) {
+    std::string pre_prefix(buffer, (size_t)pre_cursor);
+    const int cursor_px = mdgui_fonts[1]->measureTextWidth(pre_prefix.c_str());
+    const int view_w = std::max(1, w - 6);
+    if (cursor_px > view_w - 2)
+      pre_scroll_px = cursor_px - (view_w - 2);
+  }
+  if (hovered && ctx->input.mouse_pressed) {
+    ctx->active_text_input_window = ctx->current_window;
+    ctx->active_text_input_id = input_id;
+    const int text_x = ix + 3;
+    const int target_px = ctx->input.mouse_x - text_x + pre_scroll_px;
+    const int click_cursor = text_cursor_from_pixel_x(buffer, len, target_px);
+    ctx->active_text_input_cursor = click_cursor;
+    ctx->active_text_input_sel_anchor = click_cursor;
+    ctx->active_text_input_sel_start = click_cursor;
+    ctx->active_text_input_sel_end = click_cursor;
+    ctx->active_text_input_drag_select = true;
+    ctx->input.mouse_pressed = 0;
+  } else if (ctx->input.mouse_pressed && focused && topmost &&
+             !point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y, ix, iy, w, box_h)) {
+    ctx->active_text_input_window = -1;
+    ctx->active_text_input_id = 0;
+    ctx->active_text_input_cursor = 0;
+    ctx->active_text_input_sel_anchor = 0;
+    ctx->active_text_input_sel_start = 0;
+    ctx->active_text_input_sel_end = 0;
+    ctx->active_text_input_drag_select = false;
+  }
+
+  const bool active = (ctx->active_text_input_window == ctx->current_window &&
+                       ctx->active_text_input_id == input_id);
+  int flags = 0;
+  ctx->active_text_input_cursor = clamp_text_cursor(ctx->active_text_input_cursor, len);
+  ctx->active_text_input_sel_anchor = clamp_text_cursor(ctx->active_text_input_sel_anchor, len);
+  ctx->active_text_input_sel_start = clamp_text_cursor(ctx->active_text_input_sel_start, len);
+  ctx->active_text_input_sel_end = clamp_text_cursor(ctx->active_text_input_sel_end, len);
+
+  if (active && ctx->active_text_input_drag_select && ctx->input.mouse_down && hovered) {
+    const int text_x = ix + 3;
+    const int target_px = ctx->input.mouse_x - text_x + pre_scroll_px;
+    const int drag_cursor = text_cursor_from_pixel_x(buffer, len, target_px);
+    ctx->active_text_input_cursor = drag_cursor;
+    ctx->active_text_input_sel_start = std::min(ctx->active_text_input_sel_anchor, drag_cursor);
+    ctx->active_text_input_sel_end = std::max(ctx->active_text_input_sel_anchor, drag_cursor);
+  }
+  if (active && !ctx->input.mouse_down) {
+    ctx->active_text_input_drag_select = false;
+  }
+
+  if (active && topmost) {
+    const bool has_selection =
+        ctx->active_text_input_sel_end > ctx->active_text_input_sel_start;
+
+    if (ctx->input.key_left) {
+      if (has_selection) {
+        ctx->active_text_input_cursor = ctx->active_text_input_sel_start;
+      } else {
+        ctx->active_text_input_cursor -= 1;
+      }
+      ctx->active_text_input_sel_start = ctx->active_text_input_cursor;
+      ctx->active_text_input_sel_end = ctx->active_text_input_cursor;
+    }
+    if (ctx->input.key_right) {
+      if (has_selection) {
+        ctx->active_text_input_cursor = ctx->active_text_input_sel_end;
+      } else {
+        ctx->active_text_input_cursor += 1;
+      }
+      ctx->active_text_input_sel_start = ctx->active_text_input_cursor;
+      ctx->active_text_input_sel_end = ctx->active_text_input_cursor;
+    }
+    if (ctx->input.key_home) {
+      ctx->active_text_input_cursor = 0;
+      ctx->active_text_input_sel_start = 0;
+      ctx->active_text_input_sel_end = 0;
+    }
+    if (ctx->input.key_end) {
+      ctx->active_text_input_cursor = len;
+      ctx->active_text_input_sel_start = len;
+      ctx->active_text_input_sel_end = len;
+    }
+    ctx->active_text_input_cursor = clamp_text_cursor(ctx->active_text_input_cursor, len);
+
+    const int sel_start = ctx->active_text_input_sel_start;
+    const int sel_end = ctx->active_text_input_sel_end;
+    const bool has_selection_now = sel_end > sel_start;
+
+    if (ctx->input.key_backspace && (has_selection_now || ctx->active_text_input_cursor > 0)) {
+      if (has_selection_now) {
+        memmove(buffer + sel_start, buffer + sel_end, (size_t)(len - sel_end + 1));
+        len -= (sel_end - sel_start);
+        ctx->active_text_input_cursor = sel_start;
+      } else {
+        const int remove_idx = ctx->active_text_input_cursor - 1;
+        memmove(buffer + remove_idx, buffer + remove_idx + 1, (size_t)(len - remove_idx));
+        len -= 1;
+        ctx->active_text_input_cursor -= 1;
+      }
+      ctx->active_text_input_sel_start = ctx->active_text_input_cursor;
+      ctx->active_text_input_sel_end = ctx->active_text_input_cursor;
+      flags |= MDGUI_INPUT_TEXT_CHANGED;
+    }
+    if (ctx->input.key_delete && (has_selection_now || ctx->active_text_input_cursor < len)) {
+      if (has_selection_now) {
+        memmove(buffer + sel_start, buffer + sel_end, (size_t)(len - sel_end + 1));
+        len -= (sel_end - sel_start);
+        ctx->active_text_input_cursor = sel_start;
+      } else {
+        const int remove_idx = ctx->active_text_input_cursor;
+        memmove(buffer + remove_idx, buffer + remove_idx + 1, (size_t)(len - remove_idx));
+        len -= 1;
+      }
+      ctx->active_text_input_sel_start = ctx->active_text_input_cursor;
+      ctx->active_text_input_sel_end = ctx->active_text_input_cursor;
+      flags |= MDGUI_INPUT_TEXT_CHANGED;
+    }
+    if (ctx->input.text_input) {
+      if (ctx->active_text_input_sel_end > ctx->active_text_input_sel_start) {
+        const int s0 = ctx->active_text_input_sel_start;
+        const int s1 = ctx->active_text_input_sel_end;
+        memmove(buffer + s0, buffer + s1, (size_t)(len - s1 + 1));
+        len -= (s1 - s0);
+        ctx->active_text_input_cursor = s0;
+        ctx->active_text_input_sel_start = s0;
+        ctx->active_text_input_sel_end = s0;
+      }
+      const unsigned char *p = (const unsigned char *)ctx->input.text_input;
+      while (*p && len < (buffer_size - 1)) {
+        const unsigned char ch = *p++;
+        if (ch < 32 || ch > 126)
+          continue;
+        const int insert_at = ctx->active_text_input_cursor;
+        memmove(buffer + insert_at + 1, buffer + insert_at, (size_t)(len - insert_at + 1));
+        buffer[insert_at] = (char)ch;
+        len += 1;
+        ctx->active_text_input_cursor += 1;
+        ctx->active_text_input_sel_start = ctx->active_text_input_cursor;
+        ctx->active_text_input_sel_end = ctx->active_text_input_cursor;
+        flags |= MDGUI_INPUT_TEXT_CHANGED;
+      }
+    }
+    if (ctx->input.key_enter)
+      flags |= MDGUI_INPUT_TEXT_SUBMITTED;
+  }
+
+  const int border_color = active ? CLR_ACCENT : CLR_WINDOW_BORDER;
+  mdgui_draw_hline_idx(nullptr, border_color, ix - 1, iy - 1, ix + w + 1);
+  mdgui_draw_hline_idx(nullptr, border_color, ix - 1, iy + box_h + 1, ix + w + 1);
+  mdgui_draw_vline_idx(nullptr, border_color, ix - 1, iy - 1, iy + box_h + 1);
+  mdgui_draw_vline_idx(nullptr, border_color, ix + w + 1, iy - 1, iy + box_h + 1);
+  mdgui_fill_rect_idx(nullptr, CLR_BOX_BODY, ix, iy, w, box_h);
+
+  const int text_x = ix + 3;
+  const int text_y = iy + 2;
+  int scroll_px = 0;
+  if (mdgui_fonts[1]) {
+    const int display_cursor = active ? ctx->active_text_input_cursor : len;
+    std::string prefix(buffer, (size_t)display_cursor);
+    const int cursor_text_x = mdgui_fonts[1]->measureTextWidth(prefix.c_str());
+    const int view_w = std::max(1, w - 6);
+    if (cursor_text_x > view_w - 2)
+      scroll_px = cursor_text_x - (view_w - 2);
+
+    mdgui_backend_set_clip_rect(1, ix + 1, iy + 1, std::max(1, w - 2), std::max(1, box_h - 2));
+    if (active && ctx->active_text_input_sel_end > ctx->active_text_input_sel_start) {
+      std::string sel_prefix(buffer, (size_t)ctx->active_text_input_sel_start);
+      std::string sel_text(buffer + ctx->active_text_input_sel_start,
+                           (size_t)(ctx->active_text_input_sel_end - ctx->active_text_input_sel_start));
+      const int sel_x0 =
+          text_x + mdgui_fonts[1]->measureTextWidth(sel_prefix.c_str()) - scroll_px;
+      const int sel_w = mdgui_fonts[1]->measureTextWidth(sel_text.c_str());
+      if (sel_w > 0)
+        mdgui_fill_rect_idx(nullptr, CLR_ACCENT, sel_x0, iy + 1, sel_w, box_h - 2);
+    }
+    mdgui_fonts[1]->drawText(buffer, nullptr, text_x - scroll_px, text_y, CLR_MENU_TEXT);
+
+    if (active) {
+      const unsigned long long ticks = mdgui_backend_get_ticks_ms();
+      if (((ticks / 500ull) % 2ull) == 0ull) {
+        const int cx = text_x + cursor_text_x - scroll_px;
+        mdgui_draw_vline_idx(nullptr, CLR_MENU_TEXT, cx, iy + 2, iy + box_h - 2);
+      }
+    }
+    set_content_clip(ctx);
+  }
+
+  if (label && mdgui_fonts[1]) {
+    mdgui_fonts[1]->drawText(label, nullptr, ix, iy - 10, CLR_TEXT_LIGHT);
+  }
+
+  int intrinsic_w = w;
+  if (requested_w <= 0)
+    intrinsic_w = 40;
+  note_content_bounds(ctx, ix + intrinsic_w, logical_y + box_h);
+  const int bottom_margin = 4;
+  ctx->content_y += std::max(y, top_margin) + box_h + bottom_margin;
+  return flags;
+}
+
 void mdgui_progress_bar(MDGUI_Context *ctx, float value, int x, int y, int w,
                        int h, const char *overlay_text) {
   if (!ctx || ctx->current_window < 0)
@@ -2725,10 +3003,12 @@ void mdgui_begin_menu_bar(MDGUI_Context *ctx) {
     return;
   ctx->window_has_nonlabel_widget = true;
   const auto &win = ctx->windows[ctx->current_window];
+  const bool had_menu_bar = ctx->has_menu_bar;
   const int bar_x = win.x + 1;
-  const int bar_y = ctx->content_y;
+  const int bar_y = ctx->origin_y;
   const int bar_w = win.w - 2;
   const int bar_h = 10;
+  mdgui_backend_set_clip_rect(0, 0, 0, 0, 0);
   mdgui_fill_rect_idx(nullptr, CLR_MENU_BG, bar_x, bar_y, bar_w, bar_h);
   ctx->menu_index = 0;
   ctx->menu_next_x = win.x + 4;
@@ -2742,7 +3022,12 @@ void mdgui_begin_menu_bar(MDGUI_Context *ctx) {
   ctx->menu_bar_h = bar_h;
   ctx->menu_defs.clear();
   ctx->menu_build_stack.clear();
-  ctx->content_y += 12;
+  if (!had_menu_bar) {
+    const int content_top = bar_y + bar_h + 2;
+    ctx->origin_y = content_top;
+    if (ctx->content_y < content_top)
+      ctx->content_y = content_top;
+  }
 }
 
 int mdgui_begin_menu(MDGUI_Context *ctx, const char *text) {
@@ -2753,7 +3038,7 @@ int mdgui_begin_menu(MDGUI_Context *ctx, const char *text) {
   const int tw = mdgui_fonts[1] ? mdgui_fonts[1]->measureTextWidth(text) : 40;
   const int item_w = tw + 10;
   const int x = ctx->menu_next_x;
-  const int y = ctx->content_y - 12;
+  const int y = ctx->menu_bar_y;
   const int hovered =
       point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y, x, y, item_w, 10);
   const bool menu_interactable =
@@ -2956,6 +3241,7 @@ void mdgui_end_menu_bar(MDGUI_Context *ctx) {
   ctx->in_menu_bar = false;
   ctx->in_menu = false;
   ctx->menu_build_stack.clear();
+  set_content_clip(ctx);
 }
 
 void mdgui_begin_main_menu_bar(MDGUI_Context *ctx) {

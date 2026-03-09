@@ -179,6 +179,7 @@ fn drawMainWindow(
     open_file_browser: *bool,
     windows_alpha: *f32,
     show_nested_test_area: bool,
+    demo_text: *[128]u8,
 ) void {
     if (c.mdgui_begin_window(ctx, "MDGUI", 10, 10, 220, 170) != 0) {
         c.mdgui_begin_menu_bar(ctx);
@@ -204,6 +205,11 @@ fn drawMainWindow(
         if (c.mdgui_button(ctx, "LOAD ROM", 10, 20, 90, 20) != 0) open_file_browser.* = true;
         _ = c.mdgui_button(ctx, "OPTIONS", 10, 45, 90, 20);
         c.mdgui_spacer(ctx, 70);
+        const text_flags = c.mdgui_input_text(ctx, "Quick note", @ptrCast(&demo_text[0]), demo_text.len, 10, 6, -16);
+        if ((text_flags & c.MDGUI_INPUT_TEXT_SUBMITTED) != 0) {
+            c.mdgui_set_status_bar_text(ctx, @ptrCast(&demo_text[0]));
+        }
+        c.mdgui_spacer(ctx, 4);
 
         c.mdgui_label(ctx, "Window transparency", 10, 2);
         var slider_alpha = windows_alpha.*;
@@ -451,6 +457,8 @@ pub fn main() !void {
     defer c.SDL_Quit();
 
     const window = c.SDL_CreateWindow("MDGUI Demo", 1280, 720, 0) orelse return error.SDLWindowFailed;
+    _ = c.SDL_StartTextInput(window);
+    defer _ = c.SDL_StopTextInput(window);
     const renderer = c.SDL_CreateRenderer(window, null) orelse return error.SDLRendererFailed;
     _ = c.SDL_SetRenderScale(renderer, 2.0, 2.0);
     if (c.SDL_GetRendererName(renderer)) |renderer_name| {
@@ -479,6 +487,14 @@ pub fn main() !void {
         .mouse_down = 0,
         .mouse_pressed = 0,
         .mouse_wheel = 0,
+        .text_input = null,
+        .key_backspace = 0,
+        .key_delete = 0,
+        .key_enter = 0,
+        .key_left = 0,
+        .key_right = 0,
+        .key_home = 0,
+        .key_end = 0,
     };
     var show_about = false;
     var show_demo = true;
@@ -489,6 +505,7 @@ pub fn main() !void {
     var has_selected_rom = false;
     var analytics = Analytics{};
     var windows_alpha = alphaFloatFromByte(c.mdgui_get_windows_alpha(ctx));
+    var demo_text: [128]u8 = [_]u8{0} ** 128;
     c.mdgui_set_tile_manager_enabled(ctx, if (startup_tile_windows) 1 else 0);
     const perf_freq = c.SDL_GetPerformanceFrequency();
     var last_counter = c.SDL_GetPerformanceCounter();
@@ -508,8 +525,21 @@ pub fn main() !void {
         var request_open_perf_analytics = false;
         var request_open_perf_graph = false;
         var request_open_window_api = false;
+        var frame_text_input: [64]u8 = [_]u8{0} ** 64;
+        var frame_text_len: usize = 0;
+        var key_fallback_input: [64]u8 = [_]u8{0} ** 64;
+        var key_fallback_len: usize = 0;
+        var saw_text_input_event = false;
         input.mouse_pressed = 0;
         input.mouse_wheel = 0;
+        input.text_input = null;
+        input.key_backspace = 0;
+        input.key_delete = 0;
+        input.key_enter = 0;
+        input.key_left = 0;
+        input.key_right = 0;
+        input.key_home = 0;
+        input.key_end = 0;
         var event: c.SDL_Event = undefined;
         while (c.SDL_PollEvent(&event)) {
             if (event.type == c.SDL_EVENT_QUIT) running = false;
@@ -528,22 +558,49 @@ pub fn main() !void {
                 input.mouse_y = @intFromFloat(event.button.y / 2.0);
                 input.mouse_down = 0;
             }
-            if (event.type == c.SDL_EVENT_KEY_DOWN and event.key.repeat == false) {
-                if (event.key.scancode == c.SDL_SCANCODE_F1) {
-                    show_window_api_menu = !show_window_api_menu;
+            if (event.type == c.SDL_EVENT_KEY_DOWN) {
+                if (event.key.scancode == c.SDL_SCANCODE_BACKSPACE) input.key_backspace = 1;
+                if (event.key.scancode == c.SDL_SCANCODE_DELETE) input.key_delete = 1;
+                if (event.key.scancode == c.SDL_SCANCODE_RETURN or event.key.scancode == c.SDL_SCANCODE_KP_ENTER) input.key_enter = 1;
+                if (event.key.scancode == c.SDL_SCANCODE_LEFT) input.key_left = 1;
+                if (event.key.scancode == c.SDL_SCANCODE_RIGHT) input.key_right = 1;
+                if (event.key.scancode == c.SDL_SCANCODE_HOME) input.key_home = 1;
+                if (event.key.scancode == c.SDL_SCANCODE_END) input.key_end = 1;
+                const keycode = event.key.key;
+                if (keycode >= 32 and keycode <= 126 and key_fallback_len < key_fallback_input.len - 1) {
+                    key_fallback_input[key_fallback_len] = @as(u8, @intCast(keycode));
+                    key_fallback_len += 1;
+                    key_fallback_input[key_fallback_len] = 0;
                 }
-                if (event.key.scancode == c.SDL_SCANCODE_F11) {
-                    emu_view_fullscreen = !emu_view_fullscreen;
-                    c.mdgui_set_window_fullscreen(ctx, render_api_window_title, if (emu_view_fullscreen) 1 else 0);
+                if (event.key.repeat == false) {
+                    if (event.key.scancode == c.SDL_SCANCODE_F1) {
+                        show_window_api_menu = !show_window_api_menu;
+                    }
+                    if (event.key.scancode == c.SDL_SCANCODE_F11) {
+                        emu_view_fullscreen = !emu_view_fullscreen;
+                        c.mdgui_set_window_fullscreen(ctx, render_api_window_title, if (emu_view_fullscreen) 1 else 0);
+                    }
+                    if (event.key.scancode == c.SDL_SCANCODE_F2) {
+                        const tiled_now = c.mdgui_is_tile_manager_enabled(ctx) != 0;
+                        c.mdgui_set_tile_manager_enabled(ctx, if (tiled_now) 0 else 1);
+                    }
+                    if (event.key.scancode == c.SDL_SCANCODE_F3) {
+                        const lock_now = c.mdgui_is_windows_locked(ctx) != 0;
+                        c.mdgui_set_windows_locked(ctx, if (lock_now) 0 else 1);
+                    }
                 }
-                if (event.key.scancode == c.SDL_SCANCODE_F2) {
-                    const tiled_now = c.mdgui_is_tile_manager_enabled(ctx) != 0;
-                    c.mdgui_set_tile_manager_enabled(ctx, if (tiled_now) 0 else 1);
+            }
+            if (event.type == c.SDL_EVENT_TEXT_INPUT) {
+                saw_text_input_event = true;
+                var i: usize = 0;
+                while (event.text.text[i] != 0 and frame_text_len < frame_text_input.len - 1) : (i += 1) {
+                    const ch = event.text.text[i];
+                    if (ch >= 32 and ch <= 126) {
+                        frame_text_input[frame_text_len] = ch;
+                        frame_text_len += 1;
+                    }
                 }
-                if (event.key.scancode == c.SDL_SCANCODE_F3) {
-                    const lock_now = c.mdgui_is_windows_locked(ctx) != 0;
-                    c.mdgui_set_windows_locked(ctx, if (lock_now) 0 else 1);
-                }
+                frame_text_input[frame_text_len] = 0;
             }
             if (event.type == c.SDL_EVENT_MOUSE_WHEEL) {
                 const wy = @as(f32, event.wheel.y);
@@ -554,11 +611,22 @@ pub fn main() !void {
                 }
             }
         }
+        if (!saw_text_input_event and key_fallback_len > 0) {
+            var i: usize = 0;
+            while (i < key_fallback_len and frame_text_len < frame_text_input.len - 1) : (i += 1) {
+                frame_text_input[frame_text_len] = key_fallback_input[i];
+                frame_text_len += 1;
+            }
+            frame_text_input[frame_text_len] = 0;
+        }
         var mx: f32 = 0;
         var my: f32 = 0;
         _ = c.SDL_GetMouseState(&mx, &my);
         input.mouse_x = @intFromFloat(mx / 2.0);
         input.mouse_y = @intFromFloat(my / 2.0);
+        if (frame_text_len > 0) {
+            input.text_input = @ptrCast(&frame_text_input[0]);
+        }
 
         // Set background color based on current theme
         const theme = c.mdgui_get_theme();
@@ -748,6 +816,7 @@ pub fn main() !void {
                     &open_file_browser,
                     &windows_alpha,
                     show_nested_test_area,
+                    &demo_text,
                 ),
                 .demo => drawDemoWindow(ctx, show_demo),
                 .perf_analytics => drawAnalyticsWindow(ctx, &analytics),
