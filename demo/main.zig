@@ -172,7 +172,14 @@ fn drawAnalyticsWindow(ctx: ?*c.MDGUI_Context, analytics: *Analytics) void {
     c.mdgui_end_window(ctx);
 }
 
-fn drawMainWindow(ctx: ?*c.MDGUI_Context, running: *bool, open_file_browser: *bool, windows_alpha: *f32) void {
+fn drawMainWindow(
+    ctx: ?*c.MDGUI_Context,
+    renderer: ?*c.SDL_Renderer,
+    running: *bool,
+    open_file_browser: *bool,
+    windows_alpha: *f32,
+    show_nested_test_area: bool,
+) void {
     if (c.mdgui_begin_window(ctx, "MDGUI", 10, 10, 220, 170) != 0) {
         c.mdgui_begin_menu_bar(ctx);
         if (c.mdgui_begin_menu(ctx, "FILE") != 0) {
@@ -209,6 +216,51 @@ fn drawMainWindow(ctx: ?*c.MDGUI_Context, running: *bool, open_file_browser: *bo
         const alpha_pct = @as(c_int, @intFromFloat(slider_alpha * 100.0 + 0.5));
         const alpha_txt = std.fmt.bufPrintZ(&alpha_line, "Window alpha: {d}%", .{alpha_pct}) catch "Window alpha";
         c.mdgui_label(ctx, alpha_txt.ptr, 10, 4);
+
+        if (show_nested_test_area) {
+            c.mdgui_label(ctx, "Nested TEST AREA", 10, 6);
+            var view_x: c_int = 0;
+            var view_y: c_int = 0;
+            var view_w: c_int = 0;
+            var view_h: c_int = 0;
+            if (c.mdgui_begin_render_window(
+                ctx,
+                "TEST AREA",
+                10,
+                8,
+                -16,
+                64,
+                0,
+                &view_x,
+                &view_y,
+                &view_w,
+                &view_h,
+            ) != 0) {
+                _ = c.SDL_SetRenderDrawBlendMode(renderer, c.SDL_BLENDMODE_BLEND);
+                _ = c.SDL_SetRenderDrawColor(renderer, 0x10, 0x10, 0x10, 0xff);
+                var bg = c.SDL_FRect{
+                    .x = @floatFromInt(view_x),
+                    .y = @floatFromInt(view_y),
+                    .w = @floatFromInt(view_w),
+                    .h = @floatFromInt(view_h),
+                };
+                _ = c.SDL_RenderFillRect(renderer, &bg);
+
+                const ticks = c.SDL_GetTicks();
+                const t = @as(c_int, @intCast(ticks % 2000));
+                const local_x: c_int = -16 + @divTrunc(t * (view_w + 32), 2000);
+                const local_y: c_int = 22;
+                var sq = c.SDL_FRect{
+                    .x = @floatFromInt(view_x + local_x),
+                    .y = @floatFromInt(view_y + local_y),
+                    .w = 18,
+                    .h = 18,
+                };
+                _ = c.SDL_SetRenderDrawColor(renderer, 0x30, 0xd0, 0x50, 0xff);
+                _ = c.SDL_RenderFillRect(renderer, &sq);
+                c.mdgui_end_window(ctx);
+            }
+        }
         c.mdgui_end_window(ctx);
     }
 }
@@ -429,6 +481,7 @@ pub fn main() !void {
     };
     var show_about = false;
     var show_demo = true;
+    var show_nested_test_area = false;
     var show_window_api_menu = false;
     var emu_view_fullscreen = false;
     var selected_rom_buf: [512]u8 = [_]u8{0} ** 512;
@@ -611,6 +664,15 @@ pub fn main() !void {
                     c.mdgui_set_windows_locked(ctx, 1);
                 }
             }
+            if (show_nested_test_area) {
+                if (c.mdgui_main_menu_item(ctx, "[x] Nested Test Area") != 0) {
+                    show_nested_test_area = false;
+                }
+            } else {
+                if (c.mdgui_main_menu_item(ctx, "[ ] Nested Test Area") != 0) {
+                    show_nested_test_area = true;
+                }
+            }
             c.mdgui_end_main_menu(ctx);
         }
         c.mdgui_end_main_menu_bar(ctx);
@@ -663,7 +725,14 @@ pub fn main() !void {
         i = 0;
         while (i < draw_count) : (i += 1) {
             switch (draw_kinds[i]) {
-                .main_window => drawMainWindow(ctx, &running, &open_file_browser, &windows_alpha),
+                .main_window => drawMainWindow(
+                    ctx,
+                    renderer,
+                    &running,
+                    &open_file_browser,
+                    &windows_alpha,
+                    show_nested_test_area,
+                ),
                 .demo => drawDemoWindow(ctx, show_demo),
                 .perf_analytics => drawAnalyticsWindow(ctx, &analytics),
                 .emu_view => drawWindowApiDemo(ctx, renderer, show_window_api_menu),

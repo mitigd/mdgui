@@ -67,6 +67,17 @@ struct FileBrowserEntry {
 } // namespace
 
 struct MDGUI_Context {
+  struct NestedRenderState {
+    int parent_origin_x;
+    int parent_origin_y;
+    int parent_content_y;
+    int parent_content_req_right;
+    int parent_content_req_bottom;
+    bool parent_window_has_nonlabel_widget;
+    unsigned char parent_alpha_mod;
+    int parent_content_y_after;
+  };
+
   MDGUI_RenderBackend backend;
   MDGUI_Input input;
 
@@ -169,6 +180,7 @@ struct MDGUI_Context {
   Uint64 file_browser_last_click_ticks;
   std::string file_browser_result;
   std::vector<std::string> file_browser_ext_filters;
+  std::vector<NestedRenderState> nested_render_stack;
 };
 
 static void note_content_bounds(MDGUI_Context *ctx, int right, int bottom) {
@@ -1626,6 +1638,24 @@ int mdgui_begin_window(MDGUI_Context *ctx, const char *title, int x, int y,
 void mdgui_end_window(MDGUI_Context *ctx) {
   if (!ctx)
     return;
+
+  if (!ctx->nested_render_stack.empty()) {
+    const auto nested = ctx->nested_render_stack.back();
+    ctx->nested_render_stack.pop_back();
+    ctx->origin_x = nested.parent_origin_x;
+    ctx->origin_y = nested.parent_origin_y;
+    ctx->content_y = nested.parent_content_y_after;
+    ctx->content_req_right =
+        std::max(ctx->content_req_right, nested.parent_content_req_right);
+    ctx->content_req_bottom =
+        std::max(ctx->content_req_bottom, nested.parent_content_req_bottom);
+    ctx->window_has_nonlabel_widget =
+        ctx->window_has_nonlabel_widget || nested.parent_window_has_nonlabel_widget;
+    mdgui_backend_set_alpha_mod(nested.parent_alpha_mod);
+    set_content_clip(ctx);
+    return;
+  }
+
   auto &win = ctx->windows[ctx->current_window];
   mdgui_backend_set_clip_rect(0, 0, 0, 0, 0);
 
@@ -3232,6 +3262,133 @@ int mdgui_begin_render_window_ex(MDGUI_Context *ctx, const char *title, int x,
                                  int *out_x, int *out_y, int *out_w, int *out_h) {
   if (!ctx)
     return 0;
+
+  // Nested mode: inside an existing parent window, treat render window as a
+  // clipped child viewport anchored in parent-local coordinates.
+  if (ctx->current_window >= 0 && ctx->current_window < (int)ctx->windows.size()) {
+    auto &parent = ctx->windows[ctx->current_window];
+    const int requested_h = h;
+    w = resolve_dynamic_width(ctx, x, w, 8);
+    const int ix = ctx->origin_x + x;
+    const int logical_y = ctx->content_y + y;
+    const int iy = logical_y - parent.text_scroll;
+
+    if (requested_h == 0 || requested_h < 0) {
+      const int viewport_bottom = parent.y + parent.h - 4;
+      int avail_h = viewport_bottom - logical_y;
+      if (requested_h < 0)
+        avail_h += requested_h;
+      h = avail_h;
+    }
+    if (h < 8)
+      h = 8;
+
+    // Parent content clip (active while drawing nested frame/body) so border
+    // can never bleed outside tiled/visible parent content.
+    const int parent_clip_x = parent.x + 2;
+    const int parent_clip_y = ctx->origin_y;
+    int parent_clip_w = parent.w - 4;
+    int parent_clip_h = (parent.y + parent.h - 4) - parent_clip_y;
+    if (parent_clip_w < 1)
+      parent_clip_w = 1;
+    if (parent_clip_h < 1)
+      parent_clip_h = 1;
+    mdgui_backend_set_clip_rect(1, parent_clip_x, parent_clip_y, parent_clip_w,
+                                parent_clip_h);
+
+    const int parent_clip_x2 = parent_clip_x + parent_clip_w;
+    const int parent_clip_y2 = parent_clip_y + parent_clip_h;
+    const bool fully_inside_parent =
+        (ix >= parent_clip_x) && (iy >= parent_clip_y) &&
+        ((ix + w) <= parent_clip_x2) && ((iy + h) <= parent_clip_y2);
+    if (!fully_inside_parent) {
+      // In tiled/scroll-constrained parents, nested viewports that are not
+      // fully within the visible content region should not render at all.
+      note_content_bounds(ctx, ix + w, logical_y + h);
+      ctx->content_y = logical_y + h + 4;
+      if (out_x)
+        *out_x = 0;
+      if (out_y)
+        *out_y = 0;
+      if (out_w)
+        *out_w = 0;
+      if (out_h)
+        *out_h = 0;
+      (void)title;
+      (void)show_menu;
+      (void)flags;
+      return 0;
+    }
+
+    MDGUI_Context::NestedRenderState nested{};
+    nested.parent_origin_x = ctx->origin_x;
+    nested.parent_origin_y = ctx->origin_y;
+    nested.parent_content_y = ctx->content_y;
+    nested.parent_content_req_right = ctx->content_req_right;
+    nested.parent_content_req_bottom = ctx->content_req_bottom;
+    nested.parent_window_has_nonlabel_widget = ctx->window_has_nonlabel_widget;
+    nested.parent_alpha_mod = mdgui_backend_get_alpha_mod();
+    nested.parent_content_y_after = logical_y + h + 4;
+    ctx->nested_render_stack.push_back(nested);
+    const int frame_x1 = ix - 1;
+    const int frame_y1 = iy - 1;
+    const int frame_x2 = ix + w + 1;
+    const int frame_y2 = iy + h + 1;
+    mdgui_draw_frame_idx(nullptr, CLR_WINDOW_BORDER, frame_x1, frame_y1,
+                         frame_x2, frame_y2);
+    mdgui_fill_rect_idx(nullptr, CLR_BOX_BODY, ix, iy, w, h);
+    note_content_bounds(ctx, ix + w, logical_y + h);
+
+    const int cx = ix + 1;
+    const int cy = iy + 1;
+    int cw = w - 2;
+    int ch = h - 2;
+    if (cw < 1)
+      cw = 1;
+    if (ch < 1)
+      ch = 1;
+
+    // Intersect child content clip with parent content clip.
+    int clip_x1 = cx;
+    int clip_y1 = cy;
+    int clip_x2 = cx + cw;
+    int clip_y2 = cy + ch;
+    const int parent_x2 = parent_clip_x + parent_clip_w;
+    const int parent_y2 = parent_clip_y + parent_clip_h;
+    if (clip_x1 < parent_clip_x)
+      clip_x1 = parent_clip_x;
+    if (clip_y1 < parent_clip_y)
+      clip_y1 = parent_clip_y;
+    if (clip_x2 > parent_x2)
+      clip_x2 = parent_x2;
+    if (clip_y2 > parent_y2)
+      clip_y2 = parent_y2;
+    int clip_w = clip_x2 - clip_x1;
+    int clip_h = clip_y2 - clip_y1;
+    if (clip_w < 1)
+      clip_w = 1;
+    if (clip_h < 1)
+      clip_h = 1;
+
+    ctx->origin_x = cx;
+    ctx->origin_y = cy;
+    ctx->content_y = cy;
+    mdgui_backend_set_clip_rect(1, clip_x1, clip_y1, clip_w, clip_h);
+
+    if (out_x)
+      *out_x = cx;
+    if (out_y)
+      *out_y = cy;
+    if (out_w)
+      *out_w = cw;
+    if (out_h)
+      *out_h = ch;
+    (void)title;
+    (void)show_menu;
+    (void)flags;
+    return 1;
+  }
+
   if (!mdgui_begin_window_ex(ctx, title, x, y, w, h, flags))
     return 0;
   if (show_menu) {
