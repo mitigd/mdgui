@@ -180,6 +180,11 @@ void mdgui_end_main_submenu(MDGUI_Context *ctx);
 void mdgui_end_main_menu(MDGUI_Context *ctx);
 void mdgui_end_main_menu_bar(MDGUI_Context *ctx);
 
+void mdgui_set_status_bar_visible(MDGUI_Context *ctx, int visible);
+int mdgui_is_status_bar_visible(MDGUI_Context *ctx);
+void mdgui_set_status_bar_text(MDGUI_Context *ctx, const char *text);
+const char *mdgui_get_status_bar_text(MDGUI_Context *ctx);
+
 // Returns 0 while open/no click, 1 when first button clicked, 2 when second
 // button clicked.
 int mdgui_message_box(MDGUI_Context *ctx, const char *id, const char *title,

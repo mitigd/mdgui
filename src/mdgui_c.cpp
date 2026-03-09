@@ -31,6 +31,7 @@ constexpr int CLR_MSG_BAR = 244;
 constexpr int CLR_ACCENT = 247;
 constexpr int CLR_WINDOW_BORDER = 248;
 constexpr int MENU_POPUP_GAP_Y = 2;
+constexpr int STATUS_BAR_DEFAULT_H = 10;
 
 struct MDGUI_Window {
   struct CollapsingState {
@@ -146,6 +147,9 @@ struct MDGUI_Context {
   int main_menu_bar_y;
   int main_menu_bar_w;
   int main_menu_bar_h;
+  bool status_bar_visible;
+  int status_bar_h;
+  std::string status_bar_text;
 
   // Resizing state
   int resizing_window; // -1 if none
@@ -345,6 +349,10 @@ static int top_window_at_point(const MDGUI_Context *ctx, int px, int py,
 
 static int get_logical_render_w(MDGUI_Context *ctx);
 static int get_logical_render_h(MDGUI_Context *ctx);
+static int get_status_bar_h(const MDGUI_Context *ctx);
+static int get_work_area_top(MDGUI_Context *ctx);
+static int get_work_area_bottom(MDGUI_Context *ctx);
+static void clamp_window_to_work_area(MDGUI_Context *ctx, MDGUI_Window &win);
 
 static int clampi(int v, int lo, int hi) {
   if (v < lo)
@@ -649,10 +657,10 @@ static void tile_windows_internal(MDGUI_Context *ctx) {
   const int rh = get_logical_render_h(ctx);
 
   const int gap = 6;
-  int top = ctx->main_menu_bar_h + 6;
+  int top = get_work_area_top(ctx) + 6;
   if (top < 18)
     top = 18;
-  const int bottom = 6;
+  const int bottom = 6 + get_status_bar_h(ctx);
   const int left = gap;
   const int right = gap;
 
@@ -975,11 +983,86 @@ static int get_logical_render_h(MDGUI_Context *ctx) {
   return rh;
 }
 
+static int get_status_bar_h(const MDGUI_Context *ctx) {
+  if (!ctx || !ctx->status_bar_visible)
+    return 0;
+  if (ctx->status_bar_h > 0)
+    return ctx->status_bar_h;
+  return STATUS_BAR_DEFAULT_H;
+}
+
+static int get_work_area_top(MDGUI_Context *ctx) {
+  return ctx ? ctx->main_menu_bar_h : 0;
+}
+
+static int get_work_area_bottom(MDGUI_Context *ctx) {
+  int bottom = get_logical_render_h(ctx) - get_status_bar_h(ctx);
+  if (bottom < 0)
+    bottom = 0;
+  return bottom;
+}
+
+static void clamp_window_to_work_area(MDGUI_Context *ctx, MDGUI_Window &win) {
+  const int screen_w = get_logical_render_w(ctx);
+  const int top = get_work_area_top(ctx);
+  int bottom = get_work_area_bottom(ctx);
+  if (bottom < top)
+    bottom = top;
+
+  if (win.w < 1)
+    win.w = 1;
+  if (win.h < 1)
+    win.h = 1;
+  if (win.w > screen_w)
+    win.w = screen_w;
+  const int max_h = std::max(1, bottom - top);
+  if (win.h > max_h)
+    win.h = max_h;
+
+  int max_x = screen_w - win.w;
+  if (max_x < 0)
+    max_x = 0;
+  int max_y = bottom - win.h;
+  if (max_y < top)
+    max_y = top;
+
+  if (win.x < 0)
+    win.x = 0;
+  if (win.x > max_x)
+    win.x = max_x;
+  if (win.y < top)
+    win.y = top;
+  if (win.y > max_y)
+    win.y = max_y;
+}
+
+static void draw_status_bar(MDGUI_Context *ctx) {
+  if (!ctx || !ctx->status_bar_visible)
+    return;
+  const int rh = get_logical_render_h(ctx);
+  const int rw = get_logical_render_w(ctx);
+  const int bar_h = get_status_bar_h(ctx);
+  if (rw <= 0 || bar_h <= 0 || rh <= 0)
+    return;
+  const int bar_y = rh - bar_h;
+  if (bar_y < 0)
+    return;
+
+  mdgui_backend_set_clip_rect(0, 0, 0, 0, 0);
+  mdgui_backend_set_alpha_mod(255);
+  mdgui_fill_rect_idx(nullptr, CLR_MENU_BG, 0, bar_y, rw, bar_h);
+  mdgui_draw_hline_idx(nullptr, CLR_WINDOW_BORDER, 0, bar_y, rw - 1);
+  if (mdgui_fonts[1] && !ctx->status_bar_text.empty()) {
+    mdgui_fonts[1]->drawText(ctx->status_bar_text.c_str(), nullptr, 3, bar_y + 1,
+                             CLR_MENU_TEXT);
+  }
+}
+
 static void center_window_rect_menu_aware(MDGUI_Context *ctx, MDGUI_Window &win) {
   const int screen_w = get_logical_render_w(ctx);
-  const int screen_h = get_logical_render_h(ctx);
-  const int top = ctx ? ctx->main_menu_bar_h : 0;
-  const int avail_h = std::max(1, screen_h - top);
+  const int top = get_work_area_top(ctx);
+  const int bottom = get_work_area_bottom(ctx);
+  const int avail_h = std::max(1, bottom - top);
   const int max_x = std::max(0, screen_w - win.w);
   const int max_y = top + std::max(0, avail_h - win.h);
 
@@ -1241,6 +1324,9 @@ MDGUI_Context *mdgui_create_with_backend(const MDGUI_RenderBackend *backend) {
   ctx->main_menu_bar_y = 0;
   ctx->main_menu_bar_w = 0;
   ctx->main_menu_bar_h = 0;
+  ctx->status_bar_visible = false;
+  ctx->status_bar_h = STATUS_BAR_DEFAULT_H;
+  ctx->status_bar_text.clear();
 
   ctx->resizing_window = -1;
   ctx->resize_edge_mask = 0;
@@ -1386,8 +1472,9 @@ void mdgui_begin_frame(MDGUI_Context *ctx, const MDGUI_Input *input) {
     if (w.closed) {
       ctx->dragging_window = -1;
     } else {
-    w.x = ctx->input.mouse_x - ctx->drag_off_x;
-    w.y = ctx->input.mouse_y - ctx->drag_off_y;
+      w.x = ctx->input.mouse_x - ctx->drag_off_x;
+      w.y = ctx->input.mouse_y - ctx->drag_off_y;
+      clamp_window_to_work_area(ctx, w);
     }
   }
 
@@ -1445,6 +1532,7 @@ void mdgui_end_frame(MDGUI_Context *ctx) {
   }
 
   draw_open_main_menu_overlay(ctx);
+  draw_status_bar(ctx);
 
   if (ctx->combo_capture_active && !ctx->combo_capture_seen_this_frame) {
     ctx->combo_capture_active = false;
@@ -1499,13 +1587,16 @@ int mdgui_begin_window_ex(MDGUI_Context *ctx, const char *title, int x, int y,
     return 0;
 
   const int screen_w = get_logical_render_w(ctx);
-  const int screen_h = get_logical_render_h(ctx);
 
   if (win.is_maximized) {
+    const int top = get_work_area_top(ctx);
+    int bottom = get_work_area_bottom(ctx);
+    if (bottom < top)
+      bottom = top;
     win.x = 0;
-    win.y = ctx->main_menu_bar_h;
+    win.y = top;
     win.w = screen_w;
-    win.h = screen_h - ctx->main_menu_bar_h;
+    win.h = std::max(1, bottom - top);
   }
 
   const int top_idx =
@@ -1519,6 +1610,7 @@ int mdgui_begin_window_ex(MDGUI_Context *ctx, const char *title, int x, int y,
     win.min_w = 50;
   if (win.min_h < 30)
     win.min_h = 30;
+  clamp_window_to_work_area(ctx, win);
 
   // Edge detection for hover AND interaction
   const int margin = 3;
@@ -1663,6 +1755,7 @@ int mdgui_begin_window_ex(MDGUI_Context *ctx, const char *title, int x, int y,
         if (win.h < win.min_h)
           win.h = win.min_h;
       }
+      clamp_window_to_work_area(ctx, win);
     }
   }
 
@@ -3087,6 +3180,30 @@ void mdgui_end_main_menu_bar(MDGUI_Context *ctx) {
   ctx->in_main_menu_bar = false;
   ctx->in_main_menu = false;
   ctx->main_menu_build_stack.clear();
+}
+
+void mdgui_set_status_bar_visible(MDGUI_Context *ctx, int visible) {
+  if (!ctx)
+    return;
+  ctx->status_bar_visible = (visible != 0);
+}
+
+int mdgui_is_status_bar_visible(MDGUI_Context *ctx) {
+  if (!ctx)
+    return 0;
+  return ctx->status_bar_visible ? 1 : 0;
+}
+
+void mdgui_set_status_bar_text(MDGUI_Context *ctx, const char *text) {
+  if (!ctx)
+    return;
+  ctx->status_bar_text = text ? text : "";
+}
+
+const char *mdgui_get_status_bar_text(MDGUI_Context *ctx) {
+  if (!ctx)
+    return "";
+  return ctx->status_bar_text.c_str();
 }
 
 int mdgui_message_box_ex(MDGUI_Context *ctx, const char *id, const char *title,

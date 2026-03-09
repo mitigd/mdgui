@@ -470,6 +470,7 @@ pub fn main() !void {
     defer c.mdgui_destroy(ctx);
     c.mdgui_set_custom_cursor_enabled(ctx, 1); // demo opt-in; library default is off
     c.mdgui_set_windows_locked(ctx, if (startup_lock_tiled_windows) 1 else 0);
+    c.mdgui_set_status_bar_visible(ctx, 1);
 
     var running = true;
     var input = c.MDGUI_Input{
@@ -595,6 +596,21 @@ pub fn main() !void {
 
         _ = c.SDL_SetRenderDrawColor(renderer, bg_r, bg_g, bg_b, 0xff);
         _ = c.SDL_RenderClear(renderer);
+
+        const status_stats = analyticsStats(&analytics);
+        var status_line: [256]u8 = undefined;
+        const status_txt = std.fmt.bufPrintZ(
+            &status_line,
+            "Mouse {d},{d}  Frame {d:.2} ms  Tile:{s}  Lock:{s}",
+            .{
+                input.mouse_x,
+                input.mouse_y,
+                status_stats.current_ms,
+                if (c.mdgui_is_tile_manager_enabled(ctx) != 0) "on" else "off",
+                if (c.mdgui_is_windows_locked(ctx) != 0) "on" else "off",
+            },
+        ) catch "Ready";
+        c.mdgui_set_status_bar_text(ctx, status_txt);
 
         c.mdgui_begin_frame(ctx, &input);
         c.mdgui_begin_main_menu_bar(ctx);
