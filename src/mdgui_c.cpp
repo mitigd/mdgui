@@ -2715,16 +2715,20 @@ void mdgui_separator(MDGUI_Context *ctx, int x, int y, int w) {
     return;
   ctx->window_has_nonlabel_widget = true;
   const auto &win = ctx->windows[ctx->current_window];
+  const int sep_h = 2;
+  const int gap = (y > 0) ? y : 0;
+  const int top_gap = std::min(gap, 4);
+  const int bottom_gap = gap - top_gap;
   const int requested_w = w;
   w = resolve_dynamic_width(ctx, x, w, 4);
   const int ix = ctx->origin_x + x;
-  const int logical_y = ctx->content_y + y;
+  const int logical_y = ctx->content_y + top_gap;
   const int iy = logical_y - win.text_scroll;
   mdgui_draw_hline_idx(nullptr, CLR_ACCENT, ix, iy, ix + w);
   mdgui_draw_hline_idx(nullptr, CLR_ACCENT, ix, iy + 1, ix + w);
   if (requested_w > 0)
-    note_content_bounds(ctx, ix + w, logical_y + 2);
-  ctx->content_y += 4;
+    note_content_bounds(ctx, ix + w, logical_y + sep_h);
+  ctx->content_y += top_gap + sep_h + bottom_gap;
 }
 
 int mdgui_listbox(MDGUI_Context *ctx, const char **items, int item_count,
