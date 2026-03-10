@@ -205,7 +205,6 @@ fn drawMainWindow(
         c.mdgui_label(ctx, "Demo window is draggable.", 8, 6);
         if (c.mdgui_button(ctx, "LOAD ROM", 10, 20, 90, 20) != 0) open_file_browser.* = true;
         _ = c.mdgui_button(ctx, "OPTIONS", 10, 45, 90, 20);
-        c.mdgui_spacer(ctx, 70);
         const text_flags = c.mdgui_input_text(ctx, "Quick note", @ptrCast(&demo_text[0]), demo_text.len, 10, 6, -16);
         if ((text_flags & c.MDGUI_INPUT_TEXT_SUBMITTED) != 0) {
             c.mdgui_set_status_bar_text(ctx, @ptrCast(&demo_text[0]));

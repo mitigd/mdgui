@@ -338,6 +338,56 @@ static void clear_window_menu_path(MDGUI_Window &win) {
   win.open_menu_path.clear();
 }
 
+static const char *parse_menu_check_prefix(const char *text, bool *out_has_check,
+                                           bool *out_checked) {
+  if (out_has_check)
+    *out_has_check = false;
+  if (out_checked)
+    *out_checked = false;
+  if (!text)
+    return "";
+  const size_t len = strlen(text);
+  if (len >= 4 && text[0] == '[' && text[2] == ']' && text[3] == ' ') {
+    const char mark = text[1];
+    if (mark == 'x' || mark == 'X' || mark == ' ') {
+      if (out_has_check)
+        *out_has_check = true;
+      if (out_checked)
+        *out_checked = (mark == 'x' || mark == 'X');
+      return text + 4;
+    }
+  }
+  return text;
+}
+
+static int menu_check_indicator_width() {
+  if (!mdgui_fonts[1])
+    return 16;
+  const int w = mdgui_fonts[1]->measureTextWidth("[ ] ");
+  return (w > 0) ? w : 16;
+}
+
+static void draw_menu_check_indicator(int x, int y, bool checked) {
+  if (!mdgui_fonts[1])
+    return;
+  int left_w = mdgui_fonts[1]->measureTextWidth("[");
+  int space_w = mdgui_fonts[1]->measureTextWidth(" ");
+  if (left_w < 1)
+    left_w = 1;
+  if (space_w < 1)
+    space_w = 1;
+  mdgui_fonts[1]->drawText("[", nullptr, x, y, CLR_MENU_TEXT);
+  mdgui_fonts[1]->drawText("]", nullptr, x + left_w + space_w, y, CLR_MENU_TEXT);
+  if (checked) {
+    const int mark_x = x + left_w + std::max(0, (space_w - 4) / 2);
+    const int mark_y = y + 2;
+    mdgui_draw_line_idx(nullptr, CLR_TEXT_LIGHT, mark_x, mark_y, mark_x + 3,
+                        mark_y + 3);
+    mdgui_draw_line_idx(nullptr, CLR_TEXT_LIGHT, mark_x + 3, mark_y, mark_x,
+                        mark_y + 3);
+  }
+}
+
 static bool *find_or_create_collapsing_state(MDGUI_Window &win, const char *id,
                                              bool default_open) {
   const char *key = (id && id[0]) ? id : "__default";
@@ -1151,8 +1201,15 @@ static void draw_open_menu_overlay(MDGUI_Context *ctx) {
         }
       }
       if (mdgui_fonts[1]) {
-        mdgui_fonts[1]->drawText(def.items[i].text.c_str(), nullptr, def.x + 4,
-                                 iy + 1, CLR_MENU_TEXT);
+        bool has_check = false;
+        bool checked = false;
+        const char *label = parse_menu_check_prefix(def.items[i].text.c_str(),
+                                                    &has_check, &checked);
+        const int check_w = has_check ? menu_check_indicator_width() : 0;
+        const int text_x = def.x + 4 + check_w;
+        if (has_check)
+          draw_menu_check_indicator(def.x + 4, iy + 1, checked);
+        mdgui_fonts[1]->drawText(label, nullptr, text_x, iy + 1, CLR_MENU_TEXT);
         if (def.items[i].child_menu_index >= 0) {
           mdgui_fonts[1]->drawText(">", nullptr, def.x + def.w - 8, iy + 1,
                                    CLR_MENU_TEXT);
@@ -1471,8 +1528,15 @@ static void draw_open_main_menu_overlay(MDGUI_Context *ctx) {
         }
       }
       if (mdgui_fonts[1]) {
-        mdgui_fonts[1]->drawText(def.items[i].text.c_str(), nullptr, def.x + 4,
-                                 iy + 1, CLR_MENU_TEXT);
+        bool has_check = false;
+        bool checked = false;
+        const char *label = parse_menu_check_prefix(def.items[i].text.c_str(),
+                                                    &has_check, &checked);
+        const int check_w = has_check ? menu_check_indicator_width() : 0;
+        const int text_x = def.x + 4 + check_w;
+        if (has_check)
+          draw_menu_check_indicator(def.x + 4, iy + 1, checked);
+        mdgui_fonts[1]->drawText(label, nullptr, text_x, iy + 1, CLR_MENU_TEXT);
         if (def.items[i].child_menu_index >= 0) {
           mdgui_fonts[1]->drawText(">", nullptr, def.x + def.w - 8, iy + 1,
                                    CLR_MENU_TEXT);
@@ -3996,9 +4060,14 @@ int mdgui_menu_item(MDGUI_Context *ctx, const char *text) {
       (win.z == ctx->z_counter) || !win.open_menu_path.empty();
   const int menu_idx = ctx->menu_build_stack.back();
   auto &def = ctx->menu_defs[menu_idx];
+  bool has_check = false;
+  bool checked = false;
+  const char *label = parse_menu_check_prefix(text, &has_check, &checked);
+  (void)checked;
+  const int check_w = has_check ? menu_check_indicator_width() : 0;
   const int item_text_w =
-      mdgui_fonts[1] ? mdgui_fonts[1]->measureTextWidth(text) : 40;
-  const int item_needed_w = item_text_w + 12;
+      mdgui_fonts[1] ? mdgui_fonts[1]->measureTextWidth(label) : 40;
+  const int item_needed_w = item_text_w + 12 + check_w;
   if (item_needed_w > def.w) {
     def.w = item_needed_w;
     reposition_child_menu_chain(ctx->menu_defs, menu_idx, ctx->current_menu_h);
@@ -4042,10 +4111,15 @@ int mdgui_begin_submenu(MDGUI_Context *ctx, const char *text) {
       (win.z == ctx->z_counter) || !win.open_menu_path.empty();
   const int parent_menu_index = ctx->menu_build_stack.back();
   auto &parent = ctx->menu_defs[parent_menu_index];
+  bool has_check = false;
+  bool checked = false;
+  const char *label = parse_menu_check_prefix(text, &has_check, &checked);
+  (void)checked;
+  const int check_w = has_check ? menu_check_indicator_width() : 0;
   const int item_h = ctx->current_menu_h;
   const int item_text_w =
-      mdgui_fonts[1] ? mdgui_fonts[1]->measureTextWidth(text) : 40;
-  const int item_needed_w = item_text_w + 20;
+      mdgui_fonts[1] ? mdgui_fonts[1]->measureTextWidth(label) : 40;
+  const int item_needed_w = item_text_w + 20 + check_w;
   if (item_needed_w > parent.w) {
     parent.w = item_needed_w;
     reposition_child_menu_chain(ctx->menu_defs, parent_menu_index, item_h);
@@ -4226,11 +4300,16 @@ int mdgui_main_menu_item(MDGUI_Context *ctx, const char *text) {
   if (!ctx || !ctx->in_main_menu || !text || ctx->main_menu_build_stack.empty())
     return 0;
 
+  bool has_check = false;
+  bool checked = false;
+  const char *label = parse_menu_check_prefix(text, &has_check, &checked);
+  (void)checked;
+  const int check_w = has_check ? menu_check_indicator_width() : 0;
   const int menu_idx = ctx->main_menu_build_stack.back();
   auto &def = ctx->main_menu_defs[menu_idx];
   const int item_text_w =
-      mdgui_fonts[1] ? mdgui_fonts[1]->measureTextWidth(text) : 40;
-  const int item_needed_w = item_text_w + 12;
+      mdgui_fonts[1] ? mdgui_fonts[1]->measureTextWidth(label) : 40;
+  const int item_needed_w = item_text_w + 12 + check_w;
   if (item_needed_w > def.w) {
     def.w = item_needed_w;
     reposition_child_menu_chain(ctx->main_menu_defs, menu_idx,
@@ -4270,12 +4349,17 @@ void mdgui_main_menu_separator(MDGUI_Context *ctx) {
 int mdgui_begin_main_submenu(MDGUI_Context *ctx, const char *text) {
   if (!ctx || !ctx->in_main_menu || !text || ctx->main_menu_build_stack.empty())
     return 0;
+  bool has_check = false;
+  bool checked = false;
+  const char *label = parse_menu_check_prefix(text, &has_check, &checked);
+  (void)checked;
+  const int check_w = has_check ? menu_check_indicator_width() : 0;
   const int parent_menu_index = ctx->main_menu_build_stack.back();
   auto &parent = ctx->main_menu_defs[parent_menu_index];
   const int item_h = ctx->current_menu_h;
   const int item_text_w =
-      mdgui_fonts[1] ? mdgui_fonts[1]->measureTextWidth(text) : 40;
-  const int item_needed_w = item_text_w + 20;
+      mdgui_fonts[1] ? mdgui_fonts[1]->measureTextWidth(label) : 40;
+  const int item_needed_w = item_text_w + 20 + check_w;
   if (item_needed_w > parent.w) {
     parent.w = item_needed_w;
     reposition_child_menu_chain(ctx->main_menu_defs, parent_menu_index, item_h);
@@ -5323,18 +5407,23 @@ void mdgui_show_demo_window(MDGUI_Context *ctx) {
 
     if (mdgui_collapsing_header(ctx, "demo.widgets", "Aesthetics & Widgets", 10,
                                 5, -16, 1)) {
+      mdgui_push_indent(ctx, 8);
       mdgui_checkbox(ctx, "Enable Sound", &check1, 10, 5);
       mdgui_checkbox(ctx, "Turbo Mode", &check2, 10, 5);
+      mdgui_pop_indent(ctx);
     }
 
     if (mdgui_collapsing_header(ctx, "demo.volumes", "Audio Volumes", 10, 4,
                                 -16, 1)) {
+      mdgui_push_indent(ctx, 8);
       mdgui_slider(ctx, "Master", &vol1, 0.0f, 1.0f, 10, 5, -54);
       mdgui_slider(ctx, "Music", &vol2, 0.0f, 1.0f, 10, 5, -46);
+      mdgui_pop_indent(ctx);
     }
 
     if (mdgui_collapsing_header(ctx, "demo.renderer", "Renderer Options", 10, 4,
                                 -16, 1)) {
+      mdgui_push_indent(ctx, 8);
       mdgui_listbox(ctx, quality_items, 3, &quality_idx, 10, 3, -16, 3);
 
       mdgui_label(ctx, "Filter Combo", 10, 5);
@@ -5353,6 +5442,7 @@ void mdgui_show_demo_window(MDGUI_Context *ctx) {
         if (progress > 1.0f)
           progress = 0.0f;
       }
+      mdgui_pop_indent(ctx);
     }
 
     // Reserve footer space, but only
