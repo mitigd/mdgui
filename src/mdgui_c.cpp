@@ -174,6 +174,7 @@ struct MDGUI_Context {
   struct LayoutStyle {
     int spacing_x;
     int spacing_y;
+    int section_spacing_y;
     int indent_step;
     int label_h;
     int content_pad_x;
@@ -1638,6 +1639,7 @@ MDGUI_Context *mdgui_create_with_backend(const MDGUI_RenderBackend *backend) {
   ctx->content_req_bottom = 0;
   ctx->style.spacing_x = 6;
   ctx->style.spacing_y = 4;
+  ctx->style.section_spacing_y = 6;
   ctx->style.indent_step = 8;
   ctx->style.label_h = 12;
   ctx->style.content_pad_x = 8;
@@ -2965,7 +2967,11 @@ int mdgui_collapsing_header(MDGUI_Context *ctx, const char *id,
 
   int local_x = 0;
   int logical_y = 0;
+  const bool had_prior_item = ctx->layout_has_last_item;
   layout_prepare_widget(ctx, &local_x, &logical_y);
+  const int section_top_gap =
+      had_prior_item ? std::max(0, ctx->style.section_spacing_y) : 0;
+  const int header_logical_y = logical_y + section_top_gap;
   w = layout_resolve_width(ctx, local_x, w, 24);
   const int text_w =
       mdgui_fonts[1] ? mdgui_fonts[1]->measureTextWidth(text) : 0;
@@ -2973,7 +2979,7 @@ int mdgui_collapsing_header(MDGUI_Context *ctx, const char *id,
   if (w < needed_w)
     w = needed_w;
   const int ix = ctx->origin_x + local_x;
-  const int iy = logical_y - win.text_scroll;
+  const int iy = header_logical_y - win.text_scroll;
   const int row_h = 12;
   const int topmost = is_current_window_topmost(ctx);
   const int hovered =
@@ -2999,9 +3005,10 @@ int mdgui_collapsing_header(MDGUI_Context *ctx, const char *id,
 
   const int text_right = ix + 12 + text_w;
   int right_needed = std::max(ix + w, text_right);
-  note_content_bounds(ctx, right_needed, logical_y + row_h);
-  layout_commit_widget(ctx, local_x, logical_y, w, row_h,
-                       2 + (*open ? 2 : 0));
+  note_content_bounds(ctx, right_needed, header_logical_y + row_h);
+  const int after_gap = *open ? 4 : std::max(4, ctx->style.spacing_y);
+  layout_commit_widget(ctx, local_x, logical_y, w, section_top_gap + row_h,
+                       after_gap);
   return *open ? 1 : 0;
 }
 
@@ -3107,13 +3114,15 @@ int mdgui_combo(MDGUI_Context *ctx, const char *label, const char **items,
   int logical_y = 0;
   layout_prepare_widget(ctx, &local_x, &logical_y);
   w = layout_resolve_width(ctx, local_x, w, 40);
+  const int label_h = (label && mdgui_fonts[1]) ? ctx->style.label_h : 0;
+  const int box_logical_y = logical_y + label_h;
   if (*selected < 0)
     *selected = 0;
   if (*selected >= item_count)
     *selected = item_count - 1;
 
   const int ix = ctx->origin_x + local_x;
-  const int iy = logical_y - win.text_scroll;
+  const int iy = box_logical_y - win.text_scroll;
   const int combo_id = ((ix & 0xffff) << 16) ^ (iy & 0xffff) ^ (w << 2);
   const int open = (win.open_combo_id == combo_id);
 
@@ -3132,7 +3141,8 @@ int mdgui_combo(MDGUI_Context *ctx, const char *label, const char **items,
     mdgui_fonts[1]->drawText("v", nullptr, ix + w - 9, iy + 2, CLR_MENU_TEXT);
   }
   if (label && mdgui_fonts[1]) {
-    mdgui_fonts[1]->drawText(label, nullptr, ix, iy - 10, CLR_TEXT_LIGHT);
+    mdgui_fonts[1]->drawText(label, nullptr, ix, logical_y - win.text_scroll,
+                             CLR_TEXT_LIGHT);
   }
 
   const int hovered =
@@ -3173,7 +3183,7 @@ int mdgui_combo(MDGUI_Context *ctx, const char *label, const char **items,
                                       // selection click
       }
     }
-    note_content_bounds(ctx, ix + w, logical_y + box_h + popup_h);
+    note_content_bounds(ctx, ix + w, box_logical_y + box_h + popup_h);
     ctx->combo_overlay_pending = true;
     ctx->combo_overlay_window = ctx->current_window;
     ctx->combo_overlay_x = ix;
@@ -3185,8 +3195,8 @@ int mdgui_combo(MDGUI_Context *ctx, const char *label, const char **items,
     ctx->combo_overlay_items = items;
   }
 
-  note_content_bounds(ctx, ix + w, logical_y + box_h);
-  layout_commit_widget(ctx, local_x, logical_y, w, box_h,
+  note_content_bounds(ctx, ix + w, box_logical_y + box_h);
+  layout_commit_widget(ctx, local_x, logical_y, w, label_h + box_h,
                        ctx->style.spacing_y);
   return changed;
 }
