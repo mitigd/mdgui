@@ -187,6 +187,13 @@ void mdgui_set_window_min_size(MDGUI_Context *ctx, const char *title, int min_w,
                                int min_h);
 void mdgui_get_window_min_size(MDGUI_Context *ctx, const char *title,
                                int *min_w, int *min_h);
+void mdgui_set_window_min_size_percent(MDGUI_Context *ctx, const char *title,
+                                       float min_w_percent,
+                                       float min_h_percent);
+// Returns 1 when percent mode is active for this window title, otherwise 0.
+int mdgui_get_window_min_size_percent(MDGUI_Context *ctx, const char *title,
+                                      float *min_w_percent,
+                                      float *min_h_percent);
 void mdgui_set_window_alpha(MDGUI_Context *ctx, const char *title,
                             unsigned char alpha);
 unsigned char mdgui_get_window_alpha(MDGUI_Context *ctx, const char *title);

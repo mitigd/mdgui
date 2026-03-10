@@ -56,6 +56,9 @@ struct MDGUI_Window {
   int min_h;
   int user_min_w;
   int user_min_h;
+  bool user_min_from_percent;
+  float user_min_w_percent;
+  float user_min_h_percent;
   int open_combo_id;
   std::vector<int> open_menu_path;
   int text_scroll;
@@ -85,6 +88,9 @@ struct PendingWindowMinSize {
   std::string title;
   int min_w;
   int min_h;
+  bool use_percent;
+  float min_w_percent;
+  float min_h_percent;
 };
 
 struct PendingWindowScrollbarVisibility {
@@ -531,6 +537,22 @@ static int normalize_window_min_w(int min_w) { return (min_w < 50) ? 50 : min_w;
 
 static int normalize_window_min_h(int min_h) { return (min_h < 30) ? 30 : min_h; }
 
+static float normalize_window_min_percent(float percent) {
+  if (percent < 0.0f)
+    return 0.0f;
+  if (percent > 100.0f)
+    return 100.0f;
+  return percent;
+}
+
+static int min_from_percent(int total, float percent, int floor_px) {
+  if (total < 1)
+    total = 1;
+  const float p = normalize_window_min_percent(percent);
+  const int px = (int)std::lround(((double)total * (double)p) / 100.0);
+  return (px < floor_px) ? floor_px : px;
+}
+
 static void set_pending_tile_excluded_title(MDGUI_Context *ctx,
                                             const char *title, bool excluded) {
   if (!ctx || !title)
@@ -556,6 +578,15 @@ static bool get_pending_window_min_size(const MDGUI_Context *ctx,
   for (const auto &it : ctx->pending_window_min_sizes) {
     if (it.title != title)
       continue;
+    if (it.use_percent) {
+      if (out_min_w)
+        *out_min_w = min_from_percent(get_logical_render_w(const_cast<MDGUI_Context *>(ctx)),
+                                      it.min_w_percent, 50);
+      if (out_min_h)
+        *out_min_h = min_from_percent(get_logical_render_h(const_cast<MDGUI_Context *>(ctx)),
+                                      it.min_h_percent, 30);
+      return true;
+    }
     if (out_min_w)
       *out_min_w = it.min_w;
     if (out_min_h)
@@ -576,9 +607,56 @@ static void set_pending_window_min_size(MDGUI_Context *ctx, const char *title,
       continue;
     it.min_w = nw;
     it.min_h = nh;
+    it.use_percent = false;
+    it.min_w_percent = 0.0f;
+    it.min_h_percent = 0.0f;
     return;
   }
-  ctx->pending_window_min_sizes.push_back({title, nw, nh});
+  ctx->pending_window_min_sizes.push_back({title, nw, nh, false, 0.0f, 0.0f});
+}
+
+static void set_pending_window_min_size_percent(MDGUI_Context *ctx,
+                                                const char *title,
+                                                float min_w_percent,
+                                                float min_h_percent) {
+  if (!ctx || !title)
+    return;
+  const float wp = normalize_window_min_percent(min_w_percent);
+  const float hp = normalize_window_min_percent(min_h_percent);
+  for (auto &it : ctx->pending_window_min_sizes) {
+    if (it.title != title)
+      continue;
+    it.use_percent = true;
+    it.min_w_percent = wp;
+    it.min_h_percent = hp;
+    it.min_w = min_from_percent(get_logical_render_w(ctx), wp, 50);
+    it.min_h = min_from_percent(get_logical_render_h(ctx), hp, 30);
+    return;
+  }
+  ctx->pending_window_min_sizes.push_back(
+      {title,
+       min_from_percent(get_logical_render_w(ctx), wp, 50),
+       min_from_percent(get_logical_render_h(ctx), hp, 30), true, wp, hp});
+}
+
+static bool get_pending_window_min_size_percent(const MDGUI_Context *ctx,
+                                                const char *title,
+                                                float *out_min_w_percent,
+                                                float *out_min_h_percent) {
+  if (!ctx || !title)
+    return false;
+  for (const auto &it : ctx->pending_window_min_sizes) {
+    if (it.title != title)
+      continue;
+    if (!it.use_percent)
+      return false;
+    if (out_min_w_percent)
+      *out_min_w_percent = it.min_w_percent;
+    if (out_min_h_percent)
+      *out_min_h_percent = it.min_h_percent;
+    return true;
+  }
+  return false;
 }
 
 static bool get_pending_window_scrollbar_visibility(const MDGUI_Context *ctx,
@@ -1225,6 +1303,9 @@ static int find_or_create_window(MDGUI_Context *ctx, const char *title, int x,
   nw.min_h = 30;
   nw.user_min_w = 50;
   nw.user_min_h = 30;
+  nw.user_min_from_percent = false;
+  nw.user_min_w_percent = 0.0f;
+  nw.user_min_h_percent = 0.0f;
   nw.open_combo_id = -1;
   nw.text_scroll = 0;
   nw.text_scroll_dragging = false;
@@ -1244,6 +1325,12 @@ static int find_or_create_window(MDGUI_Context *ctx, const char *title, int x,
     nw.user_min_h = pending_min_h;
     nw.min_w = pending_min_w;
     nw.min_h = pending_min_h;
+    float wp = 0.0f, hp = 0.0f;
+    if (get_pending_window_min_size_percent(ctx, key, &wp, &hp)) {
+      nw.user_min_from_percent = true;
+      nw.user_min_w_percent = wp;
+      nw.user_min_h_percent = hp;
+    }
   }
   bool pending_scrollbar_visible = true;
   if (get_pending_window_scrollbar_visibility(ctx, key,
@@ -1412,6 +1499,18 @@ static void clamp_window_to_work_area(MDGUI_Context *ctx, MDGUI_Window &win) {
     win.y = top;
   if (win.y > max_y)
     win.y = max_y;
+}
+
+static void apply_window_user_min_size(MDGUI_Context *ctx, MDGUI_Window &win) {
+  if (!ctx)
+    return;
+  if (win.user_min_from_percent) {
+    win.user_min_w =
+        min_from_percent(get_logical_render_w(ctx), win.user_min_w_percent, 50);
+    win.user_min_h =
+        min_from_percent(get_logical_render_h(ctx), win.user_min_h_percent, 30);
+  }
+  apply_window_user_min_size(ctx, win);
 }
 
 static void draw_status_bar(MDGUI_Context *ctx) {
@@ -4942,6 +5041,9 @@ void mdgui_set_window_min_size(MDGUI_Context *ctx, const char *title, int min_w,
     auto &win = ctx->windows[i];
     if (win.id != title)
       continue;
+    win.user_min_from_percent = false;
+    win.user_min_w_percent = 0.0f;
+    win.user_min_h_percent = 0.0f;
     win.user_min_w = nw;
     win.user_min_h = nh;
     win.min_w = nw;
@@ -4970,9 +5072,15 @@ void mdgui_get_window_min_size(MDGUI_Context *ctx, const char *title, int *min_w
     return;
 
   for (int i = 0; i < (int)ctx->windows.size(); ++i) {
-    const auto &win = ctx->windows[i];
+    auto &win = ctx->windows[i];
     if (win.id != title)
       continue;
+    if (win.user_min_from_percent) {
+      win.user_min_w =
+          min_from_percent(get_logical_render_w(ctx), win.user_min_w_percent, 50);
+      win.user_min_h =
+          min_from_percent(get_logical_render_h(ctx), win.user_min_h_percent, 30);
+    }
     if (min_w)
       *min_w = win.user_min_w;
     if (min_h)
@@ -4987,6 +5095,70 @@ void mdgui_get_window_min_size(MDGUI_Context *ctx, const char *title, int *min_w
     if (min_h)
       *min_h = pending_h;
   }
+}
+
+void mdgui_set_window_min_size_percent(MDGUI_Context *ctx, const char *title,
+                                       float min_w_percent,
+                                       float min_h_percent) {
+  if (!ctx || !title)
+    return;
+  const float wp = normalize_window_min_percent(min_w_percent);
+  const float hp = normalize_window_min_percent(min_h_percent);
+  set_pending_window_min_size_percent(ctx, title, wp, hp);
+  for (int i = 0; i < (int)ctx->windows.size(); ++i) {
+    auto &win = ctx->windows[i];
+    if (win.id != title)
+      continue;
+    win.user_min_from_percent = true;
+    win.user_min_w_percent = wp;
+    win.user_min_h_percent = hp;
+    apply_window_user_min_size(ctx, win);
+    if (win.w < win.min_w)
+      win.w = win.min_w;
+    if (win.h < win.min_h)
+      win.h = win.min_h;
+    if (win.restored_w < win.min_w)
+      win.restored_w = win.min_w;
+    if (win.restored_h < win.min_h)
+      win.restored_h = win.min_h;
+    if (ctx->tile_manager_enabled)
+      tile_windows_internal(ctx);
+    return;
+  }
+}
+
+int mdgui_get_window_min_size_percent(MDGUI_Context *ctx, const char *title,
+                                      float *min_w_percent,
+                                      float *min_h_percent) {
+  if (min_w_percent)
+    *min_w_percent = 0.0f;
+  if (min_h_percent)
+    *min_h_percent = 0.0f;
+  if (!ctx || !title)
+    return 0;
+
+  for (int i = 0; i < (int)ctx->windows.size(); ++i) {
+    const auto &win = ctx->windows[i];
+    if (win.id != title)
+      continue;
+    if (!win.user_min_from_percent)
+      return 0;
+    if (min_w_percent)
+      *min_w_percent = win.user_min_w_percent;
+    if (min_h_percent)
+      *min_h_percent = win.user_min_h_percent;
+    return 1;
+  }
+
+  float pending_w = 0.0f, pending_h = 0.0f;
+  if (get_pending_window_min_size_percent(ctx, title, &pending_w, &pending_h)) {
+    if (min_w_percent)
+      *min_w_percent = pending_w;
+    if (min_h_percent)
+      *min_h_percent = pending_h;
+    return 1;
+  }
+  return 0;
 }
 
 void mdgui_set_windows_locked(MDGUI_Context *ctx, int locked) {
