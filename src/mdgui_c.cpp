@@ -173,6 +173,13 @@ struct MDGUI_Context {
   int button_row_param_y;
   int button_row_anchor_y;
   int button_row_bottom_y;
+  int button_row_first_x;
+  int button_row_next_x;
+  int button_row_last_input_x;
+  int button_row_last_w;
+  int button_row_hgap;
+  int button_row_flow_logical_y;
+  bool button_row_flow_mode;
   bool window_has_nonlabel_widget;
   bool windows_locked;
   bool tile_manager_enabled;
@@ -292,6 +299,8 @@ static int resolve_dynamic_width(MDGUI_Context *ctx, int local_x, int w,
     int adjusted = avail + w;
     return (adjusted < min_w) ? min_w : adjusted;
   }
+  if (w > avail)
+    return avail;
   return w;
 }
 
@@ -2066,6 +2075,13 @@ int mdgui_begin_window_ex(MDGUI_Context *ctx, const char *title, int x, int y,
   ctx->button_row_param_y = 0;
   ctx->button_row_anchor_y = ctx->content_y;
   ctx->button_row_bottom_y = ctx->content_y;
+  ctx->button_row_first_x = 0;
+  ctx->button_row_next_x = 0;
+  ctx->button_row_last_input_x = 0;
+  ctx->button_row_last_w = 0;
+  ctx->button_row_hgap = 6;
+  ctx->button_row_flow_logical_y = ctx->content_y;
+  ctx->button_row_flow_mode = false;
   ctx->window_has_nonlabel_widget = false;
   note_content_bounds(ctx, win.x + chrome_min_w, win.y + title_h + 2);
 
@@ -2306,12 +2322,20 @@ int mdgui_button(MDGUI_Context *ctx, const char *text, int x, int y, int w,
   const auto &win = ctx->windows[ctx->current_window];
 
   const int topmost = is_current_window_topmost(ctx);
-  w = resolve_dynamic_width(ctx, x, w, 12);
-  if (text && mdgui_fonts[1]) {
-    int tw = mdgui_fonts[1]->measureTextWidth(text) + 8;
-    if (w < tw)
-      w = tw;
-  }
+  const int requested_w = w;
+  const int text_min_w =
+      (text && mdgui_fonts[1]) ? (mdgui_fonts[1]->measureTextWidth(text) + 8)
+                               : 0;
+  auto fit_button_width = [&](int local_x) {
+    int bw = resolve_dynamic_width(ctx, local_x, requested_w, 12);
+    if (text_min_w > bw)
+      bw = text_min_w;
+    const int max_w_here = resolve_dynamic_width(ctx, local_x, 0, 1);
+    if (bw > max_w_here)
+      bw = max_w_here;
+    return bw;
+  };
+
   const bool continue_same_button_row =
       ctx->button_row_active && ctx->button_row_window == ctx->current_window &&
       ctx->button_row_param_y == y && ctx->button_row_bottom_y == ctx->content_y;
@@ -2323,10 +2347,58 @@ int mdgui_button(MDGUI_Context *ctx, const char *text, int x, int y, int w,
     ctx->button_row_param_y = y;
     ctx->button_row_anchor_y = row_anchor_y;
     ctx->button_row_bottom_y = ctx->content_y;
+    ctx->button_row_first_x = x;
+    ctx->button_row_next_x = x;
+    ctx->button_row_last_input_x = x;
+    ctx->button_row_last_w = 0;
+    ctx->button_row_hgap = 6;
+    ctx->button_row_flow_logical_y = row_anchor_y + y;
+    ctx->button_row_flow_mode = false;
   }
 
-  const int abs_x = ctx->origin_x + x;
-  const int logical_y = row_anchor_y + y;
+  const int row_limit_local = resolve_dynamic_width(ctx, 0, 0, 1);
+  int draw_x = x;
+  int logical_y = row_anchor_y + y;
+  if (continue_same_button_row) {
+    if (!ctx->button_row_flow_mode) {
+      const int probe_w = fit_button_width(draw_x);
+      if (draw_x + probe_w > row_limit_local && draw_x > ctx->button_row_first_x) {
+        ctx->button_row_flow_mode = true;
+        ctx->button_row_flow_logical_y = ctx->button_row_bottom_y + y;
+        ctx->button_row_next_x = ctx->button_row_first_x;
+      } else {
+        const int inferred_gap =
+            x - (ctx->button_row_last_input_x + ctx->button_row_last_w);
+        if (inferred_gap >= 0 && inferred_gap <= 32)
+          ctx->button_row_hgap = inferred_gap;
+      }
+    }
+
+    if (ctx->button_row_flow_mode) {
+      draw_x = ctx->button_row_next_x;
+      logical_y = ctx->button_row_flow_logical_y;
+      int probe_w = fit_button_width(draw_x);
+      if (draw_x + probe_w > row_limit_local && draw_x > ctx->button_row_first_x) {
+        draw_x = ctx->button_row_first_x;
+        logical_y = ctx->button_row_bottom_y + y;
+        ctx->button_row_flow_logical_y = logical_y;
+        probe_w = fit_button_width(draw_x);
+      }
+      w = probe_w;
+      ctx->button_row_next_x = draw_x + w + ctx->button_row_hgap;
+      ctx->button_row_flow_logical_y = logical_y;
+    } else {
+      w = fit_button_width(draw_x);
+      ctx->button_row_next_x = draw_x + w + ctx->button_row_hgap;
+    }
+  } else {
+    w = fit_button_width(draw_x);
+    ctx->button_row_next_x = draw_x + w + ctx->button_row_hgap;
+  }
+  ctx->button_row_last_input_x = x;
+  ctx->button_row_last_w = w;
+
+  const int abs_x = ctx->origin_x + draw_x;
   const int abs_y = logical_y - win.text_scroll;
   const int hovered =
       topmost &&
@@ -2351,10 +2423,14 @@ int mdgui_button(MDGUI_Context *ctx, const char *text, int x, int y, int w,
                          abs_x + w);
   }
 
-  if (text && mdgui_fonts[1]) {
+  if (text && mdgui_fonts[1] && w > 2 && h > 2) {
     const int tx = abs_x + (w - mdgui_fonts[1]->measureTextWidth(text)) / 2;
     const int ty = abs_y + (h - 8) / 2;
-    mdgui_fonts[1]->drawText(text, nullptr, tx, ty, CLR_TEXT_LIGHT);
+    if (set_widget_clip_intersect_content(ctx, abs_x + 1, abs_y + 1, w - 2,
+                                          h - 2)) {
+      mdgui_fonts[1]->drawText(text, nullptr, tx, ty, CLR_TEXT_LIGHT);
+    }
+    set_content_clip(ctx);
   }
   note_content_bounds(ctx, abs_x + w, logical_y + h);
   const int bottom_margin = 4;
