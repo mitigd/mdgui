@@ -2796,7 +2796,8 @@ int mdgui_collapsing_header(MDGUI_Context *ctx, const char *id,
                         // resolve_dynamic_width
                         // right gutter reserve
   note_content_bounds(ctx, right_needed, logical_y + row_h);
-  ctx->content_y += std::max(y, top_margin) + row_h + 2;
+  const int bottom_gap = 2 + (*open ? 2 : 0);
+  ctx->content_y += std::max(y, top_margin) + row_h + bottom_gap;
   return *open ? 1 : 0;
 }
 
