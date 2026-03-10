@@ -63,6 +63,7 @@ struct MDGUI_Window {
   bool disallow_maximize;
   int tile_weight;
   int tile_side;
+  bool tile_excluded;
   unsigned char alpha;
   int chrome_min_w;
   int chrome_min_h;
@@ -205,6 +206,7 @@ struct MDGUI_Context {
   int file_browser_scroll;
   bool file_browser_scroll_dragging;
   int file_browser_scroll_drag_offset;
+  std::vector<std::string> pending_tile_excluded_titles;
   int file_browser_last_click_idx;
   Uint64 file_browser_last_click_ticks;
   std::string file_browser_result;
@@ -371,6 +373,34 @@ static int clampi(int v, int lo, int hi) {
   if (v > hi)
     return hi;
   return v;
+}
+
+static bool has_pending_tile_excluded_title(const MDGUI_Context *ctx,
+                                            const char *title) {
+  if (!ctx || !title)
+    return false;
+  for (const auto &it : ctx->pending_tile_excluded_titles) {
+    if (it == title)
+      return true;
+  }
+  return false;
+}
+
+static void set_pending_tile_excluded_title(MDGUI_Context *ctx,
+                                            const char *title, bool excluded) {
+  if (!ctx || !title)
+    return;
+  for (size_t i = 0; i < ctx->pending_tile_excluded_titles.size(); ++i) {
+    if (ctx->pending_tile_excluded_titles[i] != title)
+      continue;
+    if (!excluded) {
+      ctx->pending_tile_excluded_titles.erase(
+          ctx->pending_tile_excluded_titles.begin() + (int)i);
+    }
+    return;
+  }
+  if (excluded)
+    ctx->pending_tile_excluded_titles.push_back(title);
 }
 
 static int normalize_tile_side(int side) {
@@ -813,7 +843,7 @@ static void tile_windows_internal(MDGUI_Context *ctx,
   order.reserve(ctx->windows.size());
   for (int i = 0; i < (int)ctx->windows.size(); ++i) {
     const auto &w = ctx->windows[i];
-    if (w.closed || w.is_maximized || w.disallow_maximize)
+    if (w.closed || w.is_maximized || w.disallow_maximize || w.tile_excluded)
       continue;
     order.push_back(i);
   }
@@ -994,6 +1024,7 @@ static int find_or_create_window(MDGUI_Context *ctx, const char *title, int x,
   nw.disallow_maximize = false;
   nw.tile_weight = 1;
   nw.tile_side = MDGUI_TILE_SIDE_AUTO;
+  nw.tile_excluded = has_pending_tile_excluded_title(ctx, key);
   nw.alpha = ctx->default_window_alpha;
   ctx->windows.push_back(nw);
   if (out_created)
@@ -1732,6 +1763,10 @@ int mdgui_begin_window_ex(MDGUI_Context *ctx, const char *title, int x, int y,
     win.restored_y = win.y;
     win.restored_w = win.w;
     win.restored_h = win.h;
+  }
+
+  if (flags & MDGUI_WINDOW_FLAG_EXCLUDE_FROM_TILING) {
+    win.tile_excluded = true;
   }
 
   if (win.closed)
@@ -4511,6 +4546,34 @@ int mdgui_get_window_tile_side(MDGUI_Context *ctx, const char *title) {
       return normalize_tile_side(w.tile_side);
   }
   return MDGUI_TILE_SIDE_AUTO;
+}
+
+void mdgui_set_window_tile_excluded(MDGUI_Context *ctx, const char *title,
+                                    int excluded) {
+  if (!ctx || !title)
+    return;
+  const bool normalized = (excluded != 0);
+  set_pending_tile_excluded_title(ctx, title, normalized);
+  for (int i = 0; i < (int)ctx->windows.size(); ++i) {
+    auto &w = ctx->windows[i];
+    if (w.id != title)
+      continue;
+    w.tile_excluded = normalized;
+    if (ctx->tile_manager_enabled)
+      tile_windows_internal(ctx);
+    return;
+  }
+}
+
+int mdgui_is_window_tile_excluded(MDGUI_Context *ctx, const char *title) {
+  if (!ctx || !title)
+    return 0;
+  for (int i = 0; i < (int)ctx->windows.size(); ++i) {
+    const auto &w = ctx->windows[i];
+    if (w.id == title)
+      return w.tile_excluded ? 1 : 0;
+  }
+  return 0;
 }
 
 void mdgui_set_window_fullscreen(MDGUI_Context *ctx, const char *title,

@@ -112,6 +112,7 @@ enum {
 enum {
   MDGUI_WINDOW_FLAG_NONE = 0,
   MDGUI_WINDOW_FLAG_CENTER_ON_FIRST_USE = 1 << 0,
+  MDGUI_WINDOW_FLAG_EXCLUDE_FROM_TILING = 1 << 1,
 };
 
 MDGUI_Context *mdgui_create(void *sdl_renderer);
@@ -189,6 +190,9 @@ int mdgui_get_window_tile_weight(MDGUI_Context *ctx, const char *title);
 void mdgui_set_window_tile_side(MDGUI_Context *ctx, const char *title,
                                 int side);
 int mdgui_get_window_tile_side(MDGUI_Context *ctx, const char *title);
+void mdgui_set_window_tile_excluded(MDGUI_Context *ctx, const char *title,
+                                    int excluded);
+int mdgui_is_window_tile_excluded(MDGUI_Context *ctx, const char *title);
 
 void mdgui_begin_menu_bar(MDGUI_Context *ctx);
 int mdgui_begin_menu(MDGUI_Context *ctx, const char *text);
