@@ -87,6 +87,8 @@ struct MDGUI_Context {
     bool parent_window_has_nonlabel_widget;
     unsigned char parent_alpha_mod;
     int parent_content_y_after;
+    int parent_layout_indent;
+    size_t parent_indent_stack_size;
   };
 
   MDGUI_RenderBackend backend;
@@ -180,6 +182,8 @@ struct MDGUI_Context {
   int button_row_hgap;
   int button_row_flow_logical_y;
   bool button_row_flow_mode;
+  int layout_indent;
+  std::vector<int> indent_stack;
   bool window_has_nonlabel_widget;
   bool windows_locked;
   bool tile_manager_enabled;
@@ -288,9 +292,10 @@ static int resolve_dynamic_width(MDGUI_Context *ctx, int local_x, int w,
   if (!ctx || ctx->current_window < 0)
     return (w > 0) ? w : min_w;
   const auto &win = ctx->windows[ctx->current_window];
+  const int effective_local_x = local_x + ctx->layout_indent;
   // Reserve a right gutter so vertical scrollbars never overlap widgets.
   const int right_pad = 14;
-  int avail = (win.x + win.w - right_pad) - (ctx->origin_x + local_x);
+  int avail = (win.x + win.w - right_pad) - (ctx->origin_x + effective_local_x);
   if (avail < min_w)
     avail = min_w;
   if (w == 0)
@@ -1593,6 +1598,8 @@ MDGUI_Context *mdgui_create_with_backend(const MDGUI_RenderBackend *backend) {
   ctx->file_browser_last_click_idx = -1;
   ctx->file_browser_last_click_ticks = 0;
   ctx->file_browser_result.clear();
+  ctx->layout_indent = 0;
+  ctx->indent_stack.clear();
 
   mdgui_set_backend(ctx, backend);
   for (int i = 0; i < 10; i++) {
@@ -2082,6 +2089,8 @@ int mdgui_begin_window_ex(MDGUI_Context *ctx, const char *title, int x, int y,
   ctx->button_row_hgap = 6;
   ctx->button_row_flow_logical_y = ctx->content_y;
   ctx->button_row_flow_mode = false;
+  ctx->layout_indent = 0;
+  ctx->indent_stack.clear();
   ctx->window_has_nonlabel_widget = false;
   note_content_bounds(ctx, win.x + chrome_min_w, win.y + title_h + 2);
 
@@ -2110,6 +2119,10 @@ void mdgui_end_window(MDGUI_Context *ctx) {
         std::max(ctx->content_req_bottom, nested.parent_content_req_bottom);
     ctx->window_has_nonlabel_widget = ctx->window_has_nonlabel_widget ||
                                       nested.parent_window_has_nonlabel_widget;
+    ctx->layout_indent = nested.parent_layout_indent;
+    if (ctx->indent_stack.size() > nested.parent_indent_stack_size) {
+      ctx->indent_stack.resize(nested.parent_indent_stack_size);
+    }
     mdgui_backend_set_alpha_mod(nested.parent_alpha_mod);
     set_content_clip(ctx);
     return;
@@ -2320,6 +2333,7 @@ int mdgui_button(MDGUI_Context *ctx, const char *text, int x, int y, int w,
     return 0;
   ctx->window_has_nonlabel_widget = true;
   const auto &win = ctx->windows[ctx->current_window];
+  const int local_x = x;
 
   const int topmost = is_current_window_topmost(ctx);
   const int requested_w = w;
@@ -2347,9 +2361,9 @@ int mdgui_button(MDGUI_Context *ctx, const char *text, int x, int y, int w,
     ctx->button_row_param_y = y;
     ctx->button_row_anchor_y = row_anchor_y;
     ctx->button_row_bottom_y = ctx->content_y;
-    ctx->button_row_first_x = x;
-    ctx->button_row_next_x = x;
-    ctx->button_row_last_input_x = x;
+    ctx->button_row_first_x = local_x;
+    ctx->button_row_next_x = local_x;
+    ctx->button_row_last_input_x = local_x;
     ctx->button_row_last_w = 0;
     ctx->button_row_hgap = 6;
     ctx->button_row_flow_logical_y = row_anchor_y + y;
@@ -2357,7 +2371,7 @@ int mdgui_button(MDGUI_Context *ctx, const char *text, int x, int y, int w,
   }
 
   const int row_limit_local = resolve_dynamic_width(ctx, 0, 0, 1);
-  int draw_x = x;
+  int draw_x = local_x;
   int logical_y = row_anchor_y + y;
   if (continue_same_button_row) {
     if (!ctx->button_row_flow_mode) {
@@ -2368,7 +2382,7 @@ int mdgui_button(MDGUI_Context *ctx, const char *text, int x, int y, int w,
         ctx->button_row_next_x = ctx->button_row_first_x;
       } else {
         const int inferred_gap =
-            x - (ctx->button_row_last_input_x + ctx->button_row_last_w);
+            local_x - (ctx->button_row_last_input_x + ctx->button_row_last_w);
         if (inferred_gap >= 0 && inferred_gap <= 32)
           ctx->button_row_hgap = inferred_gap;
       }
@@ -2395,10 +2409,10 @@ int mdgui_button(MDGUI_Context *ctx, const char *text, int x, int y, int w,
     w = fit_button_width(draw_x);
     ctx->button_row_next_x = draw_x + w + ctx->button_row_hgap;
   }
-  ctx->button_row_last_input_x = x;
+  ctx->button_row_last_input_x = local_x;
   ctx->button_row_last_w = w;
 
-  const int abs_x = ctx->origin_x + draw_x;
+  const int abs_x = ctx->origin_x + draw_x + ctx->layout_indent;
   const int abs_y = logical_y - win.text_scroll;
   const int hovered =
       topmost &&
@@ -2447,7 +2461,7 @@ void mdgui_label(MDGUI_Context *ctx, const char *text, int x, int y) {
   if (!ctx || !text || !mdgui_fonts[1] || ctx->current_window < 0)
     return;
   const auto &win = ctx->windows[ctx->current_window];
-  const int abs_x = ctx->origin_x + x;
+  const int abs_x = ctx->origin_x + x + ctx->layout_indent;
   const int logical_y = ctx->content_y + y;
   const int abs_y = logical_y - win.text_scroll;
   mdgui_fonts[1]->drawText(text, nullptr, abs_x, abs_y, CLR_TEXT_LIGHT);
@@ -2462,7 +2476,7 @@ void mdgui_label_wrapped(MDGUI_Context *ctx, const char *text, int x, int y,
     return;
   const auto &win = ctx->windows[ctx->current_window];
   const int top_margin = ((y > 0) ? y : 0) + 4;
-  const int abs_x = ctx->origin_x + x;
+  const int abs_x = ctx->origin_x + x + ctx->layout_indent;
   const int logical_y = ctx->content_y + top_margin;
   const int wrap_w = resolve_dynamic_width(ctx, x, w, 20);
   const int margin_l = 2;
@@ -2588,7 +2602,7 @@ int mdgui_checkbox(MDGUI_Context *ctx, const char *text, bool *checked, int x,
     return 0;
   ctx->window_has_nonlabel_widget = true;
   const auto &win = ctx->windows[ctx->current_window];
-  const int ix = ctx->origin_x + x;
+  const int ix = ctx->origin_x + x + ctx->layout_indent;
   const int logical_y = ctx->content_y + y;
   const int iy = logical_y - win.text_scroll;
   const int box_size = 10;
@@ -2637,7 +2651,7 @@ int mdgui_slider(MDGUI_Context *ctx, const char *text, float *val, float min,
   const auto &win = ctx->windows[ctx->current_window];
   const int requested_w = w;
   w = resolve_dynamic_width(ctx, x, w, 24);
-  const int ix = ctx->origin_x + x;
+  const int ix = ctx->origin_x + x + ctx->layout_indent;
   const int top_margin = 10;
   const int logical_y = ctx->content_y + std::max(y, top_margin);
   const int iy = logical_y - win.text_scroll;
@@ -2737,7 +2751,7 @@ int mdgui_collapsing_header(MDGUI_Context *ctx, const char *id,
   const int needed_w = 12 + text_w + 4;
   if (w < needed_w)
     w = needed_w;
-  const int ix = ctx->origin_x + x;
+  const int ix = ctx->origin_x + x + ctx->layout_indent;
   const int top_margin = 2;
   const int logical_y = ctx->content_y + std::max(y, top_margin);
   const int iy = logical_y - win.text_scroll;
@@ -2786,6 +2800,41 @@ int mdgui_collapsing_header(MDGUI_Context *ctx, const char *id,
   return *open ? 1 : 0;
 }
 
+void mdgui_push_indent(MDGUI_Context *ctx, int pixels) {
+  if (!ctx || ctx->current_window < 0)
+    return;
+  if (pixels < 0)
+    pixels = 0;
+  ctx->indent_stack.push_back(pixels);
+  ctx->layout_indent += pixels;
+}
+
+void mdgui_pop_indent(MDGUI_Context *ctx) {
+  if (!ctx || ctx->current_window < 0 || ctx->indent_stack.empty())
+    return;
+  const int pixels = ctx->indent_stack.back();
+  ctx->indent_stack.pop_back();
+  ctx->layout_indent -= pixels;
+  if (ctx->layout_indent < 0)
+    ctx->layout_indent = 0;
+}
+
+int mdgui_begin_collapsing_header_group(MDGUI_Context *ctx, const char *id,
+                                        const char *text, int x, int y, int w,
+                                        int default_open, int child_indent) {
+  const int open = mdgui_collapsing_header(ctx, id, text, x, y, w, default_open);
+  if (open) {
+    if (child_indent <= 0)
+      child_indent = 8;
+    mdgui_push_indent(ctx, child_indent);
+  }
+  return open;
+}
+
+void mdgui_end_collapsing_header_group(MDGUI_Context *ctx) {
+  mdgui_pop_indent(ctx);
+}
+
 void mdgui_separator(MDGUI_Context *ctx, int x, int y, int w) {
   if (!ctx || ctx->current_window < 0)
     return;
@@ -2797,7 +2846,7 @@ void mdgui_separator(MDGUI_Context *ctx, int x, int y, int w) {
   const int bottom_gap = gap - top_gap;
   const int requested_w = w;
   w = resolve_dynamic_width(ctx, x, w, 4);
-  const int ix = ctx->origin_x + x;
+  const int ix = ctx->origin_x + x + ctx->layout_indent;
   const int logical_y = ctx->content_y + top_gap;
   const int iy = logical_y - win.text_scroll;
   mdgui_draw_hline_idx(nullptr, CLR_ACCENT, ix, iy, ix + w);
@@ -2819,7 +2868,7 @@ int mdgui_listbox(MDGUI_Context *ctx, const char **items, int item_count,
   w = resolve_dynamic_width(ctx, x, w, 24);
   const int row_h = 10;
   const int box_h = rows * row_h;
-  const int ix = ctx->origin_x + x;
+  const int ix = ctx->origin_x + x + ctx->layout_indent;
   const int top_margin = 4;
   const int logical_y = ctx->content_y + std::max(y, top_margin);
   const int iy = logical_y - win.text_scroll;
@@ -2882,7 +2931,7 @@ int mdgui_combo(MDGUI_Context *ctx, const char *label, const char **items,
   if (*selected >= item_count)
     *selected = item_count - 1;
 
-  const int ix = ctx->origin_x + x;
+  const int ix = ctx->origin_x + x + ctx->layout_indent;
   const int top_margin = 10;
   const int logical_y = ctx->content_y + std::max(y, top_margin);
   const int iy = logical_y - win.text_scroll;
@@ -2984,13 +3033,13 @@ int mdgui_input_text(MDGUI_Context *ctx, const char *label, char *buffer,
   const int requested_w = w;
   w = resolve_dynamic_width(ctx, x, w, 40);
 
-  const int ix = ctx->origin_x + x;
+  const int ix = ctx->origin_x + x + ctx->layout_indent;
   const int top_margin = 10;
   const int logical_y = ctx->content_y + std::max(y, top_margin);
   const int iy = logical_y - win.text_scroll;
   const uintptr_t buf_addr = (uintptr_t)buffer;
   const int input_id = (int)(((buf_addr >> 3) & 0x7fffffff) ^
-                             ((x & 0xffff) << 16) ^ (y & 0xffff) ^ 0x54455854);
+                             ((ix & 0xffff) << 16) ^ (y & 0xffff) ^ 0x54455854);
   const bool focused = (ctx->active_text_input_window == ctx->current_window &&
                         ctx->active_text_input_id == input_id);
 
@@ -3251,7 +3300,7 @@ int mdgui_input_text_multiline(MDGUI_Context *ctx, const char *label,
   if (h < 24)
     h = 24;
 
-  const int ix = ctx->origin_x + x;
+  const int ix = ctx->origin_x + x + ctx->layout_indent;
   const int top_margin = 10;
   const int logical_y = ctx->content_y + std::max(y, top_margin);
   const int iy = logical_y - win.text_scroll;
@@ -3286,7 +3335,7 @@ int mdgui_input_text_multiline(MDGUI_Context *ctx, const char *label,
 
   const uintptr_t buf_addr = (uintptr_t)buffer;
   const int input_id = (int)(((buf_addr >> 3) & 0x7fffffff) ^
-                             ((x & 0xffff) << 16) ^ (y & 0xffff) ^ 0x4d4c5449);
+                             ((ix & 0xffff) << 16) ^ (y & 0xffff) ^ 0x4d4c5449);
   const bool focused = (ctx->active_text_input_window == ctx->current_window &&
                         ctx->active_text_input_id == input_id);
   if (focused && !ctx->active_text_input_multiline) {
@@ -3673,7 +3722,7 @@ void mdgui_progress_bar(MDGUI_Context *ctx, float value, int x, int y, int w,
   if (value > 1.0f)
     value = 1.0f;
 
-  const int ix = ctx->origin_x + x;
+  const int ix = ctx->origin_x + x + ctx->layout_indent;
   const int top_margin = 4;
   const int logical_y = ctx->content_y + std::max(y, top_margin);
   const int iy = logical_y - win.text_scroll;
@@ -3720,7 +3769,8 @@ void mdgui_frame_time_graph(MDGUI_Context *ctx, const float *frame_ms_samples,
   const int requested_h = h;
   const bool fill_mode = (requested_w == 0 && requested_h == 0);
   if (fill_mode) {
-    int avail_w = (win.x + win.w - 2) - (ctx->origin_x + x);
+    int avail_w =
+        (win.x + win.w - 2) - (ctx->origin_x + x + ctx->layout_indent);
     if (avail_w < 24)
       avail_w = 24;
     w = avail_w;
@@ -3732,7 +3782,7 @@ void mdgui_frame_time_graph(MDGUI_Context *ctx, const float *frame_ms_samples,
   if (graph_max_ms < 1.0f)
     graph_max_ms = 1.0f;
 
-  const int ix = ctx->origin_x + x;
+  const int ix = ctx->origin_x + x + ctx->layout_indent;
   const int top_margin = 4;
   const int logical_y = ctx->content_y + std::max(y, top_margin);
   const int iy = logical_y - win.text_scroll;
@@ -4800,7 +4850,7 @@ int mdgui_begin_render_window_ex(MDGUI_Context *ctx, const char *title, int x,
     auto &parent = ctx->windows[ctx->current_window];
     const int requested_h = h;
     w = resolve_dynamic_width(ctx, x, w, 8);
-    const int ix = ctx->origin_x + x;
+    const int ix = ctx->origin_x + x + ctx->layout_indent;
     const int logical_y = ctx->content_y + y;
     const int iy = logical_y - parent.text_scroll;
 
@@ -4866,6 +4916,8 @@ int mdgui_begin_render_window_ex(MDGUI_Context *ctx, const char *title, int x,
     nested.parent_window_has_nonlabel_widget = ctx->window_has_nonlabel_widget;
     nested.parent_alpha_mod = mdgui_backend_get_alpha_mod();
     nested.parent_content_y_after = logical_y + h + 4;
+    nested.parent_layout_indent = ctx->layout_indent;
+    nested.parent_indent_stack_size = ctx->indent_stack.size();
     ctx->nested_render_stack.push_back(nested);
     const int frame_x1 = ix - 1;
     const int frame_y1 = iy - 1;

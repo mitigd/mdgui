@@ -142,6 +142,12 @@ int mdgui_slider(MDGUI_Context *ctx, const char *text, float *val, float min,
 int mdgui_collapsing_header(MDGUI_Context *ctx, const char *id,
                             const char *text, int x, int y, int w,
                             int default_open);
+int mdgui_begin_collapsing_header_group(MDGUI_Context *ctx, const char *id,
+                                        const char *text, int x, int y, int w,
+                                        int default_open, int child_indent);
+void mdgui_end_collapsing_header_group(MDGUI_Context *ctx);
+void mdgui_push_indent(MDGUI_Context *ctx, int pixels);
+void mdgui_pop_indent(MDGUI_Context *ctx);
 void mdgui_separator(MDGUI_Context *ctx, int x, int y, int w);
 int mdgui_listbox(MDGUI_Context *ctx, const char **items, int item_count,
                   int *selected, int x, int y, int w, int rows);
