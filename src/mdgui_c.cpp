@@ -33,7 +33,9 @@ constexpr int CLR_MSG_BAR = 244;
 constexpr int CLR_ACCENT = 247;
 constexpr int CLR_WINDOW_BORDER = 248;
 constexpr int MENU_POPUP_GAP_Y = 2;
+constexpr int RESERVED_TOP_LEVEL_MENU_SLOTS = 32;
 constexpr int STATUS_BAR_DEFAULT_H = 12;
+constexpr int MAIN_MENU_ITEM_H = 10;
 constexpr int TOAST_DEFAULT_DURATION_MS = 2400;
 constexpr int TOAST_MAX_VISIBLE = 6;
 
@@ -177,6 +179,7 @@ struct MDGUI_Context {
   std::vector<MenuDef> main_menu_defs;
   std::vector<int> main_menu_build_stack;
   std::vector<int> open_main_menu_path;
+  std::vector<int> open_main_menu_item_path;
   int main_menu_bar_x;
   int main_menu_bar_y;
   int main_menu_bar_w;
@@ -1788,7 +1791,12 @@ static void draw_open_main_menu_overlay(MDGUI_Context *ctx) {
   if (ctx->open_main_menu_path.empty())
     return;
 
-  const int item_h = ctx->current_menu_h;
+  // Main-menu popups are an overlay and should not inherit clip or alpha
+  // state from any previously drawn window/content region.
+  mdgui_backend_set_clip_rect(0, 0, 0, 0, 0);
+  mdgui_backend_set_alpha_mod(255);
+
+  const int item_h = MAIN_MENU_ITEM_H;
   for (int depth = 0; depth < (int)ctx->open_main_menu_path.size(); ++depth) {
     const int menu_idx = ctx->open_main_menu_path[depth];
     if (menu_idx < 0 || menu_idx >= (int)ctx->main_menu_defs.size())
@@ -1828,12 +1836,19 @@ static void draw_open_main_menu_overlay(MDGUI_Context *ctx) {
           if ((int)ctx->open_main_menu_path.size() < want_size) {
             ctx->open_main_menu_path.resize((size_t)want_size);
           }
+          if ((int)ctx->open_main_menu_item_path.size() < want_size) {
+            ctx->open_main_menu_item_path.resize((size_t)want_size, -1);
+          }
           ctx->open_main_menu_path[depth + 1] = child_idx;
+          ctx->open_main_menu_item_path[depth + 1] = i;
           ctx->open_main_menu_index = ctx->open_main_menu_path.empty()
                                           ? -1
                                           : ctx->open_main_menu_path[0];
         } else if ((int)ctx->open_main_menu_path.size() > depth + 1) {
           ctx->open_main_menu_path.resize((size_t)depth + 1);
+          if ((int)ctx->open_main_menu_item_path.size() > depth + 1) {
+            ctx->open_main_menu_item_path.resize((size_t)depth + 1);
+          }
           ctx->open_main_menu_index = ctx->open_main_menu_path.empty()
                                           ? -1
                                           : ctx->open_main_menu_path[0];
@@ -1902,6 +1917,7 @@ MDGUI_Context *mdgui_create_with_backend(const MDGUI_RenderBackend *backend) {
   ctx->building_main_menu_index = -1;
   ctx->main_menu_build_stack.clear();
   ctx->open_main_menu_path.clear();
+  ctx->open_main_menu_item_path.clear();
   ctx->main_menu_bar_x = 0;
   ctx->main_menu_bar_y = 0;
   ctx->main_menu_bar_w = 0;
@@ -2155,10 +2171,11 @@ void mdgui_end_frame(MDGUI_Context *ctx) {
                                 ctx->main_menu_bar_x, ctx->main_menu_bar_y,
                                 ctx->main_menu_bar_w, ctx->main_menu_bar_h);
     const bool in_popup = point_in_menu_popup_chain(
-        ctx->main_menu_defs, ctx->open_main_menu_path, ctx->current_menu_h,
+        ctx->main_menu_defs, ctx->open_main_menu_path, MAIN_MENU_ITEM_H,
         ctx->input.mouse_x, ctx->input.mouse_y);
     if (!in_bar && !in_popup) {
       ctx->open_main_menu_path.clear();
+      ctx->open_main_menu_item_path.clear();
       ctx->open_main_menu_index = -1;
     }
   }
@@ -4391,6 +4408,7 @@ void mdgui_begin_menu_bar(MDGUI_Context *ctx) {
   ctx->menu_bar_w = bar_w;
   ctx->menu_bar_h = bar_h;
   ctx->menu_defs.clear();
+  ctx->menu_defs.resize(RESERVED_TOP_LEVEL_MENU_SLOTS);
   ctx->menu_build_stack.clear();
   if (!had_menu_bar) {
     const int content_top = bar_y + bar_h + 2 + ctx->style.content_pad_y;
@@ -4650,6 +4668,7 @@ void mdgui_begin_main_menu_bar(MDGUI_Context *ctx) {
   ctx->in_main_menu = false;
   ctx->building_main_menu_index = -1;
   ctx->main_menu_defs.clear();
+  ctx->main_menu_defs.resize(RESERVED_TOP_LEVEL_MENU_SLOTS);
   ctx->main_menu_build_stack.clear();
 }
 
@@ -4678,16 +4697,21 @@ int mdgui_begin_main_menu(MDGUI_Context *ctx, const char *text) {
   if (!ctx->open_main_menu_path.empty() && hovered) {
     ctx->open_main_menu_path.resize(1);
     ctx->open_main_menu_path[0] = ctx->main_menu_index;
+    ctx->open_main_menu_item_path.resize(1);
+    ctx->open_main_menu_item_path[0] = ctx->main_menu_index;
     ctx->open_main_menu_index = ctx->main_menu_index;
   }
   if (ctx->input.mouse_pressed && hovered) {
     if (ctx->open_main_menu_path.size() == 1 &&
         ctx->open_main_menu_path[0] == ctx->main_menu_index) {
       ctx->open_main_menu_path.clear();
+      ctx->open_main_menu_item_path.clear();
       ctx->open_main_menu_index = -1;
     } else {
       ctx->open_main_menu_path.resize(1);
       ctx->open_main_menu_path[0] = ctx->main_menu_index;
+      ctx->open_main_menu_item_path.resize(1);
+      ctx->open_main_menu_item_path[0] = ctx->main_menu_index;
       ctx->open_main_menu_index = ctx->main_menu_index;
     }
     ctx->input.mouse_pressed = 0;
@@ -4706,6 +4730,11 @@ int mdgui_begin_main_menu(MDGUI_Context *ctx, const char *text) {
   if (open) {
     ctx->in_main_menu = true;
     ctx->building_main_menu_index = ctx->main_menu_index;
+    ctx->current_menu_x = def.x;
+    ctx->current_menu_y = def.y;
+    ctx->current_menu_w = def.w;
+    ctx->current_menu_h = 10;
+    ctx->current_menu_item = 0;
     ctx->main_menu_build_stack.clear();
     ctx->main_menu_build_stack.push_back(ctx->main_menu_index);
   }
@@ -4732,25 +4761,29 @@ int mdgui_main_menu_item(MDGUI_Context *ctx, const char *text) {
   if (item_needed_w > def.w) {
     def.w = item_needed_w;
     reposition_child_menu_chain(ctx->main_menu_defs, menu_idx,
-                                ctx->current_menu_h);
+                                MAIN_MENU_ITEM_H);
   }
   def.items.push_back({text, -1, false});
   const int item_index = (int)def.items.size() - 1;
-  const int item_y = def.y + (item_index * ctx->current_menu_h);
+  const int item_y = def.y + (item_index * MAIN_MENU_ITEM_H);
   const int hovered = point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y,
-                                    def.x, item_y, def.w, ctx->current_menu_h);
+                                    def.x, item_y, def.w, MAIN_MENU_ITEM_H);
   const int submenu_depth = (int)ctx->main_menu_build_stack.size();
   if (hovered &&
       menu_path_prefix_matches(ctx->open_main_menu_path,
                                ctx->main_menu_build_stack) &&
       (int)ctx->open_main_menu_path.size() > submenu_depth) {
     ctx->open_main_menu_path.resize(submenu_depth);
+    if ((int)ctx->open_main_menu_item_path.size() > submenu_depth) {
+      ctx->open_main_menu_item_path.resize(submenu_depth);
+    }
     ctx->open_main_menu_index =
         ctx->open_main_menu_path.empty() ? -1 : ctx->open_main_menu_path[0];
   }
 
   if (hovered && ctx->input.mouse_pressed) {
     ctx->open_main_menu_path.clear();
+    ctx->open_main_menu_item_path.clear();
     ctx->open_main_menu_index = -1;
     ctx->input.mouse_pressed = 0;
     return 1;
@@ -4775,7 +4808,7 @@ int mdgui_begin_main_submenu(MDGUI_Context *ctx, const char *text) {
   const int check_w = has_check ? menu_check_indicator_width() : 0;
   const int parent_menu_index = ctx->main_menu_build_stack.back();
   auto &parent = ctx->main_menu_defs[parent_menu_index];
-  const int item_h = ctx->current_menu_h;
+  const int item_h = MAIN_MENU_ITEM_H;
   const int item_text_w =
       mdgui_fonts[1] ? mdgui_fonts[1]->measureTextWidth(label) : 40;
   const int item_needed_w = item_text_w + 20 + check_w;
@@ -4806,39 +4839,59 @@ int mdgui_begin_main_submenu(MDGUI_Context *ctx, const char *text) {
       point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y, parent_after.x,
                     item_y, parent_after.w, item_h);
   const int submenu_depth = (int)ctx->main_menu_build_stack.size();
+  auto ensure_open_paths_for_item = [&](int child_idx) {
+    if ((int)ctx->open_main_menu_path.size() < submenu_depth + 1) {
+      ctx->open_main_menu_path.resize((size_t)submenu_depth + 1);
+    }
+    for (int i = 0; i < submenu_depth; ++i) {
+      ctx->open_main_menu_path[i] = ctx->main_menu_build_stack[i];
+    }
+    ctx->open_main_menu_path[submenu_depth] = child_idx;
+
+    if ((int)ctx->open_main_menu_item_path.size() < submenu_depth + 1) {
+      ctx->open_main_menu_item_path.resize((size_t)submenu_depth + 1, -1);
+    }
+    for (int i = 0; i < submenu_depth; ++i) {
+      if (i < (int)ctx->open_main_menu_item_path.size() &&
+          ctx->open_main_menu_item_path[i] >= 0) {
+        continue;
+      }
+      ctx->open_main_menu_item_path[i] = ctx->main_menu_build_stack[i];
+    }
+    ctx->open_main_menu_item_path[submenu_depth] = item_index;
+    ctx->open_main_menu_index =
+        ctx->open_main_menu_path.empty() ? -1 : ctx->open_main_menu_path[0];
+  };
+
   const bool was_open =
-      menu_path_prefix_matches(ctx->open_main_menu_path,
+      menu_path_prefix_matches(ctx->open_main_menu_item_path,
                                ctx->main_menu_build_stack) &&
-      (int)ctx->open_main_menu_path.size() > submenu_depth &&
-      ctx->open_main_menu_path[submenu_depth] == child_menu_index;
+      (int)ctx->open_main_menu_item_path.size() > submenu_depth &&
+      ctx->open_main_menu_item_path[submenu_depth] == item_index;
   if (ctx->input.mouse_pressed && hovered) {
-    if (was_open && (int)ctx->open_main_menu_path.size() == submenu_depth + 1) {
+    if (was_open &&
+        (int)ctx->open_main_menu_item_path.size() == submenu_depth + 1) {
       ctx->open_main_menu_path.resize(submenu_depth);
+      if ((int)ctx->open_main_menu_item_path.size() > submenu_depth) {
+        ctx->open_main_menu_item_path.resize(submenu_depth);
+      }
       ctx->open_main_menu_index =
           ctx->open_main_menu_path.empty() ? -1 : ctx->open_main_menu_path[0];
     } else {
-      ctx->open_main_menu_path.resize((size_t)submenu_depth + 1);
-      for (int i = 0; i < submenu_depth; ++i)
-        ctx->open_main_menu_path[i] = ctx->main_menu_build_stack[i];
-      ctx->open_main_menu_path[submenu_depth] = child_menu_index;
-      ctx->open_main_menu_index =
-          ctx->open_main_menu_path.empty() ? -1 : ctx->open_main_menu_path[0];
+      ensure_open_paths_for_item(child_menu_index);
     }
     ctx->input.mouse_pressed = 0;
   } else if (hovered) {
-    ctx->open_main_menu_path.resize((size_t)submenu_depth + 1);
-    for (int i = 0; i < submenu_depth; ++i)
-      ctx->open_main_menu_path[i] = ctx->main_menu_build_stack[i];
-    ctx->open_main_menu_path[submenu_depth] = child_menu_index;
-    ctx->open_main_menu_index =
-        ctx->open_main_menu_path.empty() ? -1 : ctx->open_main_menu_path[0];
+    ensure_open_paths_for_item(child_menu_index);
   }
 
-  const bool open = menu_path_prefix_matches(ctx->open_main_menu_path,
-                                             ctx->main_menu_build_stack) &&
-                    (int)ctx->open_main_menu_path.size() > submenu_depth &&
-                    ctx->open_main_menu_path[submenu_depth] == child_menu_index;
+  const bool open =
+      menu_path_prefix_matches(ctx->open_main_menu_item_path,
+                               ctx->main_menu_build_stack) &&
+      (int)ctx->open_main_menu_item_path.size() > submenu_depth &&
+      ctx->open_main_menu_item_path[submenu_depth] == item_index;
   if (open) {
+    ensure_open_paths_for_item(child_menu_index);
     ctx->main_menu_build_stack.push_back(child_menu_index);
     ctx->building_main_menu_index = child_menu_index;
   }
