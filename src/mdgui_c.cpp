@@ -168,6 +168,11 @@ struct MDGUI_Context {
 
   int content_req_right;
   int content_req_bottom;
+  bool button_row_active;
+  int button_row_window;
+  int button_row_param_y;
+  int button_row_anchor_y;
+  int button_row_bottom_y;
   bool window_has_nonlabel_widget;
   bool windows_locked;
   bool tile_manager_enabled;
@@ -2056,6 +2061,11 @@ int mdgui_begin_window_ex(MDGUI_Context *ctx, const char *title, int x, int y,
   ctx->menu_build_stack.clear();
   ctx->content_req_right = win.x + 6;
   ctx->content_req_bottom = win.y + title_h + 6;
+  ctx->button_row_active = false;
+  ctx->button_row_window = -1;
+  ctx->button_row_param_y = 0;
+  ctx->button_row_anchor_y = ctx->content_y;
+  ctx->button_row_bottom_y = ctx->content_y;
   ctx->window_has_nonlabel_widget = false;
   note_content_bounds(ctx, win.x + chrome_min_w, win.y + title_h + 2);
 
@@ -2302,8 +2312,21 @@ int mdgui_button(MDGUI_Context *ctx, const char *text, int x, int y, int w,
     if (w < tw)
       w = tw;
   }
+  const bool continue_same_button_row =
+      ctx->button_row_active && ctx->button_row_window == ctx->current_window &&
+      ctx->button_row_param_y == y && ctx->button_row_bottom_y == ctx->content_y;
+  const int row_anchor_y =
+      continue_same_button_row ? ctx->button_row_anchor_y : ctx->content_y;
+  if (!continue_same_button_row) {
+    ctx->button_row_active = true;
+    ctx->button_row_window = ctx->current_window;
+    ctx->button_row_param_y = y;
+    ctx->button_row_anchor_y = row_anchor_y;
+    ctx->button_row_bottom_y = ctx->content_y;
+  }
+
   const int abs_x = ctx->origin_x + x;
-  const int logical_y = ctx->content_y + y;
+  const int logical_y = row_anchor_y + y;
   const int abs_y = logical_y - win.text_scroll;
   const int hovered =
       topmost &&
@@ -2334,6 +2357,12 @@ int mdgui_button(MDGUI_Context *ctx, const char *text, int x, int y, int w,
     mdgui_fonts[1]->drawText(text, nullptr, tx, ty, CLR_TEXT_LIGHT);
   }
   note_content_bounds(ctx, abs_x + w, logical_y + h);
+  const int bottom_margin = 4;
+  const int row_bottom = logical_y + h + bottom_margin;
+  if (row_bottom > ctx->button_row_bottom_y)
+    ctx->button_row_bottom_y = row_bottom;
+  if (ctx->button_row_bottom_y > ctx->content_y)
+    ctx->content_y = ctx->button_row_bottom_y;
 
   return hovered && ctx->input.mouse_pressed && win.z == ctx->z_counter;
 }
