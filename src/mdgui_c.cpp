@@ -237,6 +237,40 @@ static void set_content_clip(MDGUI_Context *ctx) {
   mdgui_backend_set_clip_rect(1, win.x + 2, ctx->origin_y, clip_w, clip_h);
 }
 
+// Clips a widget drawing region to the current window content area.
+// Returns false when there is no visible intersection.
+static bool set_widget_clip_intersect_content(MDGUI_Context *ctx, int x, int y,
+                                              int w, int h) {
+  if (!ctx || ctx->current_window < 0 ||
+      ctx->current_window >= (int)ctx->windows.size())
+    return false;
+
+  const auto &win = ctx->windows[ctx->current_window];
+  const int content_x1 = win.x + 2;
+  const int content_y1 = ctx->origin_y;
+  int content_x2 = content_x1 + (win.w - 4);
+  int content_y2 = content_y1 + ((win.y + win.h - 4) - ctx->origin_y);
+
+  const int widget_x1 = x;
+  const int widget_y1 = y;
+  const int widget_x2 = x + w;
+  const int widget_y2 = y + h;
+
+  const int clip_x1 = std::max(content_x1, widget_x1);
+  const int clip_y1 = std::max(content_y1, widget_y1);
+  content_x2 = std::max(content_x1, content_x2);
+  content_y2 = std::max(content_y1, content_y2);
+  const int clip_x2 = std::min(content_x2, widget_x2);
+  const int clip_y2 = std::min(content_y2, widget_y2);
+
+  if (clip_x2 <= clip_x1 || clip_y2 <= clip_y1)
+    return false;
+
+  mdgui_backend_set_clip_rect(1, clip_x1, clip_y1, clip_x2 - clip_x1,
+                              clip_y2 - clip_y1);
+  return true;
+}
+
 static int resolve_dynamic_width(MDGUI_Context *ctx, int local_x, int w,
                                  int min_w = 1) {
   if (!ctx || ctx->current_window < 0)
@@ -3049,31 +3083,34 @@ int mdgui_input_text(MDGUI_Context *ctx, const char *label, char *buffer,
     if (cursor_text_x > view_w - 2)
       scroll_px = cursor_text_x - (view_w - 2);
 
-    mdgui_backend_set_clip_rect(1, ix + 1, iy + 1, std::max(1, w - 2),
-                                std::max(1, box_h - 2));
-    if (active &&
-        ctx->active_text_input_sel_end > ctx->active_text_input_sel_start) {
-      std::string sel_prefix(buffer, (size_t)ctx->active_text_input_sel_start);
-      std::string sel_text(buffer + ctx->active_text_input_sel_start,
-                           (size_t)(ctx->active_text_input_sel_end -
-                                    ctx->active_text_input_sel_start));
-      const int sel_x0 = text_x +
-                         mdgui_fonts[1]->measureTextWidth(sel_prefix.c_str()) -
-                         scroll_px;
-      const int sel_w = mdgui_fonts[1]->measureTextWidth(sel_text.c_str());
-      if (sel_w > 0)
-        mdgui_fill_rect_idx(nullptr, CLR_ACCENT, sel_x0, iy + 1, sel_w,
-                            box_h - 2);
-    }
-    mdgui_fonts[1]->drawText(buffer, nullptr, text_x - scroll_px, text_y,
-                             CLR_MENU_TEXT);
+    if (set_widget_clip_intersect_content(ctx, ix + 1, iy + 1,
+                                          std::max(1, w - 2),
+                                          std::max(1, box_h - 2))) {
+      if (active &&
+          ctx->active_text_input_sel_end > ctx->active_text_input_sel_start) {
+        std::string sel_prefix(buffer,
+                               (size_t)ctx->active_text_input_sel_start);
+        std::string sel_text(buffer + ctx->active_text_input_sel_start,
+                             (size_t)(ctx->active_text_input_sel_end -
+                                      ctx->active_text_input_sel_start));
+        const int sel_x0 =
+            text_x + mdgui_fonts[1]->measureTextWidth(sel_prefix.c_str()) -
+            scroll_px;
+        const int sel_w = mdgui_fonts[1]->measureTextWidth(sel_text.c_str());
+        if (sel_w > 0)
+          mdgui_fill_rect_idx(nullptr, CLR_ACCENT, sel_x0, iy + 1, sel_w,
+                              box_h - 2);
+      }
+      mdgui_fonts[1]->drawText(buffer, nullptr, text_x - scroll_px, text_y,
+                               CLR_MENU_TEXT);
 
-    if (active) {
-      const unsigned long long ticks = mdgui_backend_get_ticks_ms();
-      if (((ticks / 500ull) % 2ull) == 0ull) {
-        const int cx = text_x + cursor_text_x - scroll_px;
-        mdgui_draw_vline_idx(nullptr, CLR_MENU_TEXT, cx, iy + 2,
-                             iy + box_h - 2);
+      if (active) {
+        const unsigned long long ticks = mdgui_backend_get_ticks_ms();
+        if (((ticks / 500ull) % 2ull) == 0ull) {
+          const int cx = text_x + cursor_text_x - scroll_px;
+          mdgui_draw_vline_idx(nullptr, CLR_MENU_TEXT, cx, iy + 2,
+                               iy + box_h - 2);
+        }
       }
     }
     set_content_clip(ctx);
@@ -3437,58 +3474,62 @@ int mdgui_input_text_multiline(MDGUI_Context *ctx, const char *label,
     const int text_y = iy + 2;
     const int scroll_y = active ? ctx->active_text_input_scroll_y : 0;
 
-    mdgui_backend_set_clip_rect(1, ix + 1, iy + 1, std::max(1, w - 2),
-                                std::max(1, h - 2));
+    if (set_widget_clip_intersect_content(ctx, ix + 1, iy + 1,
+                                          std::max(1, w - 2),
+                                          std::max(1, h - 2))) {
+      const int lc = (int)line_starts.size();
+      const int sel_start =
+          active ? std::min(ctx->active_text_input_sel_start,
+                            ctx->active_text_input_sel_end)
+                 : 0;
+      const int sel_end =
+          active ? std::max(ctx->active_text_input_sel_start,
+                            ctx->active_text_input_sel_end)
+                 : 0;
+      for (int li = 0; li < lc; ++li) {
+        int ls = line_starts[li];
+        int le = (li + 1 < lc) ? (line_starts[li + 1] - 1) : len;
+        const int ly = text_y + li * line_h - scroll_y;
+        if (ly + line_h < iy + 1 || ly > iy + h - 2)
+          continue;
 
-    const int lc = (int)line_starts.size();
-    const int sel_start = active ? std::min(ctx->active_text_input_sel_start,
-                                            ctx->active_text_input_sel_end)
-                                 : 0;
-    const int sel_end = active ? std::max(ctx->active_text_input_sel_start,
-                                          ctx->active_text_input_sel_end)
-                               : 0;
-    for (int li = 0; li < lc; ++li) {
-      int ls = line_starts[li];
-      int le = (li + 1 < lc) ? (line_starts[li + 1] - 1) : len;
-      const int ly = text_y + li * line_h - scroll_y;
-      if (ly + line_h < iy + 1 || ly > iy + h - 2)
-        continue;
-
-      if (active && sel_end > sel_start) {
-        const int s0 = std::max(sel_start, ls);
-        const int s1 = std::min(sel_end, le);
-        if (s1 > s0) {
-          std::string left(buffer + ls, (size_t)(s0 - ls));
-          std::string mid(buffer + s0, (size_t)(s1 - s0));
-          const int sx =
-              text_x + mdgui_fonts[1]->measureTextWidth(left.c_str());
-          const int sw = mdgui_fonts[1]->measureTextWidth(mid.c_str());
-          if (sw > 0)
-            mdgui_fill_rect_idx(nullptr, CLR_ACCENT, sx, ly, sw, line_h - 1);
+        if (active && sel_end > sel_start) {
+          const int s0 = std::max(sel_start, ls);
+          const int s1 = std::min(sel_end, le);
+          if (s1 > s0) {
+            std::string left(buffer + ls, (size_t)(s0 - ls));
+            std::string mid(buffer + s0, (size_t)(s1 - s0));
+            const int sx =
+                text_x + mdgui_fonts[1]->measureTextWidth(left.c_str());
+            const int sw = mdgui_fonts[1]->measureTextWidth(mid.c_str());
+            if (sw > 0)
+              mdgui_fill_rect_idx(nullptr, CLR_ACCENT, sx, ly, sw, line_h - 1);
+          }
         }
+
+        std::string line_text(buffer + ls, (size_t)(le - ls));
+        mdgui_fonts[1]->drawText(line_text.c_str(), nullptr, text_x, ly,
+                                 CLR_MENU_TEXT);
       }
 
-      std::string line_text(buffer + ls, (size_t)(le - ls));
-      mdgui_fonts[1]->drawText(line_text.c_str(), nullptr, text_x, ly,
-                               CLR_MENU_TEXT);
-    }
-
-    if (active) {
-      const unsigned long long ticks = mdgui_backend_get_ticks_ms();
-      if (((ticks / 500ull) % 2ull) == 0ull) {
-        int caret_line = 0;
-        for (int i = 0; i < lc; ++i) {
-          if (line_starts[i] <= ctx->active_text_input_cursor)
-            caret_line = i;
-          else
-            break;
+      if (active) {
+        const unsigned long long ticks = mdgui_backend_get_ticks_ms();
+        if (((ticks / 500ull) % 2ull) == 0ull) {
+          int caret_line = 0;
+          for (int i = 0; i < lc; ++i) {
+            if (line_starts[i] <= ctx->active_text_input_cursor)
+              caret_line = i;
+            else
+              break;
+          }
+          const int cls = line_starts[caret_line];
+          std::string left(buffer + cls,
+                           (size_t)(ctx->active_text_input_cursor - cls));
+          const int cx =
+              text_x + mdgui_fonts[1]->measureTextWidth(left.c_str());
+          const int cy = text_y + caret_line * line_h - scroll_y;
+          mdgui_draw_vline_idx(nullptr, CLR_MENU_TEXT, cx, cy, cy + line_h - 1);
         }
-        const int cls = line_starts[caret_line];
-        std::string left(buffer + cls,
-                         (size_t)(ctx->active_text_input_cursor - cls));
-        const int cx = text_x + mdgui_fonts[1]->measureTextWidth(left.c_str());
-        const int cy = text_y + caret_line * line_h - scroll_y;
-        mdgui_draw_vline_idx(nullptr, CLR_MENU_TEXT, cx, cy, cy + line_h - 1);
       }
     }
 
