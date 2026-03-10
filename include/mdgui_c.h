@@ -190,6 +190,9 @@ void mdgui_get_window_min_size(MDGUI_Context *ctx, const char *title,
 void mdgui_set_window_alpha(MDGUI_Context *ctx, const char *title,
                             unsigned char alpha);
 unsigned char mdgui_get_window_alpha(MDGUI_Context *ctx, const char *title);
+void mdgui_set_window_scrollbar_visible(MDGUI_Context *ctx, const char *title,
+                                        int visible);
+int mdgui_is_window_scrollbar_visible(MDGUI_Context *ctx, const char *title);
 void mdgui_set_windows_alpha(MDGUI_Context *ctx, unsigned char alpha);
 unsigned char mdgui_get_windows_alpha(MDGUI_Context *ctx);
 void mdgui_set_windows_locked(MDGUI_Context *ctx, int locked);

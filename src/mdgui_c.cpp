@@ -63,6 +63,8 @@ struct MDGUI_Window {
   int text_scroll_drag_offset;
   bool fixed_rect;
   bool disallow_maximize;
+  bool is_message_box;
+  bool scrollbar_visible;
   int tile_weight;
   int tile_side;
   bool tile_excluded;
@@ -82,6 +84,11 @@ struct PendingWindowMinSize {
   std::string title;
   int min_w;
   int min_h;
+};
+
+struct PendingWindowScrollbarVisibility {
+  std::string title;
+  bool visible;
 };
 } // namespace
 
@@ -245,6 +252,7 @@ struct MDGUI_Context {
   int file_browser_scroll_drag_offset;
   std::vector<std::string> pending_tile_excluded_titles;
   std::vector<PendingWindowMinSize> pending_window_min_sizes;
+  std::vector<PendingWindowScrollbarVisibility> pending_window_scrollbars;
   int file_browser_last_click_idx;
   Uint64 file_browser_last_click_ticks;
   std::string file_browser_result;
@@ -563,6 +571,35 @@ static void set_pending_window_min_size(MDGUI_Context *ctx, const char *title,
     return;
   }
   ctx->pending_window_min_sizes.push_back({title, nw, nh});
+}
+
+static bool get_pending_window_scrollbar_visibility(const MDGUI_Context *ctx,
+                                                    const char *title,
+                                                    bool *out_visible) {
+  if (!ctx || !title)
+    return false;
+  for (const auto &it : ctx->pending_window_scrollbars) {
+    if (it.title != title)
+      continue;
+    if (out_visible)
+      *out_visible = it.visible;
+    return true;
+  }
+  return false;
+}
+
+static void set_pending_window_scrollbar_visibility(MDGUI_Context *ctx,
+                                                    const char *title,
+                                                    bool visible) {
+  if (!ctx || !title)
+    return;
+  for (auto &it : ctx->pending_window_scrollbars) {
+    if (it.title != title)
+      continue;
+    it.visible = visible;
+    return;
+  }
+  ctx->pending_window_scrollbars.push_back({title, visible});
 }
 
 static int normalize_tile_side(int side) {
@@ -1186,6 +1223,8 @@ static int find_or_create_window(MDGUI_Context *ctx, const char *title, int x,
   nw.text_scroll_drag_offset = 0;
   nw.fixed_rect = false;
   nw.disallow_maximize = false;
+  nw.is_message_box = false;
+  nw.scrollbar_visible = true;
   nw.tile_weight = 1;
   nw.tile_side = MDGUI_TILE_SIDE_AUTO;
   nw.tile_excluded = has_pending_tile_excluded_title(ctx, key);
@@ -1196,6 +1235,11 @@ static int find_or_create_window(MDGUI_Context *ctx, const char *title, int x,
     nw.user_min_h = pending_min_h;
     nw.min_w = pending_min_w;
     nw.min_h = pending_min_h;
+  }
+  bool pending_scrollbar_visible = true;
+  if (get_pending_window_scrollbar_visibility(ctx, key,
+                                              &pending_scrollbar_visible)) {
+    nw.scrollbar_visible = pending_scrollbar_visible;
   }
   nw.alpha = ctx->default_window_alpha;
   ctx->windows.push_back(nw);
@@ -1980,6 +2024,7 @@ int mdgui_begin_window_ex(MDGUI_Context *ctx, const char *title, int x, int y,
 
   if (win.closed)
     return 0;
+  win.is_message_box = false;
 
   const int screen_w = get_logical_render_w(ctx);
 
@@ -2382,7 +2427,9 @@ void mdgui_end_window(MDGUI_Context *ctx) {
     if (win.text_scroll > max_scroll)
       win.text_scroll = max_scroll;
 
-    if (max_scroll > 0 && viewport_h > 8) {
+    const bool show_scrollbar =
+        (viewport_h > 8) && !win.is_message_box && win.scrollbar_visible;
+    if (show_scrollbar) {
       const int sb_w = 8;
       const int sb_x = win.x + win.w - sb_w - 2;
       const int sb_y = viewport_top;
@@ -2395,12 +2442,15 @@ void mdgui_end_window(MDGUI_Context *ctx) {
         thumb_h = viewport_h;
       const int travel = viewport_h - thumb_h;
       const int thumb_y =
-          sb_y + ((travel > 0) ? ((win.text_scroll * travel) / max_scroll) : 0);
-      mdgui_fill_rect_idx(nullptr, CLR_ACCENT, sb_x + 1, thumb_y, sb_w - 2,
+          sb_y + ((max_scroll > 0 && travel > 0)
+                      ? ((win.text_scroll * travel) / max_scroll)
+                      : 0);
+      const int thumb_color = (max_scroll > 0) ? CLR_ACCENT : CLR_BUTTON_DARK;
+      mdgui_fill_rect_idx(nullptr, thumb_color, sb_x + 1, thumb_y, sb_w - 2,
                           thumb_h);
       const int over_scrollbar = point_in_rect(
           ctx->input.mouse_x, ctx->input.mouse_y, sb_x, sb_y, sb_w, viewport_h);
-      if (ctx->input.mouse_pressed && over_scrollbar &&
+      if (max_scroll > 0 && ctx->input.mouse_pressed && over_scrollbar &&
           is_current_window_topmost(ctx)) {
         if (ctx->input.mouse_y >= thumb_y &&
             ctx->input.mouse_y <= thumb_y + thumb_h) {
@@ -4712,6 +4762,7 @@ int mdgui_message_box_ex(MDGUI_Context *ctx, const char *id, const char *title,
     auto &msg_win = ctx->windows[ctx->current_window];
     msg_win.z = ++ctx->z_counter;
     msg_win.disallow_maximize = true;
+    msg_win.is_message_box = true;
     msg_win.is_maximized = false;
     // Message boxes should remain
     // fixed-size; avoid feedback with
@@ -4970,6 +5021,37 @@ unsigned char mdgui_get_window_alpha(MDGUI_Context *ctx, const char *title) {
       return win.alpha;
   }
   return 255;
+}
+
+void mdgui_set_window_scrollbar_visible(MDGUI_Context *ctx, const char *title,
+                                        int visible) {
+  if (!ctx || !title)
+    return;
+  const bool normalized = (visible != 0);
+  set_pending_window_scrollbar_visibility(ctx, title, normalized);
+  for (int i = 0; i < (int)ctx->windows.size(); ++i) {
+    auto &win = ctx->windows[i];
+    if (win.id != title)
+      continue;
+    win.scrollbar_visible = normalized;
+    if (!normalized)
+      win.text_scroll_dragging = false;
+    return;
+  }
+}
+
+int mdgui_is_window_scrollbar_visible(MDGUI_Context *ctx, const char *title) {
+  if (!ctx || !title)
+    return 1;
+  for (int i = 0; i < (int)ctx->windows.size(); ++i) {
+    const auto &win = ctx->windows[i];
+    if (win.id == title)
+      return win.scrollbar_visible ? 1 : 0;
+  }
+  bool pending_visible = true;
+  if (get_pending_window_scrollbar_visibility(ctx, title, &pending_visible))
+    return pending_visible ? 1 : 0;
+  return 1;
 }
 
 void mdgui_set_windows_alpha(MDGUI_Context *ctx, unsigned char alpha) {

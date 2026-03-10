@@ -507,6 +507,8 @@ pub fn main() !void {
     const ctx = c.mdgui_create(renderer) orelse return error.MdguiInitFailed;
     defer c.mdgui_destroy(ctx);
     c.mdgui_set_custom_cursor_enabled(ctx, 1); // demo opt-in; library default is off
+    c.mdgui_set_window_scrollbar_visible(ctx, render_api_window_title, 0);
+    c.mdgui_set_window_scrollbar_visible(ctx, "PERF GRAPH", 0);
     c.mdgui_set_windows_locked(ctx, if (startup_lock_tiled_windows) 1 else 0);
     c.mdgui_set_status_bar_visible(ctx, 1);
 
