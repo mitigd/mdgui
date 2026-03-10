@@ -186,12 +186,21 @@ fn drawMainWindow(
         c.mdgui_begin_menu_bar(ctx);
         if (c.mdgui_begin_menu(ctx, "FILE") != 0) {
             if (c.mdgui_begin_submenu(ctx, "OPEN RECENT") != 0) {
-                if (c.mdgui_menu_item(ctx, "Sonic.sms") != 0) open_file_browser.* = true;
-                if (c.mdgui_menu_item(ctx, "Tetris.gb") != 0) open_file_browser.* = true;
+                if (c.mdgui_menu_item(ctx, "Sonic.sms") != 0) {
+                    open_file_browser.* = true;
+                    c.mdgui_show_toast(ctx, "Opening file browser...", 1800);
+                }
+                if (c.mdgui_menu_item(ctx, "Tetris.gb") != 0) {
+                    open_file_browser.* = true;
+                    c.mdgui_show_toast(ctx, "Opening file browser...", 1800);
+                }
                 c.mdgui_end_submenu(ctx);
             }
             c.mdgui_menu_separator(ctx);
-            if (c.mdgui_menu_item(ctx, "OPEN ROM") != 0) open_file_browser.* = true;
+            if (c.mdgui_menu_item(ctx, "OPEN ROM") != 0) {
+                open_file_browser.* = true;
+                c.mdgui_show_toast(ctx, "Opening file browser...", 1800);
+            }
             c.mdgui_menu_separator(ctx);
             if (c.mdgui_menu_item(ctx, "EXIT") != 0) running.* = false;
             c.mdgui_end_menu(ctx);
@@ -212,6 +221,7 @@ fn drawMainWindow(
         const text_flags = c.mdgui_input_text(ctx, "Quick note", @ptrCast(&demo_text[0]), demo_text.len, -16);
         if ((text_flags & c.MDGUI_INPUT_TEXT_SUBMITTED) != 0) {
             c.mdgui_set_status_bar_text(ctx, @ptrCast(&demo_text[0]));
+            c.mdgui_show_toast(ctx, "Quick note submitted", 2000);
         }
         c.mdgui_spacing(ctx, 4);
         _ = c.mdgui_input_text_multiline(
@@ -739,12 +749,21 @@ pub fn main() !void {
         c.mdgui_begin_main_menu_bar(ctx);
         if (c.mdgui_begin_main_menu(ctx, "FILE") != 0) {
             if (c.mdgui_begin_main_submenu(ctx, "TOOLS") != 0) {
-                if (c.mdgui_main_menu_item(ctx, "OPEN FILE BROWSER") != 0) open_file_browser = true;
-                if (c.mdgui_main_menu_item(ctx, "ABOUT") != 0) show_about = true;
+                if (c.mdgui_main_menu_item(ctx, "OPEN FILE BROWSER") != 0) {
+                    open_file_browser = true;
+                    c.mdgui_show_toast(ctx, "Opening file browser...", 1800);
+                }
+                if (c.mdgui_main_menu_item(ctx, "ABOUT") != 0) {
+                    show_about = true;
+                    c.mdgui_show_toast(ctx, "About dialog opened", 1600);
+                }
                 c.mdgui_end_main_submenu(ctx);
             }
             c.mdgui_main_menu_separator(ctx);
-            if (c.mdgui_main_menu_item(ctx, "OPEN ROM") != 0) open_file_browser = true;
+            if (c.mdgui_main_menu_item(ctx, "OPEN ROM") != 0) {
+                open_file_browser = true;
+                c.mdgui_show_toast(ctx, "Opening file browser...", 1800);
+            }
             c.mdgui_main_menu_separator(ctx);
             if (c.mdgui_main_menu_item(ctx, "EXIT") != 0) running = false;
             c.mdgui_end_main_menu(ctx);

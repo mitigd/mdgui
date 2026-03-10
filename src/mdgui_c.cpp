@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <string.h>
 #include <string>
+#include <utility>
 #include <vector>
 
 extern MDGuiFont *mdgui_fonts[10];
@@ -33,6 +34,8 @@ constexpr int CLR_ACCENT = 247;
 constexpr int CLR_WINDOW_BORDER = 248;
 constexpr int MENU_POPUP_GAP_Y = 2;
 constexpr int STATUS_BAR_DEFAULT_H = 12;
+constexpr int TOAST_DEFAULT_DURATION_MS = 2400;
+constexpr int TOAST_MAX_VISIBLE = 6;
 
 struct MDGUI_Window {
   struct CollapsingState {
@@ -100,6 +103,11 @@ struct PendingWindowScrollbarVisibility {
 } // namespace
 
 struct MDGUI_Context {
+  struct ToastItem {
+    std::string text;
+    unsigned long long expires_at_ms;
+  };
+
   struct NestedRenderState {
     int parent_origin_x;
     int parent_origin_y;
@@ -176,6 +184,7 @@ struct MDGUI_Context {
   bool status_bar_visible;
   int status_bar_h;
   std::string status_bar_text;
+  std::vector<ToastItem> toasts;
 
   // Resizing state
   int resizing_window; // -1 if none
@@ -1535,6 +1544,88 @@ static void draw_status_bar(MDGUI_Context *ctx) {
   }
 }
 
+static std::string ellipsize_text_to_width(const std::string &text,
+                                           int max_w) {
+  if (max_w <= 0 || !mdgui_fonts[1])
+    return {};
+  if (mdgui_fonts[1]->measureTextWidth(text.c_str()) <= max_w)
+    return text;
+  static const char *kEllipsis = "...";
+  const int ellipsis_w = mdgui_fonts[1]->measureTextWidth(kEllipsis);
+  if (ellipsis_w > max_w)
+    return {};
+
+  std::string out;
+  out.reserve(text.size());
+  for (char c : text) {
+    out.push_back(c);
+    std::string candidate = out + kEllipsis;
+    if (mdgui_fonts[1]->measureTextWidth(candidate.c_str()) > max_w) {
+      out.pop_back();
+      break;
+    }
+  }
+  return out + kEllipsis;
+}
+
+static void prune_expired_toasts(MDGUI_Context *ctx, unsigned long long now_ms) {
+  if (!ctx)
+    return;
+  auto &toasts = ctx->toasts;
+  toasts.erase(std::remove_if(toasts.begin(), toasts.end(),
+                              [now_ms](const MDGUI_Context::ToastItem &t) {
+                                return now_ms >= t.expires_at_ms;
+                              }),
+               toasts.end());
+}
+
+static void draw_toasts(MDGUI_Context *ctx) {
+  if (!ctx || ctx->toasts.empty() || !mdgui_fonts[1])
+    return;
+  const int rw = get_logical_render_w(ctx);
+  const int bottom = get_work_area_bottom(ctx);
+  if (rw <= 0 || bottom <= 0)
+    return;
+
+  const int top = get_work_area_top(ctx) + 6;
+  const int margin = 6;
+  const int pad_x = 6;
+  const int pad_y = 4;
+  const int toast_h = 16;
+  const int step = toast_h + 4;
+  const int max_toast_w = std::max(80, rw - (margin * 2));
+  const int text_max_w = std::max(20, max_toast_w - (pad_x * 2));
+
+  mdgui_backend_set_clip_rect(0, 0, 0, 0, 0);
+  mdgui_backend_set_alpha_mod(255);
+
+  int y = top;
+  const int total = (int)ctx->toasts.size();
+  const int first = (total > TOAST_MAX_VISIBLE) ? (total - TOAST_MAX_VISIBLE) : 0;
+  for (int i = first; i < total; ++i) {
+    if (y + toast_h > bottom)
+      break;
+    const auto &toast = ctx->toasts[(size_t)i];
+    std::string text = ellipsize_text_to_width(toast.text, text_max_w);
+    const int text_w = text.empty() ? 0 : mdgui_fonts[1]->measureTextWidth(text.c_str());
+    int toast_w = text_w + (pad_x * 2);
+    if (toast_w < 80)
+      toast_w = 80;
+    if (toast_w > max_toast_w)
+      toast_w = max_toast_w;
+    const int x = rw - margin - toast_w;
+
+    mdgui_fill_rect_idx(nullptr, CLR_MSG_BG, x, y, toast_w, toast_h);
+    mdgui_draw_frame_idx(nullptr, CLR_BUTTON_LIGHT, x, y, x + toast_w,
+                         y + toast_h);
+    if (!text.empty()) {
+      mdgui_fonts[1]->drawText(text.c_str(), nullptr, x + pad_x, y + pad_y,
+                               CLR_TEXT_LIGHT);
+    }
+    y += step;
+  }
+}
+
 static void center_window_rect_menu_aware(MDGUI_Context *ctx,
                                           MDGUI_Window &win) {
   const int screen_w = get_logical_render_w(ctx);
@@ -2072,7 +2163,10 @@ void mdgui_end_frame(MDGUI_Context *ctx) {
     }
   }
 
+  const unsigned long long now_ms = mdgui_backend_get_ticks_ms();
+  prune_expired_toasts(ctx, now_ms);
   draw_open_main_menu_overlay(ctx);
+  draw_toasts(ctx);
   draw_status_bar(ctx);
 
   if (ctx->combo_capture_active && !ctx->combo_capture_seen_this_frame) {
@@ -4800,6 +4894,26 @@ const char *mdgui_get_status_bar_text(MDGUI_Context *ctx) {
   if (!ctx)
     return "";
   return ctx->status_bar_text.c_str();
+}
+
+void mdgui_show_toast(MDGUI_Context *ctx, const char *text, int duration_ms) {
+  if (!ctx || !text || !*text)
+    return;
+  if (duration_ms <= 0)
+    duration_ms = TOAST_DEFAULT_DURATION_MS;
+  const unsigned long long now_ms = mdgui_backend_get_ticks_ms();
+  prune_expired_toasts(ctx, now_ms);
+
+  MDGUI_Context::ToastItem toast;
+  toast.text = text;
+  toast.expires_at_ms = now_ms + (unsigned long long)duration_ms;
+  ctx->toasts.push_back(std::move(toast));
+}
+
+void mdgui_clear_toasts(MDGUI_Context *ctx) {
+  if (!ctx)
+    return;
+  ctx->toasts.clear();
 }
 
 int mdgui_message_box_ex(MDGUI_Context *ctx, const char *id, const char *title,

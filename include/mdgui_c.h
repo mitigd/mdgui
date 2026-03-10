@@ -240,6 +240,8 @@ void mdgui_set_status_bar_visible(MDGUI_Context *ctx, int visible);
 int mdgui_is_status_bar_visible(MDGUI_Context *ctx);
 void mdgui_set_status_bar_text(MDGUI_Context *ctx, const char *text);
 const char *mdgui_get_status_bar_text(MDGUI_Context *ctx);
+void mdgui_show_toast(MDGUI_Context *ctx, const char *text, int duration_ms);
+void mdgui_clear_toasts(MDGUI_Context *ctx);
 
 // Returns 0 while open/no click, 1 when first button clicked, 2 when second
 // button clicked.
