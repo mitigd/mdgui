@@ -129,45 +129,49 @@ int mdgui_begin_window(MDGUI_Context *ctx, const char *title, int x, int y,
 int mdgui_begin_window_ex(MDGUI_Context *ctx, const char *title, int x, int y,
                           int w, int h, int flags);
 void mdgui_end_window(MDGUI_Context *ctx);
-int mdgui_button(MDGUI_Context *ctx, const char *text, int x, int y, int w,
-                 int h);
-void mdgui_label(MDGUI_Context *ctx, const char *text, int x, int y);
-void mdgui_label_wrapped(MDGUI_Context *ctx, const char *text, int x, int y,
-                         int w);
-void mdgui_spacer(MDGUI_Context *ctx, int pixels);
-int mdgui_checkbox(MDGUI_Context *ctx, const char *text, bool *checked, int x,
-                   int y);
+void mdgui_same_line(MDGUI_Context *ctx);
+void mdgui_new_line(MDGUI_Context *ctx);
+void mdgui_spacing(MDGUI_Context *ctx, int pixels);
+void mdgui_indent(MDGUI_Context *ctx, int pixels);
+void mdgui_unindent(MDGUI_Context *ctx);
+int mdgui_begin_row(MDGUI_Context *ctx, int columns);
+void mdgui_end_row(MDGUI_Context *ctx);
+int mdgui_begin_columns(MDGUI_Context *ctx, int columns);
+void mdgui_next_column(MDGUI_Context *ctx);
+void mdgui_end_columns(MDGUI_Context *ctx);
+
+int mdgui_button(MDGUI_Context *ctx, const char *text, int w, int h);
+void mdgui_label(MDGUI_Context *ctx, const char *text);
+void mdgui_label_wrapped(MDGUI_Context *ctx, const char *text, int w);
+int mdgui_checkbox(MDGUI_Context *ctx, const char *text, bool *checked);
 int mdgui_slider(MDGUI_Context *ctx, const char *text, float *val, float min,
-                 float max, int x, int y, int w);
+                 float max, int w);
 int mdgui_collapsing_header(MDGUI_Context *ctx, const char *id,
-                            const char *text, int x, int y, int w,
-                            int default_open);
+                            const char *text, int w, int default_open);
 int mdgui_begin_collapsing_header_group(MDGUI_Context *ctx, const char *id,
-                                        const char *text, int x, int y, int w,
+                                        const char *text, int w,
                                         int default_open, int child_indent);
 void mdgui_end_collapsing_header_group(MDGUI_Context *ctx);
-void mdgui_push_indent(MDGUI_Context *ctx, int pixels);
-void mdgui_pop_indent(MDGUI_Context *ctx);
-void mdgui_separator(MDGUI_Context *ctx, int x, int y, int w);
+void mdgui_separator(MDGUI_Context *ctx, int w);
 int mdgui_listbox(MDGUI_Context *ctx, const char **items, int item_count,
-                  int *selected, int x, int y, int w, int rows);
+                  int *selected, int w, int rows);
 int mdgui_combo(MDGUI_Context *ctx, const char *label, const char **items,
-                int item_count, int *selected, int x, int y, int w);
+                int item_count, int *selected, int w);
 // Returns MDGUI_INPUT_TEXT_* flags.
 int mdgui_input_text(MDGUI_Context *ctx, const char *label, char *buffer,
-                     int buffer_size, int x, int y, int w);
+                     int buffer_size, int w);
 // Returns MDGUI_INPUT_TEXT_* flags.
 int mdgui_input_text_multiline(MDGUI_Context *ctx, const char *label,
-                               char *buffer, int buffer_size, int x, int y,
-                               int w, int h, int flags);
-void mdgui_progress_bar(MDGUI_Context *ctx, float value, int x, int y, int w,
-                        int h, const char *overlay_text);
+                               char *buffer, int buffer_size, int w, int h,
+                               int flags);
+void mdgui_progress_bar(MDGUI_Context *ctx, float value, int w, int h,
+                        const char *overlay_text);
 // For frame graph sizing, w/h follow widget conventions:
 // w == 0 uses available width, w < 0 subtracts from available width.
 // h == 0 uses remaining window content height, h < 0 subtracts from it.
 void mdgui_frame_time_graph(MDGUI_Context *ctx, const float *frame_ms_samples,
                             int sample_count, float target_fps,
-                            float graph_max_ms, int x, int y, int w, int h);
+                            float graph_max_ms, int w, int h);
 
 void mdgui_show_demo_window(MDGUI_Context *ctx);
 void mdgui_open_file_browser(MDGUI_Context *ctx);

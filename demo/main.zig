@@ -129,29 +129,29 @@ fn drawAnalyticsWindow(ctx: ?*c.MDGUI_Context, analytics: *Analytics) void {
 
     const was_show_graph = analytics.show_graph;
     var toggle_graph = analytics.show_graph;
-    _ = c.mdgui_checkbox(ctx, "Show realtime graph", &toggle_graph, 10, 5);
+    _ = c.mdgui_checkbox(ctx, "Show realtime graph", &toggle_graph);
     analytics.show_graph = toggle_graph;
     if (!was_show_graph and analytics.show_graph) {
         c.mdgui_set_window_open(ctx, "PERF GRAPH", 1);
         c.mdgui_focus_window(ctx, "PERF GRAPH");
     }
 
-    c.mdgui_label(ctx, "FPS + Frame Time", 10, 5);
+    c.mdgui_label(ctx, "FPS + Frame Time");
 
     var line1: [64]u8 = undefined;
     const txt_fps = std.fmt.bufPrintZ(&line1, "{d:.1} fps (avg {d:.1})", .{ stats.current_fps, stats.avg_fps }) catch "fps";
-    c.mdgui_progress_bar(ctx, clamp01(stats.current_fps / analytics.target_fps), 10, 3, -16, 10, txt_fps.ptr);
+    c.mdgui_progress_bar(ctx, clamp01(stats.current_fps / analytics.target_fps), -16, 10, txt_fps.ptr);
 
     var line2: [64]u8 = undefined;
     const txt_ms = std.fmt.bufPrintZ(&line2, "{d:.2} ms", .{stats.current_ms}) catch "ms";
-    c.mdgui_progress_bar(ctx, clamp01(stats.current_ms / analytics.graph_max_ms), 10, 3, -16, 10, txt_ms.ptr);
+    c.mdgui_progress_bar(ctx, clamp01(stats.current_ms / analytics.graph_max_ms), -16, 10, txt_ms.ptr);
 
     var line3: [64]u8 = undefined;
     const txt_minmax = std.fmt.bufPrintZ(&line3, "min/max {d:.1}/{d:.1}", .{ stats.min_fps, stats.max_fps }) catch "min/max";
-    c.mdgui_label(ctx, txt_minmax.ptr, 10, 5);
+    c.mdgui_label(ctx, txt_minmax.ptr);
 
-    c.mdgui_separator(ctx, 10, 5, 0);
-    c.mdgui_label(ctx, "Frame Time Histogram", 10, 5);
+    c.mdgui_separator(ctx, 0);
+    c.mdgui_label(ctx, "Frame Time Histogram");
 
     const bins = analyticsHistogram(analytics);
     const labels = [_][]const u8{ "<14ms", "14-16.7", "16.7-20", "20-25", "25-33", ">=33" };
@@ -165,8 +165,8 @@ fn drawAnalyticsWindow(ctx: ?*c.MDGUI_Context, analytics: *Analytics) void {
         var row: [64]u8 = undefined;
         const pct = if (analytics.count == 0) 0.0 else (@as(f32, @floatFromInt(bins[i])) * 100.0 / @as(f32, @floatFromInt(analytics.count)));
         const txt = std.fmt.bufPrintZ(&row, "{s}: {d:.0}%", .{ labels[i], pct }) catch "bin";
-        c.mdgui_label(ctx, txt.ptr, 10, 3);
-        c.mdgui_progress_bar(ctx, @as(f32, @floatFromInt(bins[i])) / @as(f32, @floatFromInt(max_bin)), 10, 1, -16, 8, null);
+        c.mdgui_label(ctx, txt.ptr);
+        c.mdgui_progress_bar(ctx, @as(f32, @floatFromInt(bins[i])) / @as(f32, @floatFromInt(max_bin)), -16, 8, null);
     }
 
     c.mdgui_end_window(ctx);
@@ -202,30 +202,32 @@ fn drawMainWindow(
             c.mdgui_end_menu(ctx);
         }
         c.mdgui_end_menu_bar(ctx);
-        c.mdgui_label(ctx, "Demo window is draggable.", 8, 6);
-        if (c.mdgui_button(ctx, "LOAD ROM", 10, 20, 90, 20) != 0) open_file_browser.* = true;
-        _ = c.mdgui_button(ctx, "OPTIONS", 10, 45, 90, 20);
-        const text_flags = c.mdgui_input_text(ctx, "Quick note", @ptrCast(&demo_text[0]), demo_text.len, 10, 6, -16);
+        c.mdgui_label(ctx, "Demo window is draggable.");
+        if (c.mdgui_begin_row(ctx, 2) != 0) {
+            if (c.mdgui_button(ctx, "LOAD ROM", 90, 20) != 0) open_file_browser.* = true;
+            c.mdgui_next_column(ctx);
+            _ = c.mdgui_button(ctx, "OPTIONS", 90, 20);
+            c.mdgui_end_row(ctx);
+        }
+        const text_flags = c.mdgui_input_text(ctx, "Quick note", @ptrCast(&demo_text[0]), demo_text.len, -16);
         if ((text_flags & c.MDGUI_INPUT_TEXT_SUBMITTED) != 0) {
             c.mdgui_set_status_bar_text(ctx, @ptrCast(&demo_text[0]));
         }
-        c.mdgui_spacer(ctx, 4);
+        c.mdgui_spacing(ctx, 4);
         _ = c.mdgui_input_text_multiline(
             ctx,
             "Quick note (multiline)",
             @ptrCast(&demo_text_multiline[0]),
             demo_text_multiline.len,
-            10,
-            4,
             -16,
             56,
             c.MDGUI_INPUT_TEXT_MULTILINE_NONE,
         );
-        c.mdgui_spacer(ctx, 2);
+        c.mdgui_spacing(ctx, 2);
 
-        c.mdgui_label(ctx, "Window transparency", 10, 2);
+        c.mdgui_label(ctx, "Window transparency");
         var slider_alpha = windows_alpha.*;
-        _ = c.mdgui_slider(ctx, null, &slider_alpha, 0.0, 1.0, 10, 2, -16);
+        _ = c.mdgui_slider(ctx, null, &slider_alpha, 0.0, 1.0, -16);
         slider_alpha = clamp01(slider_alpha);
         windows_alpha.* = slider_alpha;
         c.mdgui_set_windows_alpha(ctx, alphaByteFromFloat(slider_alpha));
@@ -233,10 +235,10 @@ fn drawMainWindow(
         var alpha_line: [64]u8 = undefined;
         const alpha_pct = @as(c_int, @intFromFloat(slider_alpha * 100.0 + 0.5));
         const alpha_txt = std.fmt.bufPrintZ(&alpha_line, "Window alpha: {d}%", .{alpha_pct}) catch "Window alpha";
-        c.mdgui_label(ctx, alpha_txt.ptr, 10, 4);
+        c.mdgui_label(ctx, alpha_txt.ptr);
 
         if (show_nested_test_area) {
-            c.mdgui_label(ctx, "Nested TEST AREA", 10, 6);
+            c.mdgui_label(ctx, "Nested TEST AREA");
             var view_x: c_int = 0;
             var view_y: c_int = 0;
             var view_w: c_int = 0;
@@ -360,7 +362,23 @@ fn drawWindowApiDemo(ctx: ?*c.MDGUI_Context, renderer: ?*c.SDL_Renderer, show_wi
 }
 
 fn drawPerfGraphWindow(ctx: ?*c.MDGUI_Context, analytics: *const Analytics) void {
-    if (c.mdgui_begin_window(ctx, "PERF GRAPH", 250, 195, 380, 155) == 0) return;
+    var view_x: c_int = 0;
+    var view_y: c_int = 0;
+    var view_w: c_int = 0;
+    var view_h: c_int = 0;
+    if (c.mdgui_begin_render_window(
+        ctx,
+        "PERF GRAPH",
+        250,
+        195,
+        380,
+        155,
+        0,
+        &view_x,
+        &view_y,
+        &view_w,
+        &view_h,
+    ) == 0) return;
 
     var ordered: [Analytics.history_len]f32 = [_]f32{16.67} ** Analytics.history_len;
     var i: usize = 0;
@@ -374,8 +392,6 @@ fn drawPerfGraphWindow(ctx: ?*c.MDGUI_Context, analytics: *const Analytics) void
         @as(c_int, @intCast(analytics.count)),
         analytics.target_fps,
         analytics.graph_max_ms,
-        0,
-        0,
         0,
         0,
     );

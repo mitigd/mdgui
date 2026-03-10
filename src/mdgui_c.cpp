@@ -170,18 +170,30 @@ struct MDGUI_Context {
 
   int content_req_right;
   int content_req_bottom;
-  bool button_row_active;
-  int button_row_window;
-  int button_row_param_y;
-  int button_row_anchor_y;
-  int button_row_bottom_y;
-  int button_row_first_x;
-  int button_row_next_x;
-  int button_row_last_input_x;
-  int button_row_last_w;
-  int button_row_hgap;
-  int button_row_flow_logical_y;
-  bool button_row_flow_mode;
+
+  struct LayoutStyle {
+    int spacing_x;
+    int spacing_y;
+    int indent_step;
+    int label_h;
+    int content_pad_x;
+    int content_pad_y;
+  } style;
+
+  bool layout_same_line;
+  bool layout_has_last_item;
+  int layout_last_item_x;
+  int layout_last_item_y;
+  int layout_last_item_w;
+  int layout_last_item_h;
+  bool layout_columns_active;
+  int layout_columns_count;
+  int layout_columns_index;
+  int layout_columns_start_x;
+  int layout_columns_start_y;
+  int layout_columns_width;
+  int layout_columns_max_bottom;
+  std::vector<int> layout_columns_bottoms;
   int layout_indent;
   std::vector<int> indent_stack;
   bool window_has_nonlabel_widget;
@@ -1624,6 +1636,26 @@ MDGUI_Context *mdgui_create_with_backend(const MDGUI_RenderBackend *backend) {
   ctx->current_cursor_idx = -1;
   ctx->content_req_right = 0;
   ctx->content_req_bottom = 0;
+  ctx->style.spacing_x = 6;
+  ctx->style.spacing_y = 4;
+  ctx->style.indent_step = 8;
+  ctx->style.label_h = 12;
+  ctx->style.content_pad_x = 8;
+  ctx->style.content_pad_y = 6;
+  ctx->layout_same_line = false;
+  ctx->layout_has_last_item = false;
+  ctx->layout_last_item_x = 0;
+  ctx->layout_last_item_y = 0;
+  ctx->layout_last_item_w = 0;
+  ctx->layout_last_item_h = 0;
+  ctx->layout_columns_active = false;
+  ctx->layout_columns_count = 0;
+  ctx->layout_columns_index = 0;
+  ctx->layout_columns_start_x = 0;
+  ctx->layout_columns_start_y = 0;
+  ctx->layout_columns_width = 0;
+  ctx->layout_columns_max_bottom = 0;
+  ctx->layout_columns_bottoms.clear();
   ctx->window_has_nonlabel_widget = false;
   ctx->windows_locked = false;
   ctx->tile_manager_enabled = false;
@@ -1662,7 +1694,7 @@ MDGUI_Context *mdgui_create_with_backend(const MDGUI_RenderBackend *backend) {
   ctx->file_browser_last_click_idx = -1;
   ctx->file_browser_last_click_ticks = 0;
   ctx->file_browser_result.clear();
-  ctx->layout_indent = 0;
+  ctx->layout_indent = ctx->style.content_pad_x;
   ctx->indent_stack.clear();
 
   mdgui_set_backend(ctx, backend);
@@ -2124,7 +2156,7 @@ int mdgui_begin_window_ex(MDGUI_Context *ctx, const char *title, int x, int y,
 
   ctx->origin_x = win.x + 2;
   ctx->origin_y = win.y + title_h + 2;
-  ctx->content_y = ctx->origin_y;
+  ctx->content_y = ctx->origin_y + ctx->style.content_pad_y;
   ctx->menu_index = 0;
   ctx->menu_next_x = ctx->origin_x;
   ctx->in_menu_bar = false;
@@ -2141,19 +2173,21 @@ int mdgui_begin_window_ex(MDGUI_Context *ctx, const char *title, int x, int y,
   ctx->menu_build_stack.clear();
   ctx->content_req_right = win.x + 6;
   ctx->content_req_bottom = win.y + title_h + 6;
-  ctx->button_row_active = false;
-  ctx->button_row_window = -1;
-  ctx->button_row_param_y = 0;
-  ctx->button_row_anchor_y = ctx->content_y;
-  ctx->button_row_bottom_y = ctx->content_y;
-  ctx->button_row_first_x = 0;
-  ctx->button_row_next_x = 0;
-  ctx->button_row_last_input_x = 0;
-  ctx->button_row_last_w = 0;
-  ctx->button_row_hgap = 6;
-  ctx->button_row_flow_logical_y = ctx->content_y;
-  ctx->button_row_flow_mode = false;
-  ctx->layout_indent = 0;
+  ctx->layout_same_line = false;
+  ctx->layout_has_last_item = false;
+  ctx->layout_last_item_x = 0;
+  ctx->layout_last_item_y = 0;
+  ctx->layout_last_item_w = 0;
+  ctx->layout_last_item_h = 0;
+  ctx->layout_columns_active = false;
+  ctx->layout_columns_count = 0;
+  ctx->layout_columns_index = 0;
+  ctx->layout_columns_start_x = 0;
+  ctx->layout_columns_start_y = ctx->content_y;
+  ctx->layout_columns_width = 0;
+  ctx->layout_columns_max_bottom = ctx->content_y;
+  ctx->layout_columns_bottoms.clear();
+  ctx->layout_indent = ctx->style.content_pad_x;
   ctx->indent_stack.clear();
   ctx->window_has_nonlabel_widget = false;
   note_content_bounds(ctx, win.x + chrome_min_w, win.y + title_h + 2);
@@ -2391,93 +2425,225 @@ static int text_cursor_from_pixel_x(const char *buffer, int len,
   return len;
 }
 
-int mdgui_button(MDGUI_Context *ctx, const char *text, int x, int y, int w,
-                 int h) {
+static int layout_current_column_base_x(const MDGUI_Context *ctx) {
+  if (!ctx)
+    return 0;
+  if (!ctx->layout_columns_active || ctx->layout_columns_count < 1)
+    return ctx->layout_indent;
+  return ctx->layout_columns_start_x +
+         ctx->layout_columns_index * (ctx->layout_columns_width +
+                                      ctx->style.spacing_x);
+}
+
+static void layout_prepare_widget(MDGUI_Context *ctx, int *out_local_x,
+                                  int *out_logical_y) {
+  if (!ctx) {
+    if (out_local_x)
+      *out_local_x = 0;
+    if (out_logical_y)
+      *out_logical_y = 0;
+    return;
+  }
+  int local_x = layout_current_column_base_x(ctx);
+  int logical_y = ctx->content_y;
+  if (ctx->layout_columns_active &&
+      ctx->layout_columns_index < (int)ctx->layout_columns_bottoms.size()) {
+    logical_y = ctx->layout_columns_bottoms[ctx->layout_columns_index];
+    ctx->content_y = logical_y;
+  }
+  if (ctx->layout_same_line && ctx->layout_has_last_item &&
+      !ctx->layout_columns_active) {
+    local_x = ctx->layout_last_item_x + ctx->layout_last_item_w +
+              ctx->style.spacing_x;
+    logical_y = ctx->layout_last_item_y;
+  }
+  if (out_local_x)
+    *out_local_x = local_x;
+  if (out_logical_y)
+    *out_logical_y = logical_y;
+}
+
+static int layout_resolve_width(MDGUI_Context *ctx, int local_x, int requested_w,
+                                int min_w) {
+  int resolved = resolve_dynamic_width(ctx, local_x, requested_w, min_w);
+  if (ctx && ctx->layout_columns_active && requested_w <= 0) {
+    if (resolved > ctx->layout_columns_width)
+      resolved = ctx->layout_columns_width;
+  }
+  if (resolved < min_w)
+    resolved = min_w;
+  return resolved;
+}
+
+static void layout_commit_widget(MDGUI_Context *ctx, int local_x, int logical_y,
+                                 int w, int h, int spacing_y) {
+  if (!ctx)
+    return;
+  if (spacing_y < 0)
+    spacing_y = 0;
+  ctx->layout_last_item_x = local_x;
+  ctx->layout_last_item_y = logical_y;
+  ctx->layout_last_item_w = w;
+  ctx->layout_last_item_h = h;
+  ctx->layout_has_last_item = true;
+  ctx->layout_same_line = false;
+
+  const int bottom = logical_y + h + spacing_y;
+  if (ctx->layout_columns_active &&
+      ctx->layout_columns_index < (int)ctx->layout_columns_bottoms.size()) {
+    int &col_bottom = ctx->layout_columns_bottoms[ctx->layout_columns_index];
+    if (bottom > col_bottom)
+      col_bottom = bottom;
+    if (col_bottom > ctx->layout_columns_max_bottom)
+      ctx->layout_columns_max_bottom = col_bottom;
+    ctx->content_y = col_bottom;
+  } else {
+    ctx->content_y = bottom;
+  }
+}
+
+void mdgui_same_line(MDGUI_Context *ctx) {
+  if (!ctx || ctx->current_window < 0)
+    return;
+  if (ctx->layout_has_last_item)
+    ctx->layout_same_line = true;
+}
+
+void mdgui_spacing(MDGUI_Context *ctx, int pixels);
+
+void mdgui_new_line(MDGUI_Context *ctx) {
+  if (!ctx || ctx->current_window < 0)
+    return;
+  if (!ctx->layout_has_last_item) {
+    mdgui_spacing(ctx, ctx->style.spacing_y);
+    return;
+  }
+  const int new_y = ctx->layout_last_item_y + ctx->layout_last_item_h +
+                    ctx->style.spacing_y;
+  if (ctx->layout_columns_active &&
+      ctx->layout_columns_index < (int)ctx->layout_columns_bottoms.size()) {
+    int &col_bottom = ctx->layout_columns_bottoms[ctx->layout_columns_index];
+    if (new_y > col_bottom)
+      col_bottom = new_y;
+    if (col_bottom > ctx->layout_columns_max_bottom)
+      ctx->layout_columns_max_bottom = col_bottom;
+    ctx->content_y = col_bottom;
+  } else {
+    ctx->content_y = new_y;
+  }
+  ctx->layout_same_line = false;
+}
+
+void mdgui_spacing(MDGUI_Context *ctx, int pixels) {
+  if (!ctx || ctx->current_window < 0)
+    return;
+  if (pixels < 0)
+    pixels = 0;
+  if (ctx->layout_columns_active &&
+      ctx->layout_columns_index < (int)ctx->layout_columns_bottoms.size()) {
+    int &col_bottom = ctx->layout_columns_bottoms[ctx->layout_columns_index];
+    col_bottom += pixels;
+    if (col_bottom > ctx->layout_columns_max_bottom)
+      ctx->layout_columns_max_bottom = col_bottom;
+    ctx->content_y = col_bottom;
+  } else {
+    ctx->content_y += pixels;
+  }
+  ctx->layout_same_line = false;
+}
+
+void mdgui_indent(MDGUI_Context *ctx, int pixels) {
+  if (!ctx || ctx->current_window < 0)
+    return;
+  if (pixels <= 0)
+    pixels = ctx->style.indent_step;
+  ctx->indent_stack.push_back(pixels);
+  ctx->layout_indent += pixels;
+}
+
+void mdgui_unindent(MDGUI_Context *ctx) {
+  if (!ctx || ctx->current_window < 0 || ctx->indent_stack.empty())
+    return;
+  const int pixels = ctx->indent_stack.back();
+  ctx->indent_stack.pop_back();
+  ctx->layout_indent -= pixels;
+  if (ctx->layout_indent < 0)
+    ctx->layout_indent = 0;
+}
+
+int mdgui_begin_columns(MDGUI_Context *ctx, int columns) {
+  if (!ctx || ctx->current_window < 0 || columns < 1)
+    return 0;
+  if (ctx->layout_columns_active)
+    return 0;
+  int avail_w = resolve_dynamic_width(ctx, ctx->layout_indent, 0, 24);
+  const int gaps = (columns - 1) * ctx->style.spacing_x;
+  int col_w = (avail_w - gaps) / columns;
+  if (col_w < 12)
+    col_w = 12;
+  ctx->layout_columns_active = true;
+  ctx->layout_columns_count = columns;
+  ctx->layout_columns_index = 0;
+  ctx->layout_columns_start_x = ctx->layout_indent;
+  ctx->layout_columns_start_y = ctx->content_y;
+  ctx->layout_columns_width = col_w;
+  ctx->layout_columns_max_bottom = ctx->content_y;
+  ctx->layout_columns_bottoms.assign((size_t)columns, ctx->content_y);
+  ctx->layout_same_line = false;
+  ctx->layout_has_last_item = false;
+  return 1;
+}
+
+void mdgui_next_column(MDGUI_Context *ctx) {
+  if (!ctx || !ctx->layout_columns_active)
+    return;
+  if (ctx->layout_columns_index + 1 < ctx->layout_columns_count) {
+    ctx->layout_columns_index += 1;
+    if (ctx->layout_columns_index < (int)ctx->layout_columns_bottoms.size())
+      ctx->content_y = ctx->layout_columns_bottoms[ctx->layout_columns_index];
+  }
+  ctx->layout_same_line = false;
+  ctx->layout_has_last_item = false;
+}
+
+void mdgui_end_columns(MDGUI_Context *ctx) {
+  if (!ctx || !ctx->layout_columns_active)
+    return;
+  ctx->content_y = ctx->layout_columns_max_bottom;
+  ctx->layout_columns_active = false;
+  ctx->layout_columns_count = 0;
+  ctx->layout_columns_index = 0;
+  ctx->layout_columns_width = 0;
+  ctx->layout_columns_bottoms.clear();
+  ctx->layout_same_line = false;
+  ctx->layout_has_last_item = false;
+  mdgui_spacing(ctx, ctx->style.spacing_y);
+}
+
+int mdgui_begin_row(MDGUI_Context *ctx, int columns) {
+  return mdgui_begin_columns(ctx, columns);
+}
+
+void mdgui_end_row(MDGUI_Context *ctx) { mdgui_end_columns(ctx); }
+
+int mdgui_button(MDGUI_Context *ctx, const char *text, int w, int h) {
   if (!ctx || ctx->current_window < 0)
     return 0;
   ctx->window_has_nonlabel_widget = true;
   const auto &win = ctx->windows[ctx->current_window];
-  const int local_x = x;
-
-  const int topmost = is_current_window_topmost(ctx);
-  const int requested_w = w;
+  int local_x = 0;
+  int logical_y = 0;
+  layout_prepare_widget(ctx, &local_x, &logical_y);
+  if (h < 8)
+    h = 12;
   const int text_min_w =
       (text && mdgui_fonts[1]) ? (mdgui_fonts[1]->measureTextWidth(text) + 8)
                                : 0;
-  auto fit_button_width = [&](int local_x) {
-    int bw = resolve_dynamic_width(ctx, local_x, requested_w, 12);
-    if (text_min_w > bw)
-      bw = text_min_w;
-    const int max_w_here = resolve_dynamic_width(ctx, local_x, 0, 1);
-    if (bw > max_w_here)
-      bw = max_w_here;
-    return bw;
-  };
+  w = layout_resolve_width(ctx, local_x, w, std::max(12, text_min_w));
 
-  const bool continue_same_button_row =
-      ctx->button_row_active && ctx->button_row_window == ctx->current_window &&
-      ctx->button_row_param_y == y && ctx->button_row_bottom_y == ctx->content_y;
-  const int row_anchor_y =
-      continue_same_button_row ? ctx->button_row_anchor_y : ctx->content_y;
-  if (!continue_same_button_row) {
-    ctx->button_row_active = true;
-    ctx->button_row_window = ctx->current_window;
-    ctx->button_row_param_y = y;
-    ctx->button_row_anchor_y = row_anchor_y;
-    ctx->button_row_bottom_y = ctx->content_y;
-    ctx->button_row_first_x = local_x;
-    ctx->button_row_next_x = local_x;
-    ctx->button_row_last_input_x = local_x;
-    ctx->button_row_last_w = 0;
-    ctx->button_row_hgap = 6;
-    ctx->button_row_flow_logical_y = row_anchor_y + y;
-    ctx->button_row_flow_mode = false;
-  }
-
-  const int row_limit_local = resolve_dynamic_width(ctx, 0, 0, 1);
-  int draw_x = local_x;
-  int logical_y = row_anchor_y + y;
-  if (continue_same_button_row) {
-    if (!ctx->button_row_flow_mode) {
-      const int probe_w = fit_button_width(draw_x);
-      if (draw_x + probe_w > row_limit_local && draw_x > ctx->button_row_first_x) {
-        ctx->button_row_flow_mode = true;
-        ctx->button_row_flow_logical_y = ctx->button_row_bottom_y + y;
-        ctx->button_row_next_x = ctx->button_row_first_x;
-      } else {
-        const int inferred_gap =
-            local_x - (ctx->button_row_last_input_x + ctx->button_row_last_w);
-        if (inferred_gap >= 0 && inferred_gap <= 32)
-          ctx->button_row_hgap = inferred_gap;
-      }
-    }
-
-    if (ctx->button_row_flow_mode) {
-      draw_x = ctx->button_row_next_x;
-      logical_y = ctx->button_row_flow_logical_y;
-      int probe_w = fit_button_width(draw_x);
-      if (draw_x + probe_w > row_limit_local && draw_x > ctx->button_row_first_x) {
-        draw_x = ctx->button_row_first_x;
-        logical_y = ctx->button_row_bottom_y + y;
-        ctx->button_row_flow_logical_y = logical_y;
-        probe_w = fit_button_width(draw_x);
-      }
-      w = probe_w;
-      ctx->button_row_next_x = draw_x + w + ctx->button_row_hgap;
-      ctx->button_row_flow_logical_y = logical_y;
-    } else {
-      w = fit_button_width(draw_x);
-      ctx->button_row_next_x = draw_x + w + ctx->button_row_hgap;
-    }
-  } else {
-    w = fit_button_width(draw_x);
-    ctx->button_row_next_x = draw_x + w + ctx->button_row_hgap;
-  }
-  ctx->button_row_last_input_x = local_x;
-  ctx->button_row_last_w = w;
-
-  const int abs_x = ctx->origin_x + draw_x + ctx->layout_indent;
+  const int abs_x = ctx->origin_x + local_x;
   const int abs_y = logical_y - win.text_scroll;
+  const int topmost = is_current_window_topmost(ctx);
   const int hovered =
       topmost &&
       point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y, abs_x, abs_y, w, h);
@@ -2511,38 +2677,41 @@ int mdgui_button(MDGUI_Context *ctx, const char *text, int x, int y, int w,
     set_content_clip(ctx);
   }
   note_content_bounds(ctx, abs_x + w, logical_y + h);
-  const int bottom_margin = 4;
-  const int row_bottom = logical_y + h + bottom_margin;
-  if (row_bottom > ctx->button_row_bottom_y)
-    ctx->button_row_bottom_y = row_bottom;
-  if (ctx->button_row_bottom_y > ctx->content_y)
-    ctx->content_y = ctx->button_row_bottom_y;
+  layout_commit_widget(ctx, local_x, logical_y, w, h, ctx->style.spacing_y);
 
   return hovered && ctx->input.mouse_pressed && win.z == ctx->z_counter;
 }
 
-void mdgui_label(MDGUI_Context *ctx, const char *text, int x, int y) {
+void mdgui_label(MDGUI_Context *ctx, const char *text) {
   if (!ctx || !text || !mdgui_fonts[1] || ctx->current_window < 0)
     return;
   const auto &win = ctx->windows[ctx->current_window];
-  const int abs_x = ctx->origin_x + x + ctx->layout_indent;
-  const int logical_y = ctx->content_y + y;
-  const int abs_y = logical_y - win.text_scroll;
+  int local_x = 0;
+  int logical_y = 0;
+  layout_prepare_widget(ctx, &local_x, &logical_y);
+  const int top_inset = std::max(1, ctx->style.spacing_y / 2);
+  const int label_logical_y = logical_y + top_inset;
+  const int abs_x = ctx->origin_x + local_x;
+  const int abs_y = label_logical_y - win.text_scroll;
   mdgui_fonts[1]->drawText(text, nullptr, abs_x, abs_y, CLR_TEXT_LIGHT);
   note_content_bounds(ctx, abs_x + mdgui_fonts[1]->measureTextWidth(text),
-                      logical_y + 12);
-  ctx->content_y += 12; // Advance content Y
+                      label_logical_y + ctx->style.label_h);
+  layout_commit_widget(ctx, local_x, logical_y, 1,
+                       ctx->style.label_h + top_inset,
+                       ctx->style.spacing_y);
 }
 
-void mdgui_label_wrapped(MDGUI_Context *ctx, const char *text, int x, int y,
-                         int w) {
+void mdgui_label_wrapped(MDGUI_Context *ctx, const char *text, int w) {
   if (!ctx || !text || !mdgui_fonts[1] || ctx->current_window < 0)
     return;
   const auto &win = ctx->windows[ctx->current_window];
-  const int top_margin = ((y > 0) ? y : 0) + 4;
-  const int abs_x = ctx->origin_x + x + ctx->layout_indent;
-  const int logical_y = ctx->content_y + top_margin;
-  const int wrap_w = resolve_dynamic_width(ctx, x, w, 20);
+  int local_x = 0;
+  int logical_y = 0;
+  layout_prepare_widget(ctx, &local_x, &logical_y);
+  const int top_inset = std::max(1, ctx->style.spacing_y / 2);
+  const int wrapped_logical_y = logical_y + top_inset;
+  const int abs_x = ctx->origin_x + local_x;
+  const int wrap_w = layout_resolve_width(ctx, local_x, w, 20);
   const int margin_l = 2;
   const int margin_r = 2;
   const int draw_x = abs_x + margin_l;
@@ -2553,7 +2722,8 @@ void mdgui_label_wrapped(MDGUI_Context *ctx, const char *text, int x, int y,
   int max_right = draw_x;
 
   auto draw_line = [&](const std::string &line) {
-    const int abs_y = (logical_y + lines_drawn * line_h) - win.text_scroll;
+    const int abs_y =
+        (wrapped_logical_y + lines_drawn * line_h) - win.text_scroll;
     mdgui_fonts[1]->drawText(line.c_str(), nullptr, draw_x, abs_y,
                              CLR_TEXT_LIGHT);
     const int line_w = mdgui_fonts[1]->measureTextWidth(line.c_str());
@@ -2644,30 +2814,21 @@ void mdgui_label_wrapped(MDGUI_Context *ctx, const char *text, int x, int y,
   if (lines_drawn < 1)
     lines_drawn = 1;
   const int bottom_margin = (lines_drawn > 1) ? 4 : 2;
-  note_content_bounds(ctx, max_right + margin_r,
-                      logical_y + lines_drawn * line_h + bottom_margin);
-  ctx->content_y += top_margin + lines_drawn * line_h + bottom_margin;
+  const int total_h = lines_drawn * line_h + bottom_margin;
+  note_content_bounds(ctx, max_right + margin_r, wrapped_logical_y + total_h);
+  layout_commit_widget(ctx, local_x, logical_y, wrap_w, total_h + top_inset,
+                       ctx->style.spacing_y);
 }
 
-void mdgui_spacer(MDGUI_Context *ctx, int pixels) {
-  if (!ctx || ctx->current_window < 0)
-    return;
-  if (pixels < 0)
-    pixels = 0;
-  const auto &win = ctx->windows[ctx->current_window];
-  const int bottom = ctx->content_y + pixels;
-  note_content_bounds(ctx, win.x + 6, bottom);
-  ctx->content_y = bottom;
-}
-
-int mdgui_checkbox(MDGUI_Context *ctx, const char *text, bool *checked, int x,
-                   int y) {
+int mdgui_checkbox(MDGUI_Context *ctx, const char *text, bool *checked) {
   if (!ctx || !checked || ctx->current_window < 0)
     return 0;
   ctx->window_has_nonlabel_widget = true;
   const auto &win = ctx->windows[ctx->current_window];
-  const int ix = ctx->origin_x + x + ctx->layout_indent;
-  const int logical_y = ctx->content_y + y;
+  int local_x = 0;
+  int logical_y = 0;
+  layout_prepare_widget(ctx, &local_x, &logical_y);
+  const int ix = ctx->origin_x + local_x;
   const int iy = logical_y - win.text_scroll;
   const int box_size = 10;
 
@@ -2703,21 +2864,22 @@ int mdgui_checkbox(MDGUI_Context *ctx, const char *text, bool *checked, int x,
     result = 1;
   }
 
-  ctx->content_y += box_size + 4;
+  layout_commit_widget(ctx, local_x, logical_y, box_size + label_w + 4, box_size,
+                       ctx->style.spacing_y);
   return result;
 }
 
 int mdgui_slider(MDGUI_Context *ctx, const char *text, float *val, float min,
-                 float max, int x, int y, int w) {
+                 float max, int w) {
   if (!ctx || !val || ctx->current_window < 0)
     return 0;
   ctx->window_has_nonlabel_widget = true;
   const auto &win = ctx->windows[ctx->current_window];
-  const int requested_w = w;
-  w = resolve_dynamic_width(ctx, x, w, 24);
-  const int ix = ctx->origin_x + x + ctx->layout_indent;
-  const int top_margin = 10;
-  const int logical_y = ctx->content_y + std::max(y, top_margin);
+  int local_x = 0;
+  int logical_y = 0;
+  layout_prepare_widget(ctx, &local_x, &logical_y);
+  w = layout_resolve_width(ctx, local_x, w, 24);
+  const int ix = ctx->origin_x + local_x;
   const int iy = logical_y - win.text_scroll;
   const int track_h = 4;
   const int thumb_w = 8;
@@ -2788,36 +2950,29 @@ int mdgui_slider(MDGUI_Context *ctx, const char *text, float *val, float min,
     mdgui_fonts[1]->drawText(text, nullptr, label_x, label_y, CLR_TEXT_LIGHT);
     label_right = label_x + text_w;
   }
-  int intrinsic_slider_w = w;
-  if (requested_w <= 0)
-    intrinsic_slider_w = 24;
-  const int slider_right = ix + intrinsic_slider_w;
-  note_content_bounds(ctx, std::max(slider_right, label_right),
+  note_content_bounds(ctx, std::max(ix + w, label_right),
                       logical_y + thumb_h);
-
-  const int bottom_margin = 4;
-  ctx->content_y += std::max(y, top_margin) + thumb_h + bottom_margin;
+  layout_commit_widget(ctx, local_x, logical_y, w, thumb_h, ctx->style.spacing_y);
   return result;
 }
 
 int mdgui_collapsing_header(MDGUI_Context *ctx, const char *id,
-                            const char *text, int x, int y, int w,
-                            int default_open) {
+                            const char *text, int w, int default_open) {
   if (!ctx || ctx->current_window < 0 || !text || !mdgui_fonts[1])
     return 0;
   ctx->window_has_nonlabel_widget = true;
   auto &win = ctx->windows[ctx->current_window];
 
-  const int requested_w = w;
-  w = resolve_dynamic_width(ctx, x, w, 24);
+  int local_x = 0;
+  int logical_y = 0;
+  layout_prepare_widget(ctx, &local_x, &logical_y);
+  w = layout_resolve_width(ctx, local_x, w, 24);
   const int text_w =
       mdgui_fonts[1] ? mdgui_fonts[1]->measureTextWidth(text) : 0;
   const int needed_w = 12 + text_w + 4;
   if (w < needed_w)
     w = needed_w;
-  const int ix = ctx->origin_x + x + ctx->layout_indent;
-  const int top_margin = 2;
-  const int logical_y = ctx->content_y + std::max(y, top_margin);
+  const int ix = ctx->origin_x + local_x;
   const int iy = logical_y - win.text_scroll;
   const int row_h = 12;
   const int topmost = is_current_window_topmost(ctx);
@@ -2842,100 +2997,63 @@ int mdgui_collapsing_header(MDGUI_Context *ctx, const char *id,
                            CLR_TEXT_LIGHT);
   mdgui_fonts[1]->drawText(text, nullptr, ix + 12, iy + 2, CLR_TEXT_LIGHT);
 
-  int intrinsic_w = w;
   const int text_right = ix + 12 + text_w;
-  if (requested_w <= 0) {
-    // Dynamic width: derive
-    // requirement from content, not
-    // resolved width.
-    intrinsic_w = (needed_w > 24) ? needed_w : 24;
-  } else if (needed_w > intrinsic_w) {
-    intrinsic_w = needed_w;
-  }
-  int right_needed = ix + intrinsic_w;
-  if (requested_w > 0)
-    right_needed = std::max(right_needed, text_right);
-  if (requested_w <= 0)
-    right_needed += 14; // match
-                        // resolve_dynamic_width
-                        // right gutter reserve
+  int right_needed = std::max(ix + w, text_right);
   note_content_bounds(ctx, right_needed, logical_y + row_h);
-  const int bottom_gap = 2 + (*open ? 2 : 0);
-  ctx->content_y += std::max(y, top_margin) + row_h + bottom_gap;
+  layout_commit_widget(ctx, local_x, logical_y, w, row_h,
+                       2 + (*open ? 2 : 0));
   return *open ? 1 : 0;
 }
 
-void mdgui_push_indent(MDGUI_Context *ctx, int pixels) {
-  if (!ctx || ctx->current_window < 0)
-    return;
-  if (pixels < 0)
-    pixels = 0;
-  ctx->indent_stack.push_back(pixels);
-  ctx->layout_indent += pixels;
-}
-
-void mdgui_pop_indent(MDGUI_Context *ctx) {
-  if (!ctx || ctx->current_window < 0 || ctx->indent_stack.empty())
-    return;
-  const int pixels = ctx->indent_stack.back();
-  ctx->indent_stack.pop_back();
-  ctx->layout_indent -= pixels;
-  if (ctx->layout_indent < 0)
-    ctx->layout_indent = 0;
-}
-
 int mdgui_begin_collapsing_header_group(MDGUI_Context *ctx, const char *id,
-                                        const char *text, int x, int y, int w,
+                                        const char *text, int w,
                                         int default_open, int child_indent) {
-  const int open = mdgui_collapsing_header(ctx, id, text, x, y, w, default_open);
+  const int open = mdgui_collapsing_header(ctx, id, text, w, default_open);
   if (open) {
     if (child_indent <= 0)
-      child_indent = 8;
-    mdgui_push_indent(ctx, child_indent);
+      child_indent = ctx->style.indent_step;
+    mdgui_indent(ctx, child_indent);
   }
   return open;
 }
 
 void mdgui_end_collapsing_header_group(MDGUI_Context *ctx) {
-  mdgui_pop_indent(ctx);
+  mdgui_unindent(ctx);
 }
 
-void mdgui_separator(MDGUI_Context *ctx, int x, int y, int w) {
+void mdgui_separator(MDGUI_Context *ctx, int w) {
   if (!ctx || ctx->current_window < 0)
     return;
   ctx->window_has_nonlabel_widget = true;
   const auto &win = ctx->windows[ctx->current_window];
   const int sep_h = 2;
-  const int gap = (y > 0) ? y : 0;
-  const int top_gap = std::min(gap, 4);
-  const int bottom_gap = gap - top_gap;
-  const int requested_w = w;
-  w = resolve_dynamic_width(ctx, x, w, 4);
-  const int ix = ctx->origin_x + x + ctx->layout_indent;
-  const int logical_y = ctx->content_y + top_gap;
+  int local_x = 0;
+  int logical_y = 0;
+  layout_prepare_widget(ctx, &local_x, &logical_y);
+  w = layout_resolve_width(ctx, local_x, w, 4);
+  const int ix = ctx->origin_x + local_x;
   const int iy = logical_y - win.text_scroll;
   mdgui_draw_hline_idx(nullptr, CLR_ACCENT, ix, iy, ix + w);
   mdgui_draw_hline_idx(nullptr, CLR_ACCENT, ix, iy + 1, ix + w);
-  if (requested_w > 0)
-    note_content_bounds(ctx, ix + w, logical_y + sep_h);
-  ctx->content_y += top_gap + sep_h + bottom_gap;
+  note_content_bounds(ctx, ix + w, logical_y + sep_h);
+  layout_commit_widget(ctx, local_x, logical_y, w, sep_h, ctx->style.spacing_y);
 }
 
 int mdgui_listbox(MDGUI_Context *ctx, const char **items, int item_count,
-                  int *selected, int x, int y, int w, int rows) {
+                  int *selected, int w, int rows) {
   if (!ctx || !selected || !items || item_count <= 0)
     return 0;
   ctx->window_has_nonlabel_widget = true;
   const auto &win = ctx->windows[ctx->current_window];
   if (rows < 1)
     rows = 1;
-  const int requested_w = w;
-  w = resolve_dynamic_width(ctx, x, w, 24);
+  int local_x = 0;
+  int logical_y = 0;
+  layout_prepare_widget(ctx, &local_x, &logical_y);
+  w = layout_resolve_width(ctx, local_x, w, 24);
   const int row_h = 10;
   const int box_h = rows * row_h;
-  const int ix = ctx->origin_x + x + ctx->layout_indent;
-  const int top_margin = 4;
-  const int logical_y = ctx->content_y + std::max(y, top_margin);
+  const int ix = ctx->origin_x + local_x;
   const int iy = logical_y - win.text_scroll;
   const int topmost = is_current_window_topmost(ctx);
 
@@ -2971,17 +3089,13 @@ int mdgui_listbox(MDGUI_Context *ctx, const char **items, int item_count,
     }
   }
 
-  int intrinsic_w = w;
-  if (requested_w <= 0)
-    intrinsic_w = 24;
-  note_content_bounds(ctx, ix + intrinsic_w, logical_y + box_h);
-  const int bottom_margin = 4;
-  ctx->content_y += std::max(y, top_margin) + box_h + bottom_margin;
+  note_content_bounds(ctx, ix + w, logical_y + box_h);
+  layout_commit_widget(ctx, local_x, logical_y, w, box_h, ctx->style.spacing_y);
   return clicked;
 }
 
 int mdgui_combo(MDGUI_Context *ctx, const char *label, const char **items,
-                int item_count, int *selected, int x, int y, int w) {
+                int item_count, int *selected, int w) {
   if (!ctx || !selected || !items || item_count <= 0 || ctx->current_window < 0)
     return 0;
   ctx->window_has_nonlabel_widget = true;
@@ -2989,16 +3103,16 @@ int mdgui_combo(MDGUI_Context *ctx, const char *label, const char **items,
   const int topmost = is_current_window_topmost(ctx);
   const int item_h = 10;
   const int box_h = 12;
-  const int requested_w = w;
-  w = resolve_dynamic_width(ctx, x, w, 40);
+  int local_x = 0;
+  int logical_y = 0;
+  layout_prepare_widget(ctx, &local_x, &logical_y);
+  w = layout_resolve_width(ctx, local_x, w, 40);
   if (*selected < 0)
     *selected = 0;
   if (*selected >= item_count)
     *selected = item_count - 1;
 
-  const int ix = ctx->origin_x + x + ctx->layout_indent;
-  const int top_margin = 10;
-  const int logical_y = ctx->content_y + std::max(y, top_margin);
+  const int ix = ctx->origin_x + local_x;
   const int iy = logical_y - win.text_scroll;
   const int combo_id = ((ix & 0xffff) << 16) ^ (iy & 0xffff) ^ (w << 2);
   const int open = (win.open_combo_id == combo_id);
@@ -3039,16 +3153,6 @@ int mdgui_combo(MDGUI_Context *ctx, const char *label, const char **items,
   }
 
   int changed = 0;
-  int intrinsic_w = w;
-  if (requested_w <= 0) {
-    intrinsic_w = 40;
-    if (mdgui_fonts[1] && items[*selected]) {
-      const int text_need =
-          mdgui_fonts[1]->measureTextWidth(items[*selected]) + 14;
-      if (text_need > intrinsic_w)
-        intrinsic_w = text_need;
-    }
-  }
 
   if (win.open_combo_id == combo_id) {
     const int popup_y = iy + box_h;
@@ -3069,7 +3173,7 @@ int mdgui_combo(MDGUI_Context *ctx, const char *label, const char **items,
                                       // selection click
       }
     }
-    note_content_bounds(ctx, ix + intrinsic_w, logical_y + box_h + popup_h);
+    note_content_bounds(ctx, ix + w, logical_y + box_h + popup_h);
     ctx->combo_overlay_pending = true;
     ctx->combo_overlay_window = ctx->current_window;
     ctx->combo_overlay_x = ix;
@@ -3081,30 +3185,31 @@ int mdgui_combo(MDGUI_Context *ctx, const char *label, const char **items,
     ctx->combo_overlay_items = items;
   }
 
-  note_content_bounds(ctx, ix + intrinsic_w, logical_y + box_h);
-  const int bottom_margin = 4;
-  ctx->content_y += std::max(y, top_margin) + box_h + bottom_margin;
+  note_content_bounds(ctx, ix + w, logical_y + box_h);
+  layout_commit_widget(ctx, local_x, logical_y, w, box_h,
+                       ctx->style.spacing_y);
   return changed;
 }
 
 int mdgui_input_text(MDGUI_Context *ctx, const char *label, char *buffer,
-                     int buffer_size, int x, int y, int w) {
+                     int buffer_size, int w) {
   if (!ctx || !buffer || buffer_size <= 1 || ctx->current_window < 0)
     return 0;
   ctx->window_has_nonlabel_widget = true;
   auto &win = ctx->windows[ctx->current_window];
   const int topmost = is_current_window_topmost(ctx);
   const int box_h = 12;
-  const int requested_w = w;
-  w = resolve_dynamic_width(ctx, x, w, 40);
-
-  const int ix = ctx->origin_x + x + ctx->layout_indent;
-  const int top_margin = 10;
-  const int logical_y = ctx->content_y + std::max(y, top_margin);
-  const int iy = logical_y - win.text_scroll;
+  int local_x = 0;
+  int logical_y = 0;
+  layout_prepare_widget(ctx, &local_x, &logical_y);
+  w = layout_resolve_width(ctx, local_x, w, 40);
+  const int ix = ctx->origin_x + local_x;
+  const int label_h = (label && mdgui_fonts[1]) ? ctx->style.label_h : 0;
+  const int box_logical_y = logical_y + label_h;
+  const int iy = box_logical_y - win.text_scroll;
   const uintptr_t buf_addr = (uintptr_t)buffer;
   const int input_id = (int)(((buf_addr >> 3) & 0x7fffffff) ^
-                             ((ix & 0xffff) << 16) ^ (y & 0xffff) ^ 0x54455854);
+                             ((ix & 0xffff) << 16) ^ 0x54455854);
   const bool focused = (ctx->active_text_input_window == ctx->current_window &&
                         ctx->active_text_input_id == input_id);
 
@@ -3339,36 +3444,40 @@ int mdgui_input_text(MDGUI_Context *ctx, const char *label, char *buffer,
     set_content_clip(ctx);
   }
 
+  int right = ix + w;
   if (label && mdgui_fonts[1]) {
-    mdgui_fonts[1]->drawText(label, nullptr, ix, iy - 10, CLR_TEXT_LIGHT);
+    mdgui_fonts[1]->drawText(label, nullptr, ix, logical_y - win.text_scroll,
+                             CLR_TEXT_LIGHT);
+    const int label_w = mdgui_fonts[1]->measureTextWidth(label);
+    if (ix + label_w > right)
+      right = ix + label_w;
   }
 
-  int intrinsic_w = w;
-  if (requested_w <= 0)
-    intrinsic_w = 40;
-  note_content_bounds(ctx, ix + intrinsic_w, logical_y + box_h);
-  const int bottom_margin = 4;
-  ctx->content_y += std::max(y, top_margin) + box_h + bottom_margin;
+  note_content_bounds(ctx, right, box_logical_y + box_h);
+  layout_commit_widget(ctx, local_x, logical_y, w, label_h + box_h,
+                       ctx->style.spacing_y);
   return flags;
 }
 
 int mdgui_input_text_multiline(MDGUI_Context *ctx, const char *label,
-                               char *buffer, int buffer_size, int x, int y,
-                               int w, int h, int flags) {
+                               char *buffer, int buffer_size, int w, int h,
+                               int flags) {
   if (!ctx || !buffer || buffer_size <= 1 || ctx->current_window < 0)
     return 0;
   ctx->window_has_nonlabel_widget = true;
   auto &win = ctx->windows[ctx->current_window];
   const int topmost = is_current_window_topmost(ctx);
-  const int requested_w = w;
-  w = resolve_dynamic_width(ctx, x, w, 40);
+  int local_x = 0;
+  int logical_y = 0;
+  layout_prepare_widget(ctx, &local_x, &logical_y);
+  w = layout_resolve_width(ctx, local_x, w, 40);
   if (h < 24)
     h = 24;
 
-  const int ix = ctx->origin_x + x + ctx->layout_indent;
-  const int top_margin = 10;
-  const int logical_y = ctx->content_y + std::max(y, top_margin);
-  const int iy = logical_y - win.text_scroll;
+  const int ix = ctx->origin_x + local_x;
+  const int label_h = (label && mdgui_fonts[1]) ? ctx->style.label_h : 0;
+  const int box_logical_y = logical_y + label_h;
+  const int iy = box_logical_y - win.text_scroll;
 
   int len = 0;
   while (len < (buffer_size - 1) && buffer[len] != '\0')
@@ -3400,7 +3509,7 @@ int mdgui_input_text_multiline(MDGUI_Context *ctx, const char *label,
 
   const uintptr_t buf_addr = (uintptr_t)buffer;
   const int input_id = (int)(((buf_addr >> 3) & 0x7fffffff) ^
-                             ((ix & 0xffff) << 16) ^ (y & 0xffff) ^ 0x4d4c5449);
+                             ((ix & 0xffff) << 16) ^ 0x4d4c5449);
   const bool focused = (ctx->active_text_input_window == ctx->current_window &&
                         ctx->active_text_input_id == input_id);
   if (focused && !ctx->active_text_input_multiline) {
@@ -3759,27 +3868,31 @@ int mdgui_input_text_multiline(MDGUI_Context *ctx, const char *label,
     set_content_clip(ctx);
   }
 
+  int right = ix + w;
   if (label && mdgui_fonts[1]) {
-    mdgui_fonts[1]->drawText(label, nullptr, ix, iy - 10, CLR_TEXT_LIGHT);
+    mdgui_fonts[1]->drawText(label, nullptr, ix, logical_y - win.text_scroll,
+                             CLR_TEXT_LIGHT);
+    const int label_w = mdgui_fonts[1]->measureTextWidth(label);
+    if (ix + label_w > right)
+      right = ix + label_w;
   }
 
-  int intrinsic_w = w;
-  if (requested_w <= 0)
-    intrinsic_w = 40;
-  note_content_bounds(ctx, ix + intrinsic_w, logical_y + h);
-  const int bottom_margin = 4;
-  ctx->content_y += std::max(y, top_margin) + h + bottom_margin;
+  note_content_bounds(ctx, right, box_logical_y + h);
+  layout_commit_widget(ctx, local_x, logical_y, w, label_h + h,
+                       ctx->style.spacing_y);
   return result_flags;
 }
 
-void mdgui_progress_bar(MDGUI_Context *ctx, float value, int x, int y, int w,
-                        int h, const char *overlay_text) {
+void mdgui_progress_bar(MDGUI_Context *ctx, float value, int w, int h,
+                        const char *overlay_text) {
   if (!ctx || ctx->current_window < 0)
     return;
   ctx->window_has_nonlabel_widget = true;
   const auto &win = ctx->windows[ctx->current_window];
-  const int requested_w = w;
-  w = resolve_dynamic_width(ctx, x, w, 24);
+  int local_x = 0;
+  int logical_y = 0;
+  layout_prepare_widget(ctx, &local_x, &logical_y);
+  w = layout_resolve_width(ctx, local_x, w, 24);
   if (h < 6)
     h = 6;
   if (value < 0.0f)
@@ -3787,9 +3900,7 @@ void mdgui_progress_bar(MDGUI_Context *ctx, float value, int x, int y, int w,
   if (value > 1.0f)
     value = 1.0f;
 
-  const int ix = ctx->origin_x + x + ctx->layout_indent;
-  const int top_margin = 4;
-  const int logical_y = ctx->content_y + std::max(y, top_margin);
+  const int ix = ctx->origin_x + local_x;
   const int iy = logical_y - win.text_scroll;
   const int fill_w = (int)((float)w * value);
 
@@ -3808,23 +3919,13 @@ void mdgui_progress_bar(MDGUI_Context *ctx, float value, int x, int y, int w,
     mdgui_fonts[1]->drawText(overlay_text, nullptr, ix + (w - tw) / 2, iy + 1,
                              CLR_TEXT_LIGHT);
   }
-  int intrinsic_w = w;
-  if (requested_w <= 0) {
-    intrinsic_w = 24;
-    if (overlay_text && mdgui_fonts[1]) {
-      const int text_need = mdgui_fonts[1]->measureTextWidth(overlay_text) + 6;
-      if (text_need > intrinsic_w)
-        intrinsic_w = text_need;
-    }
-  }
-  note_content_bounds(ctx, ix + intrinsic_w, logical_y + h);
-  const int bottom_margin = 4;
-  ctx->content_y += std::max(y, top_margin) + h + bottom_margin;
+  note_content_bounds(ctx, ix + w, logical_y + h);
+  layout_commit_widget(ctx, local_x, logical_y, w, h, ctx->style.spacing_y + 2);
 }
 
 void mdgui_frame_time_graph(MDGUI_Context *ctx, const float *frame_ms_samples,
                             int sample_count, float target_fps,
-                            float graph_max_ms, int x, int y, int w, int h) {
+                            float graph_max_ms, int w, int h) {
   if (!ctx || ctx->current_window < 0)
     return;
   ctx->window_has_nonlabel_widget = true;
@@ -3833,23 +3934,23 @@ void mdgui_frame_time_graph(MDGUI_Context *ctx, const float *frame_ms_samples,
   const int requested_w = w;
   const int requested_h = h;
   const bool fill_mode = (requested_w == 0 && requested_h == 0);
+  int local_x = 0;
+  int logical_y = 0;
+  layout_prepare_widget(ctx, &local_x, &logical_y);
   if (fill_mode) {
-    int avail_w =
-        (win.x + win.w - 2) - (ctx->origin_x + x + ctx->layout_indent);
+    int avail_w = (win.x + win.w - 2) - (ctx->origin_x + local_x);
     if (avail_w < 24)
       avail_w = 24;
     w = avail_w;
   } else {
-    w = resolve_dynamic_width(ctx, x, w, 24);
+    w = layout_resolve_width(ctx, local_x, w, 24);
   }
   if (target_fps < 1.0f)
     target_fps = 1.0f;
   if (graph_max_ms < 1.0f)
     graph_max_ms = 1.0f;
 
-  const int ix = ctx->origin_x + x + ctx->layout_indent;
-  const int top_margin = 4;
-  const int logical_y = ctx->content_y + std::max(y, top_margin);
+  const int ix = ctx->origin_x + local_x;
   const int iy = logical_y - win.text_scroll;
 
   // Height 0/negative mirrors dynamic
@@ -3942,10 +4043,9 @@ void mdgui_frame_time_graph(MDGUI_Context *ctx, const float *frame_ms_samples,
   const int intrinsic_h = fill_mode ? 12 : h;
   note_content_bounds(ctx, ix + intrinsic_w, logical_y + intrinsic_h);
   if (fill_mode) {
-    ctx->content_y = logical_y + h;
+    layout_commit_widget(ctx, local_x, logical_y, w, h, 0);
   } else {
-    const int bottom_margin = 4;
-    ctx->content_y += std::max(y, top_margin) + h + bottom_margin;
+    layout_commit_widget(ctx, local_x, logical_y, w, h, ctx->style.spacing_y);
   }
 }
 
@@ -3974,7 +4074,7 @@ void mdgui_begin_menu_bar(MDGUI_Context *ctx) {
   ctx->menu_defs.clear();
   ctx->menu_build_stack.clear();
   if (!had_menu_bar) {
-    const int content_top = bar_y + bar_h + 2;
+    const int content_top = bar_y + bar_h + 2 + ctx->style.content_pad_y;
     ctx->origin_y = content_top;
     if (ctx->content_y < content_top)
       ctx->content_y = content_top;
@@ -4588,28 +4688,39 @@ int mdgui_message_box_ex(MDGUI_Context *ctx, const char *id, const char *title,
   const int btn_w = 70;
   const int btn_h = 12;
   const int btn_abs_y = footer_y + (footer_h - btn_h) / 2;
-  // mdgui_button applies window
-  // text_scroll to y; compensate so
-  // footer button stays visually
-  // centered regardless of scroll
-  // state.
-  const int btn_y = btn_abs_y - ctx->content_y + win.text_scroll;
-
+  const int saved_content_y = ctx->content_y;
+  const int saved_indent = ctx->layout_indent;
+  const bool saved_has_last = ctx->layout_has_last_item;
+  const bool saved_same_line = ctx->layout_same_line;
+  const int button_logical_y = btn_abs_y + win.text_scroll;
   if (style == MDGUI_MSGBOX_TWO_BUTTON) {
     const int b1_abs_x = win.x + (win.w / 4) - (btn_w / 2);
     const int b2_abs_x = win.x + ((win.w * 3) / 4) - (btn_w / 2);
-    if (mdgui_button(ctx, button1, b1_abs_x - ctx->origin_x, btn_y, btn_w,
-                     btn_h))
+    ctx->content_y = button_logical_y;
+    ctx->layout_indent = b1_abs_x - ctx->origin_x;
+    ctx->layout_has_last_item = false;
+    ctx->layout_same_line = false;
+    if (mdgui_button(ctx, button1, btn_w, btn_h))
       result = 1;
-    if (mdgui_button(ctx, button2, b2_abs_x - ctx->origin_x, btn_y, btn_w,
-                     btn_h))
+    ctx->content_y = button_logical_y;
+    ctx->layout_indent = b2_abs_x - ctx->origin_x;
+    ctx->layout_has_last_item = false;
+    ctx->layout_same_line = false;
+    if (mdgui_button(ctx, button2, btn_w, btn_h))
       result = 2;
   } else {
     const int b_abs_x = win.x + (win.w / 2) - (btn_w / 2);
-    if (mdgui_button(ctx, button1, b_abs_x - ctx->origin_x, btn_y, btn_w,
-                     btn_h))
+    ctx->content_y = button_logical_y;
+    ctx->layout_indent = b_abs_x - ctx->origin_x;
+    ctx->layout_has_last_item = false;
+    ctx->layout_same_line = false;
+    if (mdgui_button(ctx, button1, btn_w, btn_h))
       result = 1;
   }
+  ctx->content_y = saved_content_y;
+  ctx->layout_indent = saved_indent;
+  ctx->layout_has_last_item = saved_has_last;
+  ctx->layout_same_line = saved_same_line;
 
   mdgui_end_window(ctx);
   return result;
@@ -5048,6 +5159,7 @@ int mdgui_begin_render_window_ex(MDGUI_Context *ctx, const char *title, int x,
     ctx->origin_x = cx;
     ctx->origin_y = cy;
     ctx->content_y = cy;
+    ctx->layout_indent = 0;
     mdgui_backend_set_clip_rect(1, clip_x1, clip_y1, clip_w, clip_h);
 
     if (out_x)
@@ -5074,13 +5186,19 @@ int mdgui_begin_render_window_ex(MDGUI_Context *ctx, const char *title, int x,
     return 0;
   const auto &win = ctx->windows[ctx->current_window];
   const int cx = ctx->origin_x;
-  const int cy = ctx->content_y;
+  int cy = ctx->origin_y;
+  // Render-window content is raw viewport content; it should not inherit flow
+  // layout padding. If menu exists, anchor directly below it.
+  if (show_menu && ctx->has_menu_bar)
+    cy = ctx->menu_bar_y + ctx->menu_bar_h + 2;
   int cw = win.w - 4;
   int ch = (win.y + win.h - 4) - cy;
   if (cw < 1)
     cw = 1;
   if (ch < 1)
     ch = 1;
+  ctx->content_y = cy;
+  ctx->layout_indent = 0;
   if (out_x)
     *out_x = cx;
   if (out_y)
@@ -5220,8 +5338,8 @@ const char *mdgui_show_file_browser(MDGUI_Context *ctx) {
   if (win.min_h < 130)
     win.min_h = 130;
 
-  mdgui_label(ctx, "Directory:", 8, 2);
-  mdgui_label(ctx, ctx->file_browser_cwd.c_str(), 8, 0);
+  mdgui_label(ctx, "Directory:");
+  mdgui_label(ctx, ctx->file_browser_cwd.c_str());
 
   const int row_h = 10;
   const int button_h = 12;
@@ -5352,20 +5470,41 @@ const char *mdgui_show_file_browser(MDGUI_Context *ctx) {
     ctx->file_browser_last_click_ticks = now;
   }
 
-  const int button_local_y = bottom_buttons_y - ctx->content_y;
-  if (mdgui_button(ctx, "Up", 8, button_local_y, 48, button_h)) {
+  const int saved_content_y = ctx->content_y;
+  const int saved_indent = ctx->layout_indent;
+  const bool saved_has_last = ctx->layout_has_last_item;
+  const bool saved_same_line = ctx->layout_same_line;
+  const int button_logical_y = bottom_buttons_y + win.text_scroll;
+
+  ctx->content_y = button_logical_y;
+  ctx->layout_indent = 8;
+  ctx->layout_has_last_item = false;
+  ctx->layout_same_line = false;
+  if (mdgui_button(ctx, "Up", 48, button_h)) {
     file_browser_open_path(ctx, "..");
   }
-  if (mdgui_button(ctx, "Open", 60, button_local_y, 60, button_h)) {
+  ctx->content_y = button_logical_y;
+  ctx->layout_indent = 60;
+  ctx->layout_has_last_item = false;
+  ctx->layout_same_line = false;
+  if (mdgui_button(ctx, "Open", 60, button_h)) {
     trigger_open = true;
   }
-  if (mdgui_button(ctx, "Cancel", 124, button_local_y, 60, button_h)) {
+  ctx->content_y = button_logical_y;
+  ctx->layout_indent = 124;
+  ctx->layout_has_last_item = false;
+  ctx->layout_same_line = false;
+  if (mdgui_button(ctx, "Cancel", 60, button_h)) {
     ctx->file_browser_open = false;
     if (ctx->current_window >= 0 &&
         ctx->current_window < (int)ctx->windows.size()) {
       ctx->windows[ctx->current_window].closed = true;
     }
   }
+  ctx->content_y = saved_content_y;
+  ctx->layout_indent = saved_indent;
+  ctx->layout_has_last_item = saved_has_last;
+  ctx->layout_same_line = saved_same_line;
 
   if (trigger_open && ctx->file_browser_selected >= 0 &&
       ctx->file_browser_selected < (int)ctx->file_browser_entries.size()) {
@@ -5405,44 +5544,43 @@ void mdgui_show_demo_window(MDGUI_Context *ctx) {
     static float vol1 = 0.5f;
     static float vol2 = 0.8f;
 
-    if (mdgui_collapsing_header(ctx, "demo.widgets", "Aesthetics & Widgets", 10,
-                                5, -16, 1)) {
-      mdgui_push_indent(ctx, 8);
-      mdgui_checkbox(ctx, "Enable Sound", &check1, 10, 5);
-      mdgui_checkbox(ctx, "Turbo Mode", &check2, 10, 5);
-      mdgui_pop_indent(ctx);
+    if (mdgui_collapsing_header(ctx, "demo.widgets", "Aesthetics & Widgets",
+                                -16, 1)) {
+      mdgui_indent(ctx, 8);
+      mdgui_checkbox(ctx, "Enable Sound", &check1);
+      mdgui_checkbox(ctx, "Turbo Mode", &check2);
+      mdgui_unindent(ctx);
     }
 
-    if (mdgui_collapsing_header(ctx, "demo.volumes", "Audio Volumes", 10, 4,
-                                -16, 1)) {
-      mdgui_push_indent(ctx, 8);
-      mdgui_slider(ctx, "Master", &vol1, 0.0f, 1.0f, 10, 5, -54);
-      mdgui_slider(ctx, "Music", &vol2, 0.0f, 1.0f, 10, 5, -46);
-      mdgui_pop_indent(ctx);
+    if (mdgui_collapsing_header(ctx, "demo.volumes", "Audio Volumes", -16, 1)) {
+      mdgui_indent(ctx, 8);
+      mdgui_slider(ctx, "Master", &vol1, 0.0f, 1.0f, -54);
+      mdgui_slider(ctx, "Music", &vol2, 0.0f, 1.0f, -46);
+      mdgui_unindent(ctx);
     }
 
-    if (mdgui_collapsing_header(ctx, "demo.renderer", "Renderer Options", 10, 4,
-                                -16, 1)) {
-      mdgui_push_indent(ctx, 8);
-      mdgui_listbox(ctx, quality_items, 3, &quality_idx, 10, 3, -16, 3);
+    if (mdgui_collapsing_header(ctx, "demo.renderer", "Renderer Options", -16,
+                                1)) {
+      mdgui_indent(ctx, 8);
+      mdgui_listbox(ctx, quality_items, 3, &quality_idx, -16, 3);
 
-      mdgui_label(ctx, "Filter Combo", 10, 5);
-      mdgui_combo(ctx, nullptr, quality_items, 3, &quality_idx, 10, 2, -16);
+      mdgui_label(ctx, "Filter Combo");
+      mdgui_combo(ctx, nullptr, quality_items, 3, &quality_idx, -16);
 
-      mdgui_label(ctx, "Theme", 10, 5);
+      mdgui_label(ctx, "Theme");
       theme_idx = mdgui_get_theme();
-      if (mdgui_combo(ctx, nullptr, theme_items, 6, &theme_idx, 10, 2, -16)) {
+      if (mdgui_combo(ctx, nullptr, theme_items, 6, &theme_idx, -16)) {
         mdgui_set_theme(theme_idx);
       }
 
-      mdgui_label(ctx, "Frame Progress", 10, 5);
-      mdgui_progress_bar(ctx, progress, 10, 3, -16, 10, nullptr);
-      if (mdgui_button(ctx, "Step", 10, 5, 56, 12)) {
+      mdgui_label(ctx, "Frame Progress");
+      mdgui_progress_bar(ctx, progress, -16, 10, nullptr);
+      if (mdgui_button(ctx, "Step", 56, 12)) {
         progress += 0.1f;
         if (progress > 1.0f)
           progress = 0.0f;
       }
-      mdgui_pop_indent(ctx);
+      mdgui_unindent(ctx);
     }
 
     // Reserve footer space, but only
@@ -5463,12 +5601,23 @@ void mdgui_show_demo_window(MDGUI_Context *ctx) {
                             (win.text_scroll >= (max_scroll_with_footer - 2));
 
     const int footer_start_y = ctx->content_y;
-    mdgui_spacer(ctx, footer_h);
+    mdgui_spacing(ctx, footer_h);
     if (show_close) {
-      const int button_local_y = (footer_start_y + 6) - ctx->content_y;
-      if (mdgui_button(ctx, "Close Demo", 10, button_local_y, -12, 12)) {
+      const int saved_demo_content_y = ctx->content_y;
+      const int saved_demo_indent = ctx->layout_indent;
+      const bool saved_demo_has_last = ctx->layout_has_last_item;
+      const bool saved_demo_same_line = ctx->layout_same_line;
+      ctx->content_y = footer_start_y + 6 + win.text_scroll;
+      ctx->layout_indent = 10;
+      ctx->layout_has_last_item = false;
+      ctx->layout_same_line = false;
+      if (mdgui_button(ctx, "Close Demo", -12, 12)) {
         ctx->windows[ctx->current_window].closed = true;
       }
+      ctx->content_y = saved_demo_content_y;
+      ctx->layout_indent = saved_demo_indent;
+      ctx->layout_has_last_item = saved_demo_has_last;
+      ctx->layout_same_line = saved_demo_same_line;
     }
 
     mdgui_end_window(ctx);
