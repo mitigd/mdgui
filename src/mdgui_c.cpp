@@ -65,6 +65,7 @@ struct MDGUI_Window {
   bool disallow_maximize;
   bool is_message_box;
   bool scrollbar_visible;
+  bool scrollbar_overflow_active;
   int tile_weight;
   int tile_side;
   bool tile_excluded;
@@ -323,8 +324,15 @@ static int resolve_dynamic_width(MDGUI_Context *ctx, int local_x, int w,
     return (w > 0) ? w : min_w;
   const auto &win = ctx->windows[ctx->current_window];
   const int effective_local_x = local_x + ctx->layout_indent;
-  // Reserve a right gutter so vertical scrollbars never overlap widgets.
-  const int right_pad = 14;
+  // Reserve right gutter only when an active scrollbar is visible.
+  int right_pad = 2;
+  if (ctx->current_window >= 0 &&
+      ctx->current_window < (int)ctx->windows.size()) {
+    const auto &win = ctx->windows[ctx->current_window];
+    if (win.scrollbar_visible && !win.is_message_box &&
+        win.scrollbar_overflow_active)
+      right_pad = 14;
+  }
   int avail = (win.x + win.w - right_pad) - (ctx->origin_x + effective_local_x);
   if (avail < min_w)
     avail = min_w;
@@ -1225,6 +1233,7 @@ static int find_or_create_window(MDGUI_Context *ctx, const char *title, int x,
   nw.disallow_maximize = false;
   nw.is_message_box = false;
   nw.scrollbar_visible = true;
+  nw.scrollbar_overflow_active = false;
   nw.tile_weight = 1;
   nw.tile_side = MDGUI_TILE_SIDE_AUTO;
   nw.tile_excluded = has_pending_tile_excluded_title(ctx, key);
@@ -2426,9 +2435,10 @@ void mdgui_end_window(MDGUI_Context *ctx) {
       win.text_scroll = 0;
     if (win.text_scroll > max_scroll)
       win.text_scroll = max_scroll;
+    win.scrollbar_overflow_active = (max_scroll > 0);
 
-    const bool show_scrollbar =
-        (viewport_h > 8) && !win.is_message_box && win.scrollbar_visible;
+    const bool show_scrollbar = (viewport_h > 8) && !win.is_message_box &&
+                                win.scrollbar_visible && (max_scroll > 0);
     if (show_scrollbar) {
       const int sb_w = 8;
       const int sb_x = win.x + win.w - sb_w - 2;
@@ -2441,16 +2451,12 @@ void mdgui_end_window(MDGUI_Context *ctx) {
       if (thumb_h > viewport_h)
         thumb_h = viewport_h;
       const int travel = viewport_h - thumb_h;
-      const int thumb_y =
-          sb_y + ((max_scroll > 0 && travel > 0)
-                      ? ((win.text_scroll * travel) / max_scroll)
-                      : 0);
-      const int thumb_color = (max_scroll > 0) ? CLR_ACCENT : CLR_BUTTON_DARK;
-      mdgui_fill_rect_idx(nullptr, thumb_color, sb_x + 1, thumb_y, sb_w - 2,
+      const int thumb_y = sb_y + ((travel > 0) ? ((win.text_scroll * travel) / max_scroll) : 0);
+      mdgui_fill_rect_idx(nullptr, CLR_ACCENT, sb_x + 1, thumb_y, sb_w - 2,
                           thumb_h);
       const int over_scrollbar = point_in_rect(
           ctx->input.mouse_x, ctx->input.mouse_y, sb_x, sb_y, sb_w, viewport_h);
-      if (max_scroll > 0 && ctx->input.mouse_pressed && over_scrollbar &&
+      if (ctx->input.mouse_pressed && over_scrollbar &&
           is_current_window_topmost(ctx)) {
         if (ctx->input.mouse_y >= thumb_y &&
             ctx->input.mouse_y <= thumb_y + thumb_h) {
@@ -5034,8 +5040,10 @@ void mdgui_set_window_scrollbar_visible(MDGUI_Context *ctx, const char *title,
     if (win.id != title)
       continue;
     win.scrollbar_visible = normalized;
-    if (!normalized)
+    if (!normalized) {
       win.text_scroll_dragging = false;
+      win.scrollbar_overflow_active = false;
+    }
     return;
   }
 }
