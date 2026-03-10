@@ -183,6 +183,10 @@ int mdgui_is_window_open(MDGUI_Context *ctx, const char *title);
 void mdgui_focus_window(MDGUI_Context *ctx, const char *title);
 void mdgui_set_window_rect(MDGUI_Context *ctx, const char *title, int x, int y,
                            int w, int h);
+void mdgui_set_window_min_size(MDGUI_Context *ctx, const char *title, int min_w,
+                               int min_h);
+void mdgui_get_window_min_size(MDGUI_Context *ctx, const char *title,
+                               int *min_w, int *min_h);
 void mdgui_set_window_alpha(MDGUI_Context *ctx, const char *title,
                             unsigned char alpha);
 unsigned char mdgui_get_window_alpha(MDGUI_Context *ctx, const char *title);

@@ -54,6 +54,8 @@ struct MDGUI_Window {
   int last_edge_mask;
   int min_w;
   int min_h;
+  int user_min_w;
+  int user_min_h;
   int open_combo_id;
   std::vector<int> open_menu_path;
   int text_scroll;
@@ -74,6 +76,12 @@ struct FileBrowserEntry {
   std::string label;
   std::string full_path;
   bool is_dir;
+};
+
+struct PendingWindowMinSize {
+  std::string title;
+  int min_w;
+  int min_h;
 };
 } // namespace
 
@@ -236,6 +244,7 @@ struct MDGUI_Context {
   bool file_browser_scroll_dragging;
   int file_browser_scroll_drag_offset;
   std::vector<std::string> pending_tile_excluded_titles;
+  std::vector<PendingWindowMinSize> pending_window_min_sizes;
   int file_browser_last_click_idx;
   Uint64 file_browser_last_click_ticks;
   std::string file_browser_result;
@@ -502,6 +511,10 @@ static bool has_pending_tile_excluded_title(const MDGUI_Context *ctx,
   return false;
 }
 
+static int normalize_window_min_w(int min_w) { return (min_w < 50) ? 50 : min_w; }
+
+static int normalize_window_min_h(int min_h) { return (min_h < 30) ? 30 : min_h; }
+
 static void set_pending_tile_excluded_title(MDGUI_Context *ctx,
                                             const char *title, bool excluded) {
   if (!ctx || !title)
@@ -517,6 +530,39 @@ static void set_pending_tile_excluded_title(MDGUI_Context *ctx,
   }
   if (excluded)
     ctx->pending_tile_excluded_titles.push_back(title);
+}
+
+static bool get_pending_window_min_size(const MDGUI_Context *ctx,
+                                        const char *title, int *out_min_w,
+                                        int *out_min_h) {
+  if (!ctx || !title)
+    return false;
+  for (const auto &it : ctx->pending_window_min_sizes) {
+    if (it.title != title)
+      continue;
+    if (out_min_w)
+      *out_min_w = it.min_w;
+    if (out_min_h)
+      *out_min_h = it.min_h;
+    return true;
+  }
+  return false;
+}
+
+static void set_pending_window_min_size(MDGUI_Context *ctx, const char *title,
+                                        int min_w, int min_h) {
+  if (!ctx || !title)
+    return;
+  const int nw = normalize_window_min_w(min_w);
+  const int nh = normalize_window_min_h(min_h);
+  for (auto &it : ctx->pending_window_min_sizes) {
+    if (it.title != title)
+      continue;
+    it.min_w = nw;
+    it.min_h = nh;
+    return;
+  }
+  ctx->pending_window_min_sizes.push_back({title, nw, nh});
 }
 
 static int normalize_tile_side(int side) {
@@ -1132,6 +1178,8 @@ static int find_or_create_window(MDGUI_Context *ctx, const char *title, int x,
   nw.last_edge_mask = 0;
   nw.min_w = 50;
   nw.min_h = 30;
+  nw.user_min_w = 50;
+  nw.user_min_h = 30;
   nw.open_combo_id = -1;
   nw.text_scroll = 0;
   nw.text_scroll_dragging = false;
@@ -1141,6 +1189,14 @@ static int find_or_create_window(MDGUI_Context *ctx, const char *title, int x,
   nw.tile_weight = 1;
   nw.tile_side = MDGUI_TILE_SIDE_AUTO;
   nw.tile_excluded = has_pending_tile_excluded_title(ctx, key);
+  int pending_min_w = 0;
+  int pending_min_h = 0;
+  if (get_pending_window_min_size(ctx, key, &pending_min_w, &pending_min_h)) {
+    nw.user_min_w = pending_min_w;
+    nw.user_min_h = pending_min_h;
+    nw.min_w = pending_min_w;
+    nw.min_h = pending_min_h;
+  }
   nw.alpha = ctx->default_window_alpha;
   ctx->windows.push_back(nw);
   if (out_created)
@@ -1945,10 +2001,14 @@ int mdgui_begin_window_ex(MDGUI_Context *ctx, const char *title, int x, int y,
   const bool move_resize_allowed = chrome_input_allowed && !ctx->windows_locked;
   const bool can_maximize = !win.disallow_maximize;
   const int title_h = 12;
-  if (win.min_w < 50)
-    win.min_w = 50;
-  if (win.min_h < 30)
-    win.min_h = 30;
+  if (win.user_min_w < 50)
+    win.user_min_w = 50;
+  if (win.user_min_h < 30)
+    win.user_min_h = 30;
+  if (win.min_w < win.user_min_w)
+    win.min_w = win.user_min_w;
+  if (win.min_h < win.user_min_h)
+    win.min_h = win.user_min_h;
   clamp_window_to_work_area(ctx, win);
 
   // Edge detection for hover AND
@@ -2376,12 +2436,12 @@ void mdgui_end_window(MDGUI_Context *ctx) {
   // Dynamic minimum size based on hard content
   const int measured_min_w = (ctx->content_req_right - win.x) + 4;
   if (ctx->window_has_nonlabel_widget) {
-    win.min_w = std::max(50, measured_min_w);
+    win.min_w = std::max(win.user_min_w, measured_min_w);
   } else {
-    win.min_w = 50;
+    win.min_w = win.user_min_w;
   }
 
-  win.min_h = win.chrome_min_h;
+  win.min_h = std::max(win.user_min_h, win.chrome_min_h);
 
   if (!win.fixed_rect) {
     if (win.w < win.min_w)
@@ -4811,6 +4871,64 @@ void mdgui_set_window_rect(MDGUI_Context *ctx, const char *title, int x, int y,
     win.is_maximized = false;
     win.fixed_rect = true;
     return;
+  }
+}
+
+void mdgui_set_window_min_size(MDGUI_Context *ctx, const char *title, int min_w,
+                               int min_h) {
+  if (!ctx || !title)
+    return;
+  const int nw = normalize_window_min_w(min_w);
+  const int nh = normalize_window_min_h(min_h);
+  set_pending_window_min_size(ctx, title, nw, nh);
+  for (int i = 0; i < (int)ctx->windows.size(); ++i) {
+    auto &win = ctx->windows[i];
+    if (win.id != title)
+      continue;
+    win.user_min_w = nw;
+    win.user_min_h = nh;
+    win.min_w = nw;
+    win.min_h = nh;
+    if (win.w < win.min_w)
+      win.w = win.min_w;
+    if (win.h < win.min_h)
+      win.h = win.min_h;
+    if (win.restored_w < win.min_w)
+      win.restored_w = win.min_w;
+    if (win.restored_h < win.min_h)
+      win.restored_h = win.min_h;
+    if (ctx->tile_manager_enabled)
+      tile_windows_internal(ctx);
+    return;
+  }
+}
+
+void mdgui_get_window_min_size(MDGUI_Context *ctx, const char *title, int *min_w,
+                               int *min_h) {
+  if (min_w)
+    *min_w = 50;
+  if (min_h)
+    *min_h = 30;
+  if (!ctx || !title)
+    return;
+
+  for (int i = 0; i < (int)ctx->windows.size(); ++i) {
+    const auto &win = ctx->windows[i];
+    if (win.id != title)
+      continue;
+    if (min_w)
+      *min_w = win.user_min_w;
+    if (min_h)
+      *min_h = win.user_min_h;
+    return;
+  }
+
+  int pending_w = 0, pending_h = 0;
+  if (get_pending_window_min_size(ctx, title, &pending_w, &pending_h)) {
+    if (min_w)
+      *min_w = pending_w;
+    if (min_h)
+      *min_h = pending_h;
   }
 }
 
