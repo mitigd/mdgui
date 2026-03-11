@@ -47,6 +47,20 @@ constexpr int TOAST_DEFAULT_DURATION_MS = 2400;
 constexpr int TOAST_MAX_VISIBLE = 6;
 
 struct MDGUI_Window {
+  struct MenuOverlayDef {
+    struct ItemDef {
+      std::string text;
+      int child_menu_index;
+      bool is_separator;
+    };
+    int x;
+    int y;
+    int w;
+    int parent_menu_index;
+    int parent_item_index;
+    std::vector<ItemDef> items;
+  };
+
   struct CollapsingState {
     std::string id;
     bool open;
@@ -73,6 +87,8 @@ struct MDGUI_Window {
   float user_min_h_percent;
   int open_combo_id;
   std::vector<int> open_menu_path;
+  std::vector<MenuOverlayDef> menu_overlay_defs;
+  int menu_overlay_item_h;
   int text_scroll;
   bool text_scroll_dragging;
   int text_scroll_drag_offset;
@@ -406,6 +422,7 @@ static bool menu_path_prefix_matches(const std::vector<int> &path,
 static void clear_window_menu_path(MDGUI_Window &win) {
   win.open_menu_index = -1;
   win.open_menu_path.clear();
+  win.menu_overlay_defs.clear();
 }
 
 static const char *parse_menu_check_prefix(const char *text, bool *out_has_check,
@@ -1333,6 +1350,8 @@ static int find_or_create_window(MDGUI_Context *ctx, const char *title, int x,
   nw.user_min_w_percent = 0.0f;
   nw.user_min_h_percent = 0.0f;
   nw.open_combo_id = -1;
+  nw.menu_overlay_defs.clear();
+  nw.menu_overlay_item_h = 10;
   nw.text_scroll = 0;
   nw.text_scroll_dragging = false;
   nw.text_scroll_drag_offset = 0;
@@ -1435,6 +1454,68 @@ static void draw_open_menu_overlay(MDGUI_Context *ctx) {
               win.open_menu_path.empty() ? -1 : win.open_menu_path[0];
         }
       }
+      if (mdgui_fonts[1]) {
+        bool has_check = false;
+        bool checked = false;
+        const char *label = parse_menu_check_prefix(def.items[i].text.c_str(),
+                                                    &has_check, &checked);
+        const int check_w = has_check ? menu_check_indicator_width() : 0;
+        const int text_x = def.x + 4 + check_w;
+        if (has_check)
+          draw_menu_check_indicator(def.x + 4, iy + 1, checked);
+        mdgui_fonts[1]->drawText(label, nullptr, text_x, iy + 1, CLR_MENU_TEXT);
+        if (def.items[i].child_menu_index >= 0) {
+          mdgui_fonts[1]->drawText(">", nullptr, def.x + def.w - 8, iy + 1,
+                                   CLR_MENU_TEXT);
+        }
+      }
+    }
+  }
+}
+
+static void draw_cached_window_menu_overlay(MDGUI_Context *ctx,
+                                            MDGUI_Window &win) {
+  if (!ctx || win.open_menu_path.empty() || win.menu_overlay_defs.empty())
+    return;
+  const int item_h = (win.menu_overlay_item_h > 0) ? win.menu_overlay_item_h : 10;
+
+  // Overlay menus should ignore existing content clip/alpha.
+  mdgui_backend_set_clip_rect(0, 0, 0, 0, 0);
+  mdgui_backend_set_alpha_mod(255);
+
+  for (int depth = 0; depth < (int)win.open_menu_path.size(); ++depth) {
+    const int menu_idx = win.open_menu_path[depth];
+    if (menu_idx < 0 || menu_idx >= (int)win.menu_overlay_defs.size())
+      continue;
+    const auto &def = win.menu_overlay_defs[menu_idx];
+    const int total_h = (int)def.items.size() * item_h;
+    if (total_h <= 0)
+      continue;
+
+    mdgui_draw_hline_idx(nullptr, CLR_WINDOW_BORDER, def.x - 1, def.y - 1,
+                         def.x + def.w + 1);
+    mdgui_draw_hline_idx(nullptr, CLR_WINDOW_BORDER, def.x - 1, def.y + total_h,
+                         def.x + def.w + 1);
+    mdgui_draw_vline_idx(nullptr, CLR_WINDOW_BORDER, def.x - 1, def.y - 1,
+                         def.y + total_h + 1);
+    mdgui_draw_vline_idx(nullptr, CLR_WINDOW_BORDER, def.x + def.w, def.y - 1,
+                         def.y + total_h + 1);
+    mdgui_fill_rect_idx(nullptr, CLR_MENU_BG, def.x, def.y, def.w, total_h);
+
+    for (int i = 0; i < (int)def.items.size(); ++i) {
+      const int iy = def.y + (i * item_h);
+      if (def.items[i].is_separator) {
+        const int sep_y = iy + (item_h / 2);
+        mdgui_draw_hline_idx(nullptr, CLR_BUTTON_LIGHT, def.x + 4, sep_y,
+                             def.x + def.w - 4);
+        mdgui_draw_hline_idx(nullptr, CLR_BUTTON_DARK, def.x + 4, sep_y + 1,
+                             def.x + def.w - 4);
+        continue;
+      }
+      const int hovered = point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y,
+                                        def.x, iy, def.w, item_h);
+      if (hovered)
+        mdgui_fill_rect_idx(nullptr, CLR_ACCENT, def.x, iy, def.w, item_h);
       if (mdgui_fonts[1]) {
         bool has_check = false;
         bool checked = false;
@@ -2320,8 +2401,11 @@ void mdgui_end_frame(MDGUI_Context *ctx) {
 
   const unsigned long long now_ms = mdgui_backend_get_ticks_ms();
   prune_expired_toasts(ctx, now_ms);
-  draw_open_main_menu_overlay(ctx);
   draw_toasts(ctx);
+  for (auto &win : ctx->windows) {
+    draw_cached_window_menu_overlay(ctx, win);
+  }
+  draw_open_main_menu_overlay(ctx);
   draw_status_bar(ctx);
 
   if (ctx->combo_capture_active && !ctx->combo_capture_seen_this_frame) {
@@ -2712,6 +2796,26 @@ void mdgui_end_window(MDGUI_Context *ctx) {
   }
 
   draw_open_menu_overlay(ctx);
+  win.menu_overlay_defs.clear();
+  win.menu_overlay_defs.reserve(ctx->menu_defs.size());
+  for (const auto &def : ctx->menu_defs) {
+    MDGUI_Window::MenuOverlayDef cached{};
+    cached.x = def.x;
+    cached.y = def.y;
+    cached.w = def.w;
+    cached.parent_menu_index = def.parent_menu_index;
+    cached.parent_item_index = def.parent_item_index;
+    cached.items.reserve(def.items.size());
+    for (const auto &item : def.items) {
+      MDGUI_Window::MenuOverlayDef::ItemDef cached_item{};
+      cached_item.text = item.text;
+      cached_item.child_menu_index = item.child_menu_index;
+      cached_item.is_separator = item.is_separator;
+      cached.items.push_back(std::move(cached_item));
+    }
+    win.menu_overlay_defs.push_back(std::move(cached));
+  }
+  win.menu_overlay_item_h = ctx->current_menu_h;
 
   if (ctx->combo_overlay_pending &&
       ctx->combo_overlay_window == ctx->current_window &&
