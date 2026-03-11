@@ -3,9 +3,16 @@
 #include "mdgui_primitives.h"
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_mouse.h>
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstdlib>
 #include <cstdint>
 #include <filesystem>
 #include <string.h>
@@ -276,6 +283,13 @@ struct MDGUI_Context {
   Uint64 file_browser_last_click_ticks;
   std::string file_browser_result;
   std::vector<std::string> file_browser_ext_filters;
+  std::vector<std::string> file_browser_drives;
+  Uint64 file_browser_last_drive_scan_ticks;
+  std::string file_browser_last_selected_path;
+  bool file_browser_restore_scroll_pending;
+  bool file_browser_center_pending;
+  int file_browser_open_x;
+  int file_browser_open_y;
   std::vector<NestedRenderState> nested_render_stack;
 };
 
@@ -1668,6 +1682,109 @@ static bool ci_less(const std::string &a, const std::string &b) {
   return a.size() < b.size();
 }
 
+static std::vector<std::string> enumerate_file_browser_drives() {
+  std::vector<std::string> roots;
+#ifdef _WIN32
+  const DWORD drive_mask = GetLogicalDrives();
+  for (int i = 0; i < 26; ++i) {
+    if ((drive_mask & (1u << i)) == 0)
+      continue;
+    std::string root;
+    root.push_back((char)('A' + i));
+    root += ":\\";
+    std::error_code ec;
+    if (std::filesystem::exists(root, ec) && !ec)
+      roots.push_back(root);
+  }
+#else
+  auto try_add_root = [&roots](const std::filesystem::path &p) {
+    const std::string s = p.string();
+    if (s.empty())
+      return;
+    for (const auto &existing : roots) {
+      if (existing == s)
+        return;
+    }
+    std::error_code ec;
+    if (std::filesystem::is_directory(p, ec) && !ec)
+      roots.push_back(s);
+  };
+
+  try_add_root("/");
+#if defined(__APPLE__)
+  std::error_code ec;
+  for (const auto &entry : std::filesystem::directory_iterator(
+           "/Volumes", std::filesystem::directory_options::skip_permission_denied,
+           ec)) {
+    if (ec)
+      break;
+    try_add_root(entry.path());
+  }
+#else
+  std::error_code mnt_ec;
+  for (const auto &entry : std::filesystem::directory_iterator(
+           "/mnt", std::filesystem::directory_options::skip_permission_denied,
+           mnt_ec)) {
+    if (mnt_ec)
+      break;
+    try_add_root(entry.path());
+  }
+
+  const char *user_env = std::getenv("USER");
+  if (user_env && user_env[0]) {
+    const std::filesystem::path media_user =
+        std::filesystem::path("/media") / user_env;
+    std::error_code media_ec;
+    for (const auto &entry : std::filesystem::directory_iterator(
+             media_user, std::filesystem::directory_options::skip_permission_denied,
+             media_ec)) {
+      if (media_ec)
+        break;
+      try_add_root(entry.path());
+    }
+
+    const std::filesystem::path run_media_user =
+        std::filesystem::path("/run/media") / user_env;
+    std::error_code run_media_ec;
+    for (const auto &entry : std::filesystem::directory_iterator(
+             run_media_user, std::filesystem::directory_options::skip_permission_denied,
+             run_media_ec)) {
+      if (run_media_ec)
+        break;
+      try_add_root(entry.path());
+    }
+  }
+#endif
+#endif
+  std::sort(roots.begin(), roots.end(), ci_less);
+  return roots;
+}
+
+static bool file_browser_path_exists(const std::string &path) {
+  if (path.empty())
+    return false;
+  std::error_code ec;
+  return std::filesystem::exists(path, ec) && !ec;
+}
+
+static std::string file_browser_default_open_path(const MDGUI_Context *ctx) {
+  if (!ctx || ctx->file_browser_drives.empty())
+    return ".";
+  return ctx->file_browser_drives.front();
+}
+
+static void file_browser_refresh_drives(MDGUI_Context *ctx, bool force_scan) {
+  if (!ctx)
+    return;
+  const Uint64 now = mdgui_backend_get_ticks_ms();
+  if (!force_scan && ctx->file_browser_last_drive_scan_ticks > 0 &&
+      (now - ctx->file_browser_last_drive_scan_ticks) < 500) {
+    return;
+  }
+  ctx->file_browser_last_drive_scan_ticks = now;
+  ctx->file_browser_drives = enumerate_file_browser_drives();
+}
+
 static std::string normalize_extension_filter(const char *ext) {
   if (!ext)
     return {};
@@ -1731,6 +1848,7 @@ static void file_browser_open_path(MDGUI_Context *ctx, const char *path) {
   ctx->file_browser_cwd = norm.string();
   ctx->file_browser_selected = -1;
   ctx->file_browser_scroll = 0;
+  ctx->file_browser_restore_scroll_pending = false;
   ctx->file_browser_scroll_dragging = false;
   ctx->file_browser_scroll_drag_offset = 0;
 
@@ -1781,8 +1899,21 @@ static void file_browser_open_path(MDGUI_Context *ctx, const char *path) {
                                    dirs.begin(), dirs.end());
   ctx->file_browser_entries.insert(ctx->file_browser_entries.end(),
                                    files.begin(), files.end());
-  if (!ctx->file_browser_entries.empty())
-    ctx->file_browser_selected = 0;
+  if (!ctx->file_browser_entries.empty()) {
+    int restore_idx = -1;
+    if (!ctx->file_browser_last_selected_path.empty()) {
+      for (int i = 0; i < (int)ctx->file_browser_entries.size(); ++i) {
+        if (!ctx->file_browser_entries[(size_t)i].is_dir &&
+            ctx->file_browser_entries[(size_t)i].full_path ==
+                ctx->file_browser_last_selected_path) {
+          restore_idx = i;
+          break;
+        }
+      }
+    }
+    ctx->file_browser_selected = (restore_idx >= 0) ? restore_idx : 0;
+    ctx->file_browser_restore_scroll_pending = (restore_idx >= 0);
+  }
 }
 
 static void draw_open_main_menu_overlay(MDGUI_Context *ctx) {
@@ -2011,6 +2142,13 @@ MDGUI_Context *mdgui_create_with_backend(const MDGUI_RenderBackend *backend) {
   ctx->file_browser_last_click_idx = -1;
   ctx->file_browser_last_click_ticks = 0;
   ctx->file_browser_result.clear();
+  ctx->file_browser_drives = enumerate_file_browser_drives();
+  ctx->file_browser_last_drive_scan_ticks = 0;
+  ctx->file_browser_last_selected_path.clear();
+  ctx->file_browser_restore_scroll_pending = false;
+  ctx->file_browser_center_pending = false;
+  ctx->file_browser_open_x = -1;
+  ctx->file_browser_open_y = -1;
   ctx->layout_indent = ctx->style.content_pad_x;
   ctx->indent_stack.clear();
 
@@ -5836,24 +5974,52 @@ void mdgui_run_window_pass(MDGUI_Context *ctx,
   }
 }
 
-void mdgui_open_file_browser(MDGUI_Context *ctx) {
+void mdgui_open_file_browser_at(MDGUI_Context *ctx, int x, int y) {
   if (!ctx)
     return;
   // Prevent same-frame click-through
   // from the opener button/menu item.
   ctx->input.mouse_pressed = 0;
-  const int idx = find_or_create_window(ctx, "File Browser", 28, 20, 280, 180);
+  const int idx = find_or_create_window(ctx, "File Browser", 28, 20, 280, 240);
   if (idx >= 0 && idx < (int)ctx->windows.size()) {
-    ctx->windows[idx].closed = false;
-    ctx->windows[idx].z = ++ctx->z_counter;
+    auto &win = ctx->windows[idx];
+    win.closed = false;
+    win.z = ++ctx->z_counter;
+    if (x >= 0 || y >= 0) {
+      if (x >= 0)
+        win.x = x;
+      if (y >= 0)
+        win.y = y;
+      clamp_window_to_work_area(ctx, win);
+      win.restored_x = win.x;
+      win.restored_y = win.y;
+      win.restored_w = win.w;
+      win.restored_h = win.h;
+    } else {
+      center_window_rect_menu_aware(ctx, win);
+      win.restored_x = win.x;
+      win.restored_y = win.y;
+      win.restored_w = win.w;
+      win.restored_h = win.h;
+    }
   }
   ctx->dragging_window = -1;
   ctx->resizing_window = -1;
   ctx->file_browser_open = true;
+  ctx->file_browser_open_x = x;
+  ctx->file_browser_open_y = y;
+  ctx->file_browser_center_pending = (x < 0 && y < 0);
   ctx->file_browser_result.clear();
   ctx->file_browser_last_click_idx = -1;
   ctx->file_browser_last_click_ticks = 0;
+  file_browser_refresh_drives(ctx, true);
+  if (!file_browser_path_exists(ctx->file_browser_cwd))
+    ctx->file_browser_cwd = file_browser_default_open_path(ctx);
   file_browser_open_path(ctx, ctx->file_browser_cwd.c_str());
+}
+
+void mdgui_open_file_browser(MDGUI_Context *ctx) {
+  mdgui_open_file_browser_at(ctx, -1, -1);
 }
 
 void mdgui_set_file_browser_filters(MDGUI_Context *ctx, const char **extensions,
@@ -5885,18 +6051,47 @@ const char *mdgui_show_file_browser(MDGUI_Context *ctx) {
     return nullptr;
   ctx->file_browser_result.clear();
 
-  if (!mdgui_begin_window(ctx, "File Browser", 28, 20, 280, 180)) {
+  const int open_x = (ctx->file_browser_open_x >= 0) ? ctx->file_browser_open_x : 28;
+  const int open_y = (ctx->file_browser_open_y >= 0) ? ctx->file_browser_open_y : 20;
+  if (!mdgui_begin_window(ctx, "File Browser", open_x, open_y, 280, 240)) {
     ctx->file_browser_open = false;
     return nullptr;
   }
   auto &win = ctx->windows[ctx->current_window];
+  if (ctx->file_browser_center_pending) {
+    center_window_rect_menu_aware(ctx, win);
+    win.restored_x = win.x;
+    win.restored_y = win.y;
+    win.restored_w = win.w;
+    win.restored_h = win.h;
+    ctx->file_browser_center_pending = false;
+  }
   if (win.min_w < 220)
     win.min_w = 220;
-  if (win.min_h < 130)
-    win.min_h = 130;
+  if (win.min_h < 180)
+    win.min_h = 180;
+
+  file_browser_refresh_drives(ctx, false);
+  if (!file_browser_path_exists(ctx->file_browser_cwd)) {
+    const std::string fallback = file_browser_default_open_path(ctx);
+    file_browser_open_path(ctx, fallback.c_str());
+  }
 
   mdgui_label(ctx, "Directory:");
   mdgui_label(ctx, ctx->file_browser_cwd.c_str());
+  mdgui_label(ctx, "Drives:");
+  for (int i = 0; i < (int)ctx->file_browser_drives.size(); ++i) {
+    const std::string &drive = ctx->file_browser_drives[(size_t)i];
+    if (mdgui_button(ctx, drive.c_str(), 64, 12)) {
+      file_browser_open_path(ctx, drive.c_str());
+    }
+    if (((i + 1) % 4) != 0 && (i + 1) < (int)ctx->file_browser_drives.size())
+      mdgui_same_line(ctx);
+  }
+  if (ctx->file_browser_drives.empty()) {
+    mdgui_label(ctx, "(no roots found)");
+  }
+  mdgui_spacing(ctx, 2);
 
   const int row_h = 10;
   const int button_h = 12;
@@ -5913,6 +6108,17 @@ const char *mdgui_show_file_browser(MDGUI_Context *ctx) {
   const int content_w = list_w - scrollbar_w - 1;
   const int total = (int)ctx->file_browser_entries.size();
   const int max_scroll = (total > rows) ? (total - rows) : 0;
+  if (ctx->file_browser_restore_scroll_pending && ctx->file_browser_selected >= 0 &&
+      total > 0) {
+    int target = ctx->file_browser_selected - (rows / 2);
+    if (target < 0)
+      target = 0;
+    const int max_target = std::max(0, total - rows);
+    if (target > max_target)
+      target = max_target;
+    ctx->file_browser_scroll = target;
+    ctx->file_browser_restore_scroll_pending = false;
+  }
   const int over_list = point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y,
                                       list_x, list_y, content_w, list_h);
   const int over_scrollbar =
@@ -6069,6 +6275,7 @@ const char *mdgui_show_file_browser(MDGUI_Context *ctx) {
     if (entry.is_dir) {
       file_browser_open_path(ctx, entry.full_path.c_str());
     } else {
+      ctx->file_browser_last_selected_path = entry.full_path;
       ctx->file_browser_result = entry.full_path;
       ctx->file_browser_open = false;
       if (ctx->current_window >= 0 &&

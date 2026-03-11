@@ -175,6 +175,8 @@ void mdgui_frame_time_graph(MDGUI_Context *ctx, const float *frame_ms_samples,
 
 void mdgui_show_demo_window(MDGUI_Context *ctx);
 void mdgui_open_file_browser(MDGUI_Context *ctx);
+// Opens centered when x/y are negative; otherwise positions at x/y.
+void mdgui_open_file_browser_at(MDGUI_Context *ctx, int x, int y);
 const char *mdgui_show_file_browser(MDGUI_Context *ctx);
 void mdgui_set_file_browser_filters(MDGUI_Context *ctx, const char **extensions,
                                     int extension_count);
