@@ -6,12 +6,9 @@
     .paths = .{
         "build.zig",
         "build.zig.zon",
-        "demo/main.zig",
-        "include/mdgui_primitives.h",
-        "include/mdgui_font8x8.h",
-        "src/mdgui_c.cpp",
-        "src/mdgui_glue.cpp",
-        "include/mdgui_c.h",
+        "demos",
+        "include",
+        "src",
     },
     .dependencies = .{
         .sdl = .{

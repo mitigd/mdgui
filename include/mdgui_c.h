@@ -139,6 +139,7 @@ void mdgui_set_backend(MDGUI_Context *ctx, const MDGUI_RenderBackend *backend);
 
 MDGUI_Font *mdgui_font_create_builtin(int scale);
 MDGUI_Font *mdgui_font_create_custom(const MDGUI_FontCallbacks *callbacks);
+MDGUI_Font *mdgui_font_create_from_file(const char *path, float pixel_height);
 void mdgui_font_destroy(MDGUI_Font *font);
 int mdgui_font_measure_text(const MDGUI_Font *font, const char *text);
 int mdgui_font_get_line_height(const MDGUI_Font *font);
@@ -146,6 +147,12 @@ void mdgui_set_default_font(MDGUI_Context *ctx, MDGUI_Font *font);
 MDGUI_Font *mdgui_get_default_font(MDGUI_Context *ctx);
 void mdgui_push_font(MDGUI_Context *ctx, MDGUI_Font *font);
 void mdgui_pop_font(MDGUI_Context *ctx);
+void mdgui_set_demo_window_font_options(MDGUI_Context *ctx,
+                                        const char **labels,
+                                        MDGUI_Font **fonts, int font_count,
+                                        int selected_index);
+void mdgui_set_demo_window_font_index(MDGUI_Context *ctx, int index);
+int mdgui_get_demo_window_font_index(MDGUI_Context *ctx);
 
 void mdgui_begin_frame(MDGUI_Context *ctx, const MDGUI_Input *input);
 void mdgui_end_frame(MDGUI_Context *ctx);

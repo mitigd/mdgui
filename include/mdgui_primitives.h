@@ -4,6 +4,7 @@
 
 struct MDGUI_RenderBackend;
 struct MDGUI_FontCallbacks;
+struct MDGUI_FileFontData;
 
 class MDGUI_Font {
 public:
@@ -11,6 +12,7 @@ public:
   MDGUI_Font();
   explicit MDGUI_Font(int builtin_scale);
   explicit MDGUI_Font(const MDGUI_FontCallbacks &callbacks);
+  explicit MDGUI_Font(const char *file_path, float pixel_height);
   ~MDGUI_Font();
   int drawChar(unsigned char c, int x, int y, int colorIdx);
   int measureTextWidth(const char *s) const;
@@ -22,6 +24,7 @@ private:
   int scale_;
   bool custom_;
   MDGUI_FontCallbacks *callbacks_;
+  MDGUI_FileFontData *file_font_;
 };
 
 using MDGuiFont = MDGUI_Font;

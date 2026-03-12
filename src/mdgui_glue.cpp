@@ -1,11 +1,26 @@
 #include "mdgui_primitives.h"
 #include "mdgui_c.h"
 #include "mdgui_font8x8.h"
+#define STB_TRUETYPE_IMPLEMENTATION
+#include "stb_truetype.h"
 #include <algorithm>
+#include <fstream>
 #include <new>
+#include <vector>
 #include <string.h>
 
 // Renderer/palette glue for MDGUI primitives.
+
+struct MDGUI_FileFontData {
+  std::vector<unsigned char> file_bytes;
+  std::vector<unsigned char> bitmap;
+  stbtt_bakedchar baked_chars[96] = {};
+  int atlas_w = 0;
+  int atlas_h = 0;
+  int line_height = 0;
+  float baseline = 0.0f;
+  bool ready = false;
+};
 
 namespace {
 MDGUI_RenderBackend g_backend = {};
@@ -214,6 +229,108 @@ bool draw_glyph_fast(unsigned char glyph, int x, int y, unsigned char color_idx)
                                    c.b, apply_alpha_mod(c.a)) != 0;
 }
 
+bool load_file_bytes(const char *path, std::vector<unsigned char> &out) {
+  if (!path || !*path)
+    return false;
+  std::ifstream file(path, std::ios::binary | std::ios::ate);
+  if (!file.is_open())
+    return false;
+  const std::streamsize size = file.tellg();
+  if (size <= 0)
+    return false;
+  file.seekg(0, std::ios::beg);
+  out.resize((size_t)size);
+  return file.read((char *)out.data(), size).good();
+}
+
+MDGUI_FileFontData *create_file_font_data(const char *path, float pixel_height) {
+  if (!path || !*path)
+    return nullptr;
+
+  auto *data = new (std::nothrow) MDGUI_FileFontData();
+  if (!data)
+    return nullptr;
+  if (pixel_height < 8.0f)
+    pixel_height = 8.0f;
+  if (!load_file_bytes(path, data->file_bytes)) {
+    delete data;
+    return nullptr;
+  }
+
+  const int atlas_sizes[] = {256, 512, 1024};
+  int bake_result = 0;
+  for (int atlas_size : atlas_sizes) {
+    data->atlas_w = atlas_size;
+    data->atlas_h = atlas_size;
+    data->bitmap.assign((size_t)atlas_size * (size_t)atlas_size, 0);
+    memset(data->baked_chars, 0, sizeof(data->baked_chars));
+    bake_result = stbtt_BakeFontBitmap(data->file_bytes.data(), 0, pixel_height,
+                                       data->bitmap.data(), atlas_size,
+                                       atlas_size, 32, 96, data->baked_chars);
+    if (bake_result > 0)
+      break;
+  }
+  if (bake_result <= 0) {
+    delete data;
+    return nullptr;
+  }
+
+  stbtt_fontinfo font_info;
+  if (!stbtt_InitFont(&font_info, data->file_bytes.data(),
+                      stbtt_GetFontOffsetForIndex(data->file_bytes.data(), 0))) {
+    delete data;
+    return nullptr;
+  }
+
+  int ascent = 0;
+  int descent = 0;
+  int line_gap = 0;
+  stbtt_GetFontVMetrics(&font_info, &ascent, &descent, &line_gap);
+  const float scale = stbtt_ScaleForPixelHeight(&font_info, pixel_height);
+  data->baseline = (float)ascent * scale;
+  data->line_height =
+      std::max(1, (int)((float)(ascent - descent + line_gap) * scale + 0.5f));
+  data->ready = true;
+  return data;
+}
+
+int baked_char_index(unsigned char c) {
+  if (c < 32 || c > 127)
+    c = '?';
+  return (int)c - 32;
+}
+
+void draw_file_font_quad(const MDGUI_FileFontData *data,
+                         const stbtt_aligned_quad &q, unsigned char color_idx) {
+  if (!data || !data->ready || !backend_ready())
+    return;
+
+  const Color c = palette_color(color_idx);
+  const int src_x0 = std::max(0, (int)(q.s0 * (float)data->atlas_w + 0.5f));
+  const int src_y0 = std::max(0, (int)(q.t0 * (float)data->atlas_h + 0.5f));
+  const int src_x1 =
+      std::min(data->atlas_w, (int)(q.s1 * (float)data->atlas_w + 0.5f));
+  const int src_y1 =
+      std::min(data->atlas_h, (int)(q.t1 * (float)data->atlas_h + 0.5f));
+  const int dst_x0 = (int)(q.x0 + 0.5f);
+  const int dst_y0 = (int)(q.y0 + 0.5f);
+
+  for (int sy = src_y0; sy < src_y1; ++sy) {
+    for (int sx = src_x0; sx < src_x1; ++sx) {
+      const unsigned char alpha =
+          data->bitmap[(size_t)sy * (size_t)data->atlas_w + (size_t)sx];
+      if (alpha == 0)
+        continue;
+      const unsigned char final_alpha = apply_alpha_mod(
+          (unsigned char)(((unsigned int)c.a * (unsigned int)alpha + 127u) /
+                          255u));
+      g_backend.fill_rect_rgba(g_backend.user_data, c.r, c.g, c.b, final_alpha,
+                               dst_x0 + (sx - src_x0), dst_y0 + (sy - src_y0),
+                               1, 1);
+    }
+  }
+}
+
 const unsigned char *glyph_for_char(unsigned char c) {
   if (c >= 128)
     c = '?';
@@ -386,17 +503,25 @@ void mdgui_draw_line_idx(char *d, int idx, int x1, int y1, int x2, int y2) {
 MDGUI_Font *mdgui_fonts[10] = {nullptr};
 
 MDGUI_Font::MDGUI_Font() : atlas_raw(nullptr), scale_(1), custom_(false),
-                           callbacks_(nullptr) {}
+                           callbacks_(nullptr), file_font_(nullptr) {}
 
 MDGUI_Font::MDGUI_Font(int builtin_scale)
     : atlas_raw(nullptr), scale_(std::max(1, builtin_scale)), custom_(false),
-      callbacks_(nullptr) {}
+      callbacks_(nullptr), file_font_(nullptr) {}
 
 MDGUI_Font::MDGUI_Font(const MDGUI_FontCallbacks &callbacks)
     : atlas_raw(nullptr), scale_(1), custom_(true),
-      callbacks_(new (std::nothrow) MDGUI_FontCallbacks(callbacks)) {}
+      callbacks_(new (std::nothrow) MDGUI_FontCallbacks(callbacks)),
+      file_font_(nullptr) {}
 
-MDGUI_Font::~MDGUI_Font() { delete callbacks_; }
+MDGUI_Font::MDGUI_Font(const char *file_path, float pixel_height)
+    : atlas_raw(nullptr), scale_(1), custom_(false), callbacks_(nullptr),
+      file_font_(create_file_font_data(file_path, pixel_height)) {}
+
+MDGUI_Font::~MDGUI_Font() {
+  delete callbacks_;
+  delete file_font_;
+}
 
 int MDGUI_Font::drawChar(unsigned char c, int x, int y, int colorIdx) {
   if (!backend_ready())
@@ -408,6 +533,20 @@ int MDGUI_Font::drawChar(unsigned char c, int x, int y, int colorIdx) {
     char buf[2] = {(char)c, '\0'};
     callbacks_->draw_text(callbacks_->user_data, buf, x, y, colorIdx);
     return measureTextWidth(buf);
+  }
+
+  if (file_font_ && file_font_->ready) {
+    float xpos = (float)x;
+    float ypos = (float)y + file_font_->baseline;
+    stbtt_aligned_quad quad{};
+    stbtt_GetBakedQuad(file_font_->baked_chars, file_font_->atlas_w,
+                       file_font_->atlas_h, baked_char_index(c), &xpos, &ypos,
+                       &quad, 1);
+    draw_file_font_quad(file_font_, quad,
+                        (unsigned char)((colorIdx >= 0 && colorIdx <= 255)
+                                            ? colorIdx
+                                            : 15));
+    return std::max(1, (int)(xpos - (float)x + 0.5f));
   }
 
   const unsigned char *glyph = glyph_for_char(c);
@@ -435,6 +574,15 @@ int MDGUI_Font::measureTextWidth(const char *s) const {
       return 0;
     return callbacks_->measure_text_width(callbacks_->user_data, s);
   }
+  if (file_font_ && file_font_->ready) {
+    float width = 0.0f;
+    for (const unsigned char *p = (const unsigned char *)s; *p; ++p) {
+      const stbtt_bakedchar &glyph =
+          file_font_->baked_chars[baked_char_index(*p)];
+      width += glyph.xadvance;
+    }
+    return std::max(0, (int)(width + 0.5f));
+  }
   int w = 0;
   for (const unsigned char *p = (const unsigned char *)s; *p; ++p) {
     w += glyph_width(*p) * scale_;
@@ -448,6 +596,8 @@ int MDGUI_Font::lineHeight() const {
       return 8;
     return callbacks_->get_line_height(callbacks_->user_data);
   }
+  if (file_font_ && file_font_->ready)
+    return file_font_->line_height;
   return 8 * scale_;
 }
 
@@ -457,6 +607,21 @@ void MDGUI_Font::drawText(const char *s, char *d, int x, int y, int colorIdx) {
   if (custom_) {
     if (callbacks_ && callbacks_->draw_text)
       callbacks_->draw_text(callbacks_->user_data, s, x, y, colorIdx);
+    return;
+  }
+  if (file_font_ && file_font_->ready) {
+    float xpos = (float)x;
+    float ypos = (float)y + file_font_->baseline;
+    for (const unsigned char *p = (const unsigned char *)s; *p; ++p) {
+      stbtt_aligned_quad quad{};
+      stbtt_GetBakedQuad(file_font_->baked_chars, file_font_->atlas_w,
+                         file_font_->atlas_h, baked_char_index(*p), &xpos,
+                         &ypos, &quad, 1);
+      draw_file_font_quad(file_font_, quad,
+                          (unsigned char)((colorIdx >= 0 && colorIdx <= 255)
+                                              ? colorIdx
+                                              : 15));
+    }
     return;
   }
   for (const unsigned char *p = (const unsigned char *)s; *p; ++p) {
@@ -476,6 +641,17 @@ MDGUI_Font *mdgui_font_create_custom(const MDGUI_FontCallbacks *callbacks) {
   if (!callbacks)
     return nullptr;
   return new (std::nothrow) MDGUI_Font(*callbacks);
+}
+
+MDGUI_Font *mdgui_font_create_from_file(const char *path, float pixel_height) {
+  MDGUI_Font *font = new (std::nothrow) MDGUI_Font(path, pixel_height);
+  if (!font)
+    return nullptr;
+  if (font->lineHeight() <= 0) {
+    delete font;
+    return nullptr;
+  }
+  return font;
 }
 
 void mdgui_font_destroy(MDGUI_Font *font) { delete font; }

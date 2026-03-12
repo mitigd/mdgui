@@ -46,6 +46,95 @@ fn alphaFloatFromByte(v: u8) f32 {
     return @as(f32, @floatFromInt(v)) / 255.0;
 }
 
+const DemoFontOption = struct {
+    label_z: [:0]u8,
+    path_z: ?[:0]u8,
+    font: ?*c.MDGUI_Font,
+};
+
+const DemoFonts = struct {
+    allocator: std.mem.Allocator,
+    options: std.ArrayList(DemoFontOption),
+    labels: std.ArrayList([*:0]const u8),
+    fonts: std.ArrayList(?*c.MDGUI_Font),
+
+    fn init(allocator: std.mem.Allocator) DemoFonts {
+        return .{
+            .allocator = allocator,
+            .options = std.ArrayList(DemoFontOption){},
+            .labels = std.ArrayList([*:0]const u8){},
+            .fonts = std.ArrayList(?*c.MDGUI_Font){},
+        };
+    }
+
+    fn deinit(self: *DemoFonts) void {
+        for (self.options.items) |opt| {
+            if (opt.font) |font| c.mdgui_font_destroy(font);
+            if (opt.path_z) |path_z| self.allocator.free(path_z);
+            self.allocator.free(opt.label_z);
+        }
+        self.options.deinit(self.allocator);
+        self.labels.deinit(self.allocator);
+        self.fonts.deinit(self.allocator);
+    }
+};
+
+fn hasFontExtension(name: []const u8) bool {
+    return std.ascii.endsWithIgnoreCase(name, ".otf") or
+        std.ascii.endsWithIgnoreCase(name, ".ttf");
+}
+
+fn loadDemoFonts(allocator: std.mem.Allocator, ctx: ?*c.MDGUI_Context) !DemoFonts {
+    var demo_fonts = DemoFonts.init(allocator);
+
+    try demo_fonts.options.append(allocator, .{
+        .label_z = try allocator.dupeZ(u8, "Builtin 8x8"),
+        .path_z = null,
+        .font = null,
+    });
+
+    var dir = try std.fs.cwd().openDir("fonts", .{ .iterate = true });
+    defer dir.close();
+
+    var it = dir.iterate();
+    while (try it.next()) |entry| {
+        if (entry.kind != .file or !hasFontExtension(entry.name)) continue;
+
+        const label_z = try allocator.dupeZ(u8, entry.name);
+        const path = try std.fmt.allocPrint(allocator, "fonts/{s}", .{entry.name});
+        defer allocator.free(path);
+        const path_z = try allocator.dupeZ(u8, path);
+        const font = c.mdgui_font_create_from_file(path_z.ptr, 10.0);
+        if (font == null) {
+            std.log.warn("Failed to load demo font: {s}", .{entry.name});
+            allocator.free(label_z);
+            allocator.free(path_z);
+            continue;
+        }
+
+        try demo_fonts.options.append(allocator, .{
+            .label_z = label_z,
+            .path_z = path_z,
+            .font = font,
+        });
+    }
+
+    for (demo_fonts.options.items) |opt| {
+        try demo_fonts.labels.append(allocator, opt.label_z.ptr);
+        try demo_fonts.fonts.append(allocator, opt.font);
+    }
+
+    c.mdgui_set_demo_window_font_options(
+        ctx,
+        @ptrCast(demo_fonts.labels.items.ptr),
+        @ptrCast(demo_fonts.fonts.items.ptr),
+        @intCast(demo_fonts.options.items.len),
+        0,
+    );
+
+    return demo_fonts;
+}
+
 fn analyticsPush(a: *Analytics, frame_ms: f32) void {
     const clamped_ms = if (frame_ms < 0.01) 0.01 else frame_ms;
     const fps = 1000.0 / clamped_ms;
@@ -491,6 +580,10 @@ fn tileDemoWindows(ctx: ?*c.MDGUI_Context, renderer: ?*c.SDL_Renderer, show_demo
 }
 
 pub fn main() !void {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
     if (c.SDL_Init(c.SDL_INIT_VIDEO) == false) return error.SDLInitFailed;
     defer c.SDL_Quit();
 
@@ -522,6 +615,8 @@ pub fn main() !void {
     c.mdgui_set_windows_locked(ctx, if (startup_lock_tiled_windows) 1 else 0);
     c.mdgui_set_status_bar_visible(ctx, 1);
     c.mdgui_set_file_browser_path_subpass_enabled(ctx, 1);
+    var demo_fonts = try loadDemoFonts(allocator, ctx);
+    defer demo_fonts.deinit();
 
     var running = true;
     var input = c.MDGUI_Input{
