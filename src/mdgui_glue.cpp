@@ -1,6 +1,9 @@
 #include "mdgui_primitives.h"
 #include "mdgui_c.h"
 #include "mdgui_font8x8.h"
+#include "mdgui_primitives.h"
+#include <algorithm>
+#include <new>
 #include <string.h>
 
 // Renderer/palette glue for MDGUI primitives.
@@ -179,17 +182,26 @@ unsigned char apply_alpha_mod(unsigned char a) {
 }
 
 void draw_glyph_bits(const unsigned char *glyph, int x, int y,
-                    unsigned char color_idx) {
+                     unsigned char color_idx, int scale = 1) {
   if (!backend_ready())
     return;
+  if (scale < 1)
+    scale = 1;
   const Color c = palette_color(color_idx);
   for (int py = 0; py < 8; py++) {
     const unsigned char row = glyph[py];
     for (int px = 0; px < 8; px++) {
       if (row & (1u << px)) {
-        g_backend.draw_point_rgba(g_backend.user_data, c.r, c.g, c.b,
-                                  apply_alpha_mod(c.a),
-                                  x + px, y + py);
+        const int dx = x + px * scale;
+        const int dy = y + py * scale;
+        if (scale == 1) {
+          g_backend.draw_point_rgba(g_backend.user_data, c.r, c.g, c.b,
+                                    apply_alpha_mod(c.a), dx, dy);
+        } else {
+          g_backend.fill_rect_rgba(g_backend.user_data, c.r, c.g, c.b,
+                                   apply_alpha_mod(c.a), dx, dy, scale,
+                                   scale);
+        }
       }
     }
   }
@@ -372,18 +384,37 @@ void mdgui_draw_line_idx(char *d, int idx, int x1, int y1, int x2, int y2) {
 }
 }
 
-MDGuiFont *mdgui_fonts[10] = {nullptr};
+MDGUI_Font *mdgui_fonts[10] = {nullptr};
 
-MDGuiFont::MDGuiFont() { atlas_raw = nullptr; }
+MDGUI_Font::MDGUI_Font() : atlas_raw(nullptr), scale_(1), custom_(false),
+                           callbacks_(nullptr) {}
 
-int MDGuiFont::drawChar(unsigned char c, int x, int y, int colorIdx) {
+MDGUI_Font::MDGUI_Font(int builtin_scale)
+    : atlas_raw(nullptr), scale_(std::max(1, builtin_scale)), custom_(false),
+      callbacks_(nullptr) {}
+
+MDGUI_Font::MDGUI_Font(const MDGUI_FontCallbacks &callbacks)
+    : atlas_raw(nullptr), scale_(1), custom_(true),
+      callbacks_(new (std::nothrow) MDGUI_FontCallbacks(callbacks)) {}
+
+MDGUI_Font::~MDGUI_Font() { delete callbacks_; }
+
+int MDGUI_Font::drawChar(unsigned char c, int x, int y, int colorIdx) {
   if (!backend_ready())
-    return 6;
+    return 6 * scale_;
+
+  if (custom_) {
+    if (!callbacks_ || !callbacks_->draw_text)
+      return 0;
+    char buf[2] = {(char)c, '\0'};
+    callbacks_->draw_text(callbacks_->user_data, buf, x, y, colorIdx);
+    return measureTextWidth(buf);
+  }
 
   const unsigned char *glyph = glyph_for_char(c);
-  const int xw = glyph_width(c);
+  const int xw = glyph_width(c) * scale_;
 
-  if (colorIdx >= 0 && colorIdx <= 255) {
+  if (scale_ == 1 && colorIdx >= 0 && colorIdx <= 255) {
     if (!draw_glyph_fast(c, x + 1, y + 1, 0))
       draw_glyph_bits(glyph, x + 1, y + 1, 0);
     if (!draw_glyph_fast(c, x, y, (unsigned char)colorIdx))
@@ -391,32 +422,72 @@ int MDGuiFont::drawChar(unsigned char c, int x, int y, int colorIdx) {
     return xw;
   }
 
-  if (!draw_glyph_fast(c, x + 1, y + 1, 0))
-    draw_glyph_bits(glyph, x + 1, y + 1, 0);
-  if (!draw_glyph_fast(c, x, y, 15))
-    draw_glyph_bits(glyph, x, y, 15);
+  draw_glyph_bits(glyph, x + scale_, y + scale_, 0, scale_);
+  draw_glyph_bits(glyph, x, y, (colorIdx >= 0 && colorIdx <= 255) ? colorIdx : 15,
+                  scale_);
   return xw;
 }
 
-int MDGuiFont::measureTextWidth(const char *s) const {
+int MDGUI_Font::measureTextWidth(const char *s) const {
   if (!s)
     return 0;
+  if (custom_) {
+    if (!callbacks_ || !callbacks_->measure_text_width)
+      return 0;
+    return callbacks_->measure_text_width(callbacks_->user_data, s);
+  }
   int w = 0;
   for (const unsigned char *p = (const unsigned char *)s; *p; ++p) {
-    w += glyph_width(*p);
+    w += glyph_width(*p) * scale_;
   }
   return w;
 }
 
-void MDGuiFont::drawText(const char *s, char *d, int x, int y, int colorIdx) {
+int MDGUI_Font::lineHeight() const {
+  if (custom_) {
+    if (!callbacks_ || !callbacks_->get_line_height)
+      return 8;
+    return callbacks_->get_line_height(callbacks_->user_data);
+  }
+  return 8 * scale_;
+}
+
+void MDGUI_Font::drawText(const char *s, char *d, int x, int y, int colorIdx) {
   if (!s)
     return;
+  if (custom_) {
+    if (callbacks_ && callbacks_->draw_text)
+      callbacks_->draw_text(callbacks_->user_data, s, x, y, colorIdx);
+    return;
+  }
   for (const unsigned char *p = (const unsigned char *)s; *p; ++p) {
     x += drawChar(*p, x, y, colorIdx);
   }
 }
-void MDGuiFont::drawText(const char *s, char *d, int x, int y) {
+void MDGUI_Font::drawText(const char *s, char *d, int x, int y) {
   drawText(s, d, x, y, -1); // Use default font palette indices.
+}
+
+extern "C" {
+MDGUI_Font *mdgui_font_create_builtin(int scale) {
+  return new (std::nothrow) MDGUI_Font(scale);
+}
+
+MDGUI_Font *mdgui_font_create_custom(const MDGUI_FontCallbacks *callbacks) {
+  if (!callbacks)
+    return nullptr;
+  return new (std::nothrow) MDGUI_Font(*callbacks);
+}
+
+void mdgui_font_destroy(MDGUI_Font *font) { delete font; }
+
+int mdgui_font_measure_text(const MDGUI_Font *font, const char *text) {
+  return font ? font->measureTextWidth(text) : 0;
+}
+
+int mdgui_font_get_line_height(const MDGUI_Font *font) {
+  return font ? font->lineHeight() : 0;
+}
 }
 
 

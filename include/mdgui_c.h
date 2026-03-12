@@ -6,6 +6,7 @@ extern "C" {
 #endif
 
 typedef struct MDGUI_Context MDGUI_Context;
+typedef struct MDGUI_Font MDGUI_Font;
 
 typedef struct MDGUI_RenderBackend {
   void *user_data;
@@ -53,6 +54,14 @@ typedef struct MDGUI_Input {
   int key_home;
   int key_end;
 } MDGUI_Input;
+
+typedef struct MDGUI_FontCallbacks {
+  void *user_data;
+  int (*measure_text_width)(void *user_data, const char *text);
+  void (*draw_text)(void *user_data, const char *text, int x, int y,
+                    int color_idx);
+  int (*get_line_height)(void *user_data);
+} MDGUI_FontCallbacks;
 
 typedef void (*MDGUI_WindowDrawFn)(MDGUI_Context *ctx, int content_x,
                                    int content_y, int content_w, int content_h,
@@ -121,6 +130,16 @@ void mdgui_destroy(MDGUI_Context *ctx);
 void mdgui_set_renderer(MDGUI_Context *ctx, void *sdl_renderer);
 void mdgui_set_backend(MDGUI_Context *ctx, const MDGUI_RenderBackend *backend);
 
+MDGUI_Font *mdgui_font_create_builtin(int scale);
+MDGUI_Font *mdgui_font_create_custom(const MDGUI_FontCallbacks *callbacks);
+void mdgui_font_destroy(MDGUI_Font *font);
+int mdgui_font_measure_text(const MDGUI_Font *font, const char *text);
+int mdgui_font_get_line_height(const MDGUI_Font *font);
+void mdgui_set_default_font(MDGUI_Context *ctx, MDGUI_Font *font);
+MDGUI_Font *mdgui_get_default_font(MDGUI_Context *ctx);
+void mdgui_push_font(MDGUI_Context *ctx, MDGUI_Font *font);
+void mdgui_pop_font(MDGUI_Context *ctx);
+
 void mdgui_begin_frame(MDGUI_Context *ctx, const MDGUI_Input *input);
 void mdgui_end_frame(MDGUI_Context *ctx);
 
@@ -142,7 +161,10 @@ void mdgui_end_columns(MDGUI_Context *ctx);
 
 int mdgui_button(MDGUI_Context *ctx, const char *text, int w, int h);
 void mdgui_label(MDGUI_Context *ctx, const char *text);
+void mdgui_label_font(MDGUI_Context *ctx, const char *text, MDGUI_Font *font);
 void mdgui_label_wrapped(MDGUI_Context *ctx, const char *text, int w);
+void mdgui_label_wrapped_font(MDGUI_Context *ctx, const char *text, int w,
+                              MDGUI_Font *font);
 int mdgui_checkbox(MDGUI_Context *ctx, const char *text, bool *checked);
 int mdgui_slider(MDGUI_Context *ctx, const char *text, float *val, float min,
                  float max, int w);
@@ -180,6 +202,8 @@ void mdgui_open_file_browser_at(MDGUI_Context *ctx, int x, int y);
 const char *mdgui_show_file_browser(MDGUI_Context *ctx);
 void mdgui_set_file_browser_filters(MDGUI_Context *ctx, const char **extensions,
                                     int extension_count);
+void mdgui_set_file_browser_path_font(MDGUI_Context *ctx, MDGUI_Font *font);
+MDGUI_Font *mdgui_get_file_browser_path_font(MDGUI_Context *ctx);
 void mdgui_set_window_open(MDGUI_Context *ctx, const char *title, int open);
 int mdgui_is_window_open(MDGUI_Context *ctx, const char *title);
 void mdgui_focus_window(MDGUI_Context *ctx, const char *title);

@@ -3,18 +3,30 @@
 #include <stdint.h>
 
 struct MDGUI_RenderBackend;
+struct MDGUI_FontCallbacks;
 
-class MDGuiFont {
+class MDGUI_Font {
 public:
   uint8_t *atlas_raw;
-  MDGuiFont();
+  MDGUI_Font();
+  explicit MDGUI_Font(int builtin_scale);
+  explicit MDGUI_Font(const MDGUI_FontCallbacks &callbacks);
+  ~MDGUI_Font();
   int drawChar(unsigned char c, int x, int y, int colorIdx);
   int measureTextWidth(const char *s) const;
+  int lineHeight() const;
   void drawText(const char *s, char *d, int x, int y, int colorIdx);
   void drawText(const char *s, char *d, int x, int y);
+
+private:
+  int scale_;
+  bool custom_;
+  MDGUI_FontCallbacks *callbacks_;
 };
 
-extern MDGuiFont *mdgui_fonts[10];
+using MDGuiFont = MDGUI_Font;
+
+extern MDGUI_Font *mdgui_fonts[10];
 
 extern "C" {
 void mdgui_bind_backend(const MDGUI_RenderBackend *backend);

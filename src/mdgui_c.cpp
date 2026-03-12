@@ -254,6 +254,9 @@ struct MDGUI_Context {
   std::vector<int> layout_columns_bottoms;
   int layout_indent;
   std::vector<int> indent_stack;
+  MDGUI_Font *default_font;
+  std::vector<MDGUI_Font *> font_stack;
+  MDGUI_Font *file_browser_path_font;
   bool window_has_nonlabel_widget;
   bool windows_locked;
   bool tile_manager_enabled;
@@ -316,6 +319,41 @@ static void note_content_bounds(MDGUI_Context *ctx, int right, int bottom) {
     ctx->content_req_right = right;
   if (bottom > ctx->content_req_bottom)
     ctx->content_req_bottom = bottom;
+}
+
+static MDGUI_Font *fallback_font() { return mdgui_fonts[1]; }
+
+static MDGUI_Font *resolve_font(MDGUI_Context *ctx,
+                                MDGUI_Font *override_font = nullptr) {
+  if (override_font)
+    return override_font;
+  if (ctx && !ctx->font_stack.empty() && ctx->font_stack.back())
+    return ctx->font_stack.back();
+  if (ctx && ctx->default_font)
+    return ctx->default_font;
+  return fallback_font();
+}
+
+static int font_line_height(MDGUI_Context *ctx,
+                            MDGUI_Font *override_font = nullptr) {
+  MDGUI_Font *font = resolve_font(ctx, override_font);
+  const int h = mdgui_font_get_line_height(font);
+  return (h > 0) ? h : 8;
+}
+
+static int font_measure_text(MDGUI_Context *ctx, const char *text,
+                             MDGUI_Font *override_font = nullptr) {
+  MDGUI_Font *font = resolve_font(ctx, override_font);
+  return mdgui_font_measure_text(font, text);
+}
+
+static void font_draw_text(MDGUI_Context *ctx, const char *text, int x, int y,
+                           int color_idx,
+                           MDGUI_Font *override_font = nullptr) {
+  MDGUI_Font *font = resolve_font(ctx, override_font);
+  if (!font || !text)
+    return;
+  font->drawText(text, nullptr, x, y, color_idx);
 }
 
 static void set_content_clip(MDGUI_Context *ctx) {
@@ -2186,6 +2224,9 @@ MDGUI_Context *mdgui_create_with_backend(const MDGUI_RenderBackend *backend) {
   ctx->layout_columns_width = 0;
   ctx->layout_columns_max_bottom = 0;
   ctx->layout_columns_bottoms.clear();
+  ctx->default_font = nullptr;
+  ctx->font_stack.clear();
+  ctx->file_browser_path_font = nullptr;
   ctx->window_has_nonlabel_widget = false;
   ctx->windows_locked = false;
   ctx->tile_manager_enabled = false;
@@ -2237,9 +2278,10 @@ MDGUI_Context *mdgui_create_with_backend(const MDGUI_RenderBackend *backend) {
   mdgui_set_backend(ctx, backend);
   for (int i = 0; i < 10; i++) {
     if (!mdgui_fonts[i]) {
-      mdgui_fonts[i] = new MDGuiFont();
+      mdgui_fonts[i] = mdgui_font_create_builtin(1);
     }
   }
+  ctx->default_font = fallback_font();
   return ctx;
 }
 
@@ -2253,6 +2295,42 @@ void mdgui_destroy(MDGUI_Context *ctx) {
     }
   }
   delete ctx;
+}
+
+void mdgui_set_default_font(MDGUI_Context *ctx, MDGUI_Font *font) {
+  if (!ctx)
+    return;
+  ctx->default_font = font ? font : fallback_font();
+}
+
+MDGUI_Font *mdgui_get_default_font(MDGUI_Context *ctx) {
+  if (!ctx)
+    return fallback_font();
+  return ctx->default_font ? ctx->default_font : fallback_font();
+}
+
+void mdgui_push_font(MDGUI_Context *ctx, MDGUI_Font *font) {
+  if (!ctx)
+    return;
+  ctx->font_stack.push_back(font ? font : fallback_font());
+}
+
+void mdgui_pop_font(MDGUI_Context *ctx) {
+  if (!ctx || ctx->font_stack.empty())
+    return;
+  ctx->font_stack.pop_back();
+}
+
+void mdgui_set_file_browser_path_font(MDGUI_Context *ctx, MDGUI_Font *font) {
+  if (!ctx)
+    return;
+  ctx->file_browser_path_font = font;
+}
+
+MDGUI_Font *mdgui_get_file_browser_path_font(MDGUI_Context *ctx) {
+  if (!ctx)
+    return nullptr;
+  return ctx->file_browser_path_font;
 }
 
 void mdgui_set_renderer(MDGUI_Context *ctx, void *sdl_renderer) {
@@ -2376,6 +2454,7 @@ void mdgui_begin_frame(MDGUI_Context *ctx, const MDGUI_Input *input) {
   ctx->main_menu_build_stack.clear();
   ctx->content_req_right = 0;
   ctx->content_req_bottom = 0;
+  ctx->font_stack.clear();
   ctx->window_has_nonlabel_widget = false;
   ctx->combo_overlay_pending = false;
   ctx->combo_overlay_window = -1;
@@ -3255,27 +3334,32 @@ int mdgui_button(MDGUI_Context *ctx, const char *text, int w, int h) {
   return hovered && ctx->input.mouse_pressed && win.z == ctx->z_counter;
 }
 
-void mdgui_label(MDGUI_Context *ctx, const char *text) {
-  if (!ctx || !text || !mdgui_fonts[1] || ctx->current_window < 0)
+void mdgui_label_font(MDGUI_Context *ctx, const char *text, MDGUI_Font *font) {
+  if (!ctx || !text || !resolve_font(ctx, font) || ctx->current_window < 0)
     return;
   const auto &win = ctx->windows[ctx->current_window];
   int local_x = 0;
   int logical_y = 0;
   layout_prepare_widget(ctx, &local_x, &logical_y);
   const int top_inset = std::max(1, ctx->style.spacing_y / 2);
+  const int line_h = std::max(ctx->style.label_h, font_line_height(ctx, font));
   const int label_logical_y = logical_y + top_inset;
   const int abs_x = ctx->origin_x + local_x;
   const int abs_y = label_logical_y - win.text_scroll;
-  mdgui_fonts[1]->drawText(text, nullptr, abs_x, abs_y, CLR_TEXT_LIGHT);
-  note_content_bounds(ctx, abs_x + mdgui_fonts[1]->measureTextWidth(text),
-                      label_logical_y + ctx->style.label_h);
-  layout_commit_widget(ctx, local_x, logical_y, 1,
-                       ctx->style.label_h + top_inset,
+  font_draw_text(ctx, text, abs_x, abs_y, CLR_TEXT_LIGHT, font);
+  note_content_bounds(ctx, abs_x + font_measure_text(ctx, text, font),
+                      label_logical_y + line_h);
+  layout_commit_widget(ctx, local_x, logical_y, 1, line_h + top_inset,
                        ctx->style.spacing_y);
 }
 
-void mdgui_label_wrapped(MDGUI_Context *ctx, const char *text, int w) {
-  if (!ctx || !text || !mdgui_fonts[1] || ctx->current_window < 0)
+void mdgui_label(MDGUI_Context *ctx, const char *text) {
+  mdgui_label_font(ctx, text, nullptr);
+}
+
+void mdgui_label_wrapped_font(MDGUI_Context *ctx, const char *text, int w,
+                              MDGUI_Font *font) {
+  if (!ctx || !text || !resolve_font(ctx, font) || ctx->current_window < 0)
     return;
   const auto &win = ctx->windows[ctx->current_window];
   int local_x = 0;
@@ -3289,7 +3373,7 @@ void mdgui_label_wrapped(MDGUI_Context *ctx, const char *text, int w) {
   const int margin_r = 2;
   const int draw_x = abs_x + margin_l;
   const int inner_wrap_w = std::max(10, wrap_w - (margin_l + margin_r));
-  const int line_h = 12;
+  const int line_h = std::max(ctx->style.label_h, font_line_height(ctx, font));
 
   int lines_drawn = 0;
   int max_right = draw_x;
@@ -3297,9 +3381,8 @@ void mdgui_label_wrapped(MDGUI_Context *ctx, const char *text, int w) {
   auto draw_line = [&](const std::string &line) {
     const int abs_y =
         (wrapped_logical_y + lines_drawn * line_h) - win.text_scroll;
-    mdgui_fonts[1]->drawText(line.c_str(), nullptr, draw_x, abs_y,
-                             CLR_TEXT_LIGHT);
-    const int line_w = mdgui_fonts[1]->measureTextWidth(line.c_str());
+    font_draw_text(ctx, line.c_str(), draw_x, abs_y, CLR_TEXT_LIGHT, font);
+    const int line_w = font_measure_text(ctx, line.c_str(), font);
     if (draw_x + line_w > max_right)
       max_right = draw_x + line_w;
     ++lines_drawn;
@@ -3316,8 +3399,7 @@ void mdgui_label_wrapped(MDGUI_Context *ctx, const char *text, int w) {
       size_t limit = word.size() - offset;
       for (size_t n = 1; n <= limit; ++n) {
         const std::string candidate = word.substr(offset, n);
-        if (mdgui_fonts[1]->measureTextWidth(candidate.c_str()) <=
-            inner_wrap_w) {
+        if (font_measure_text(ctx, candidate.c_str(), font) <= inner_wrap_w) {
           best = n;
         } else {
           break;
@@ -3357,8 +3439,7 @@ void mdgui_label_wrapped(MDGUI_Context *ctx, const char *text, int w) {
         const std::string candidate =
             current.empty() ? word : (current + " " + word);
 
-        if (mdgui_fonts[1]->measureTextWidth(candidate.c_str()) <=
-            inner_wrap_w) {
+        if (font_measure_text(ctx, candidate.c_str(), font) <= inner_wrap_w) {
           current = candidate;
           continue;
         }
@@ -3366,7 +3447,7 @@ void mdgui_label_wrapped(MDGUI_Context *ctx, const char *text, int w) {
         if (!current.empty()) {
           draw_line(current);
           current.clear();
-          if (mdgui_fonts[1]->measureTextWidth(word.c_str()) <= inner_wrap_w) {
+          if (font_measure_text(ctx, word.c_str(), font) <= inner_wrap_w) {
             current = word;
           } else {
             draw_word_wrapped(word);
@@ -3391,6 +3472,10 @@ void mdgui_label_wrapped(MDGUI_Context *ctx, const char *text, int w) {
   note_content_bounds(ctx, max_right + margin_r, wrapped_logical_y + total_h);
   layout_commit_widget(ctx, local_x, logical_y, wrap_w, total_h + top_inset,
                        ctx->style.spacing_y);
+}
+
+void mdgui_label_wrapped(MDGUI_Context *ctx, const char *text, int w) {
+  mdgui_label_wrapped_font(ctx, text, w, nullptr);
 }
 
 int mdgui_checkbox(MDGUI_Context *ctx, const char *text, bool *checked) {
@@ -6206,7 +6291,8 @@ const char *mdgui_show_file_browser(MDGUI_Context *ctx) {
     file_browser_open_path(ctx, fallback.c_str());
   }
 
-  mdgui_label(ctx, ctx->file_browser_cwd.c_str());
+  mdgui_label_font(ctx, ctx->file_browser_cwd.c_str(),
+                   ctx->file_browser_path_font);
   const int drive_button_w = 64;
   const int drive_stride = drive_button_w + ctx->style.spacing_x;
   const int drive_avail_w = resolve_dynamic_width(ctx, 0, 0, drive_button_w);
