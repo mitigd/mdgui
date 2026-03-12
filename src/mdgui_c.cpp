@@ -5875,17 +5875,34 @@ int mdgui_begin_render_window_ex(MDGUI_Context *ctx, const char *title, int x,
     mdgui_backend_set_clip_rect(1, parent_clip_x, parent_clip_y, parent_clip_w,
                                 parent_clip_h);
 
-    const int parent_clip_x2 = parent_clip_x + parent_clip_w;
-    const int parent_clip_y2 = parent_clip_y + parent_clip_h;
-    const bool fully_inside_parent =
-        (ix >= parent_clip_x) && (iy >= parent_clip_y) &&
-        ((ix + w) <= parent_clip_x2) && ((iy + h) <= parent_clip_y2);
-    if (!fully_inside_parent) {
-      // In tiled/scroll-constrained
-      // parents, nested viewports
-      // that are not fully within the
-      // visible content region should
-      // not render at all.
+    const int cx = ix + 1;
+    const int cy = iy + 1;
+    int cw = w - 2;
+    int ch = h - 2;
+    if (cw < 1)
+      cw = 1;
+    if (ch < 1)
+      ch = 1;
+
+    // Intersect child content clip
+    // with parent content clip.
+    int clip_x1 = cx;
+    int clip_y1 = cy;
+    int clip_x2 = cx + cw;
+    int clip_y2 = cy + ch;
+    const int parent_x2 = parent_clip_x + parent_clip_w;
+    const int parent_y2 = parent_clip_y + parent_clip_h;
+    if (clip_x1 < parent_clip_x)
+      clip_x1 = parent_clip_x;
+    if (clip_y1 < parent_clip_y)
+      clip_y1 = parent_clip_y;
+    if (clip_x2 > parent_x2)
+      clip_x2 = parent_x2;
+    if (clip_y2 > parent_y2)
+      clip_y2 = parent_y2;
+    int clip_w = clip_x2 - clip_x1;
+    int clip_h = clip_y2 - clip_y1;
+    if (clip_w <= 0 || clip_h <= 0) {
       note_content_bounds(ctx, ix + w, logical_y + h);
       ctx->content_y = logical_y + h + 4;
       if (out_x)
@@ -5922,38 +5939,6 @@ int mdgui_begin_render_window_ex(MDGUI_Context *ctx, const char *title, int x,
                          frame_x2, frame_y2);
     mdgui_fill_rect_idx(nullptr, CLR_BOX_BODY, ix, iy, w, h);
     note_content_bounds(ctx, ix + w, logical_y + h);
-
-    const int cx = ix + 1;
-    const int cy = iy + 1;
-    int cw = w - 2;
-    int ch = h - 2;
-    if (cw < 1)
-      cw = 1;
-    if (ch < 1)
-      ch = 1;
-
-    // Intersect child content clip
-    // with parent content clip.
-    int clip_x1 = cx;
-    int clip_y1 = cy;
-    int clip_x2 = cx + cw;
-    int clip_y2 = cy + ch;
-    const int parent_x2 = parent_clip_x + parent_clip_w;
-    const int parent_y2 = parent_clip_y + parent_clip_h;
-    if (clip_x1 < parent_clip_x)
-      clip_x1 = parent_clip_x;
-    if (clip_y1 < parent_clip_y)
-      clip_y1 = parent_clip_y;
-    if (clip_x2 > parent_x2)
-      clip_x2 = parent_x2;
-    if (clip_y2 > parent_y2)
-      clip_y2 = parent_y2;
-    int clip_w = clip_x2 - clip_x1;
-    int clip_h = clip_y2 - clip_y1;
-    if (clip_w < 1)
-      clip_w = 1;
-    if (clip_h < 1)
-      clip_h = 1;
 
     ctx->origin_x = cx;
     ctx->origin_y = cy;
