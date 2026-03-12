@@ -3239,8 +3239,15 @@ void mdgui_end_window(MDGUI_Context *ctx) {
       if (i == ctx->combo_overlay_selected || row_hover)
         mdgui_fill_rect_idx(nullptr, CLR_ACCENT, ix, ry, w, item_h);
       if (mdgui_fonts[1] && ctx->combo_overlay_items[i]) {
-        mdgui_fonts[1]->drawText(ctx->combo_overlay_items[i], nullptr, ix + 2,
-                                 ry + 1, CLR_MENU_TEXT);
+        const int text_max_w = std::max(1, w - 4);
+        const std::string row_text =
+            ellipsize_text_to_width(ctx->combo_overlay_items[i], text_max_w);
+        if (set_widget_clip_intersect_content(ctx, ix + 1, ry,
+                                              std::max(1, w - 2), item_h)) {
+          mdgui_fonts[1]->drawText(row_text.c_str(), nullptr, ix + 2, ry + 1,
+                                   CLR_MENU_TEXT);
+          set_content_clip(ctx);
+        }
       }
     }
     ctx->combo_overlay_pending = false;
@@ -4119,7 +4126,15 @@ int mdgui_combo(MDGUI_Context *ctx, const char *label, const char **items,
   mdgui_draw_vline_idx(nullptr, CLR_BUTTON_DARK, ix + w - 12, iy, iy + box_h);
   if (font && items[*selected]) {
     const int text_y = iy + (box_h - line_h) / 2;
-    font_draw_text(ctx, items[*selected], ix + 2, text_y, CLR_MENU_TEXT);
+    const int text_clip_x = ix + 1;
+    const int text_clip_y = iy + 1;
+    const int text_clip_w = std::max(1, w - 14);
+    const int text_clip_h = std::max(1, box_h - 2);
+    if (set_widget_clip_intersect_content(ctx, text_clip_x, text_clip_y,
+                                          text_clip_w, text_clip_h)) {
+      font_draw_text(ctx, items[*selected], ix + 2, text_y, CLR_MENU_TEXT);
+      set_content_clip(ctx);
+    }
     font_draw_text(ctx, "v", ix + w - 9, text_y, CLR_MENU_TEXT);
   }
   if (label && font) {
