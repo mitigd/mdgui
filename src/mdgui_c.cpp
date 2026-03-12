@@ -2501,6 +2501,12 @@ MDGUI_Font *mdgui_get_file_browser_path_font(MDGUI_Context *ctx) {
   return ctx->file_browser_path_font;
 }
 
+void mdgui_set_file_browser_path(MDGUI_Context *ctx, const char *path) {
+  if (!ctx || !path || !*path)
+    return;
+  file_browser_open_path(ctx, path);
+}
+
 void mdgui_set_file_browser_path_subpass_enabled(MDGUI_Context *ctx,
                                                  int enabled) {
   if (!ctx)

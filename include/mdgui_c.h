@@ -238,6 +238,7 @@ void mdgui_open_file_browser_at(MDGUI_Context *ctx, int x, int y);
 const char *mdgui_show_file_browser(MDGUI_Context *ctx);
 void mdgui_set_file_browser_filters(MDGUI_Context *ctx, const char **extensions,
                                     int extension_count);
+void mdgui_set_file_browser_path(MDGUI_Context *ctx, const char *path);
 void mdgui_set_file_browser_path_font(MDGUI_Context *ctx, MDGUI_Font *font);
 MDGUI_Font *mdgui_get_file_browser_path_font(MDGUI_Context *ctx);
 void mdgui_set_file_browser_path_subpass_enabled(MDGUI_Context *ctx,
