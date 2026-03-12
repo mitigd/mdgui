@@ -662,6 +662,31 @@ static int top_window_at_point(const MDGUI_Context *ctx, int px, int py,
   return best;
 }
 
+static bool is_tiled_file_browser_window(const MDGUI_Context *ctx,
+                                         const MDGUI_Window &win) {
+  if (!ctx)
+    return false;
+  return ctx->tile_manager_enabled && !win.tile_excluded &&
+         win.id == "File Browser";
+}
+
+static bool is_occluded_by_higher_maximized_window(const MDGUI_Context *ctx,
+                                                   int window_idx) {
+  if (!ctx || window_idx < 0 || window_idx >= (int)ctx->windows.size())
+    return false;
+  const auto &target = ctx->windows[window_idx];
+  for (int i = 0; i < (int)ctx->windows.size(); ++i) {
+    if (i == window_idx)
+      continue;
+    const auto &other = ctx->windows[i];
+    if (other.closed || !other.is_maximized)
+      continue;
+    if (other.z > target.z)
+      return true;
+  }
+  return false;
+}
+
 static int get_logical_render_w(MDGUI_Context *ctx);
 static int get_logical_render_h(MDGUI_Context *ctx);
 static int get_status_bar_h(const MDGUI_Context *ctx);
@@ -2655,7 +2680,9 @@ void mdgui_begin_frame(MDGUI_Context *ctx, const MDGUI_Input *input) {
     const int clicked_idx =
         top_window_at_point(ctx, ctx->input.mouse_x, ctx->input.mouse_y, 3);
     if (clicked_idx >= 0 && clicked_idx < (int)ctx->windows.size()) {
-      ctx->windows[clicked_idx].z = ++ctx->z_counter;
+      auto &clicked = ctx->windows[clicked_idx];
+      if (!is_tiled_file_browser_window(ctx, clicked))
+        clicked.z = ++ctx->z_counter;
     }
   }
 
@@ -2828,6 +2855,10 @@ int mdgui_begin_window_ex(MDGUI_Context *ctx, const char *title, int x, int y,
     ctx->current_window = -1;
     return 0;
   }
+  if (is_occluded_by_higher_maximized_window(ctx, idx)) {
+    ctx->current_window = -1;
+    return 0;
+  }
   win.is_message_box = false;
 
   const int screen_w = get_logical_render_w(ctx);
@@ -2929,7 +2960,8 @@ int mdgui_begin_window_ex(MDGUI_Context *ctx, const char *title, int x, int y,
     // treat it as titlebar/chrome
     // interaction.
     if (win.open_combo_id != -1) {
-      win.z = ++ctx->z_counter;
+      if (!is_tiled_file_browser_window(ctx, win))
+        win.z = ++ctx->z_counter;
     } else {
       // Check Close button
       if (point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y, close_x,
@@ -2956,7 +2988,8 @@ int mdgui_begin_window_ex(MDGUI_Context *ctx, const char *title, int x, int y,
         }
       }
 
-      win.z = ++ctx->z_counter;
+      if (!is_tiled_file_browser_window(ctx, win))
+        win.z = ++ctx->z_counter;
 
       if (move_resize_allowed && edge_mask != 0) {
         win.fixed_rect = false;
@@ -6491,7 +6524,8 @@ void mdgui_open_file_browser_at(MDGUI_Context *ctx, int x, int y) {
   if (idx >= 0 && idx < (int)ctx->windows.size()) {
     auto &win = ctx->windows[idx];
     win.closed = false;
-    win.z = ++ctx->z_counter;
+    if (!is_tiled_file_browser_window(ctx, win))
+      win.z = ++ctx->z_counter;
     if (x >= 0 || y >= 0) {
       if (x >= 0)
         win.x = x;
@@ -6561,6 +6595,12 @@ const char *mdgui_show_file_browser(MDGUI_Context *ctx) {
   const int open_x = (ctx->file_browser_open_x >= 0) ? ctx->file_browser_open_x : 28;
   const int open_y = (ctx->file_browser_open_y >= 0) ? ctx->file_browser_open_y : 20;
   if (!mdgui_begin_window(ctx, "File Browser", open_x, open_y, 280, 240)) {
+    for (int i = 0; i < (int)ctx->windows.size(); ++i) {
+      if (ctx->windows[i].id == "File Browser" && !ctx->windows[i].closed) {
+        // Hidden behind a higher z fullscreen window; keep browser state open.
+        return nullptr;
+      }
+    }
     ctx->file_browser_open = false;
     return nullptr;
   }
