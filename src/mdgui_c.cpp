@@ -3787,7 +3787,8 @@ int mdgui_slider(MDGUI_Context *ctx, const char *text, float *val, float min,
   if (ratio > 1)
     ratio = 1;
 
-  int tx = ix + (int)(ratio * (float)(w - thumb_w));
+  const int thumb_travel = std::max(1, w - thumb_w);
+  int tx = ix + (int)(ratio * (float)thumb_travel + 0.5f);
 
   // Thumb (outset 3D)
   mdgui_fill_rect_idx(nullptr, CLR_BUTTON_SURFACE, tx, iy, thumb_w, thumb_h);
@@ -3802,7 +3803,8 @@ int mdgui_slider(MDGUI_Context *ctx, const char *text, float *val, float min,
   if (ctx->input.mouse_down && is_current_window_topmost(ctx) &&
       point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y, ix, iy, w,
                     thumb_h)) {
-    float new_ratio = (float)(ctx->input.mouse_x - ix) / (float)w;
+    float new_ratio =
+        (float)(ctx->input.mouse_x - ix) / (float)thumb_travel;
     if (new_ratio < 0)
       new_ratio = 0;
     if (new_ratio > 1)
