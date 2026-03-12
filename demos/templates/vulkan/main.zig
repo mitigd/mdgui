@@ -9,6 +9,18 @@ const c = @cImport({
 const render_api_window_title = "WINDOW API";
 const startup_tile_windows = true;
 const startup_lock_tiled_windows = false;
+const main_pane_tabs = [_][*:0]const u8{
+    "HOME",
+    "ROM",
+    "AUDIO",
+    "VIDEO",
+    "INPUT",
+    "DEBUG",
+    "MEMORY",
+    "BREAKPOINTS",
+    "TRACE",
+};
+var main_pane_tab_index: c_int = 0;
 
 const Analytics = struct {
     const history_len = 240;
@@ -666,6 +678,27 @@ fn drawMainWindow(
             c.mdgui_next_column(ctx);
             _ = c.mdgui_button(ctx, "OPTIONS", 90, 20);
             c.mdgui_end_row(ctx);
+        }
+        if (c.mdgui_begin_tab_pane(
+            ctx,
+            "main.panes",
+            @ptrCast(@constCast(&main_pane_tabs[0])),
+            @intCast(main_pane_tabs.len),
+            &main_pane_tab_index,
+            -16,
+        ) != 0) {
+            switch (main_pane_tab_index) {
+                0 => c.mdgui_label_wrapped(ctx, "Home pane: emulator summary + quick actions.", -16),
+                1 => c.mdgui_label_wrapped(ctx, "ROM pane: cartridge metadata and launch options.", -16),
+                2 => c.mdgui_label_wrapped(ctx, "Audio pane: mixer and channel state.", -16),
+                3 => c.mdgui_label_wrapped(ctx, "Video pane: scaler and palette controls.", -16),
+                4 => c.mdgui_label_wrapped(ctx, "Input pane: bindings and live pad state.", -16),
+                5 => c.mdgui_label_wrapped(ctx, "Debug pane: runtime diagnostics.", -16),
+                6 => c.mdgui_label_wrapped(ctx, "Memory pane: hex viewer and watch list.", -16),
+                7 => c.mdgui_label_wrapped(ctx, "Breakpoints pane: add/remove execution stops.", -16),
+                else => c.mdgui_label_wrapped(ctx, "Trace pane: CPU event timeline.", -16),
+            }
+            c.mdgui_end_tab_pane(ctx);
         }
         const text_flags = c.mdgui_input_text(ctx, "Quick note", @ptrCast(&demo_text[0]), demo_text.len, -16);
         if ((text_flags & c.MDGUI_INPUT_TEXT_SUBMITTED) != 0) {

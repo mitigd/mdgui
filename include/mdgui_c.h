@@ -206,6 +206,15 @@ int mdgui_listbox(MDGUI_Context *ctx, const char **items, int item_count,
                   int *selected, int w, int rows);
 int mdgui_combo(MDGUI_Context *ctx, const char *label, const char **items,
                 int item_count, int *selected, int w);
+// Returns 1 when selected tab changes.
+int mdgui_tab_bar(MDGUI_Context *ctx, const char *id, const char **tabs,
+                  int tab_count, int *selected, int w);
+// Draws tab bar and begins a tab pane content block. Returns 1 on success.
+int mdgui_begin_tab_pane(MDGUI_Context *ctx, const char *id,
+                         const char **tabs, int tab_count, int *selected,
+                         int w);
+// Ends a tab pane content block started by mdgui_begin_tab_pane.
+void mdgui_end_tab_pane(MDGUI_Context *ctx);
 // Returns MDGUI_INPUT_TEXT_* flags.
 int mdgui_input_text(MDGUI_Context *ctx, const char *label, char *buffer,
                      int buffer_size, int w);

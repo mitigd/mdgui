@@ -66,6 +66,12 @@ struct MDGUI_Window {
     bool open;
   };
 
+  struct TabBarState {
+    std::string id;
+    int scroll_x;
+    int last_selected;
+  };
+
   std::string id;
   std::string title;
   int x;
@@ -104,6 +110,7 @@ struct MDGUI_Window {
   int chrome_min_w;
   int chrome_min_h;
   std::vector<CollapsingState> collapsing_states;
+  std::vector<TabBarState> tab_bar_states;
 };
 
 struct FileBrowserEntry {
@@ -596,6 +603,17 @@ static bool *find_or_create_collapsing_state(MDGUI_Window &win, const char *id,
   }
   win.collapsing_states.push_back({key, default_open});
   return &win.collapsing_states.back().open;
+}
+
+static MDGUI_Window::TabBarState *find_or_create_tab_bar_state(MDGUI_Window &win,
+                                                               const char *id) {
+  const char *key = (id && id[0]) ? id : "__default";
+  for (auto &st : win.tab_bar_states) {
+    if (st.id == key)
+      return &st;
+  }
+  win.tab_bar_states.push_back({key, 0, -1});
+  return &win.tab_bar_states.back();
 }
 
 static bool
@@ -4197,6 +4215,188 @@ int mdgui_combo(MDGUI_Context *ctx, const char *label, const char **items,
   return changed;
 }
 
+int mdgui_tab_bar(MDGUI_Context *ctx, const char *id, const char **tabs,
+                  int tab_count, int *selected, int w) {
+  if (!ctx || !tabs || tab_count <= 0 || !selected || ctx->current_window < 0)
+    return 0;
+  ctx->window_has_nonlabel_widget = true;
+  auto &win = ctx->windows[ctx->current_window];
+  int local_x = 0;
+  int logical_y = 0;
+  layout_prepare_widget(ctx, &local_x, &logical_y);
+  w = layout_resolve_width(ctx, local_x, w, 40);
+  const int bar_h = 12;
+  const int ix = ctx->origin_x + local_x;
+  const int iy = logical_y - win.text_scroll;
+
+  std::vector<int> tab_w;
+  std::vector<int> tab_x;
+  tab_w.reserve((size_t)tab_count);
+  tab_x.reserve((size_t)tab_count);
+  int total_w = 0;
+  for (int i = 0; i < tab_count; ++i) {
+    const char *label = tabs[i] ? tabs[i] : "";
+    int tw = 18;
+    if (mdgui_fonts[1]) {
+      const int measured = mdgui_fonts[1]->measureTextWidth(label);
+      if (measured + 10 > tw)
+        tw = measured + 10;
+    }
+    tab_x.push_back(total_w);
+    tab_w.push_back(tw);
+    total_w += tw;
+  }
+
+  int index = *selected;
+  if (index < 0)
+    index = 0;
+  if (index >= tab_count)
+    index = tab_count - 1;
+  *selected = index;
+
+  const int topmost = is_current_window_topmost(ctx);
+  const int hovered =
+      topmost &&
+      point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y, ix, iy, w, bar_h);
+
+  const bool overflow = (total_w > w);
+  const int nav_btn_w = overflow ? 10 : 0;
+  const int track_x = ix + nav_btn_w;
+  const int track_w = std::max(1, w - (nav_btn_w * 2));
+  auto *tab_state = find_or_create_tab_bar_state(win, id);
+  int scroll_x = tab_state ? tab_state->scroll_x : 0;
+  int max_scroll = total_w - track_w;
+  if (max_scroll < 0)
+    max_scroll = 0;
+  if (scroll_x < 0)
+    scroll_x = 0;
+  if (scroll_x > max_scroll)
+    scroll_x = max_scroll;
+
+  const bool selected_changed =
+      tab_state ? (tab_state->last_selected != index) : false;
+  if (selected_changed) {
+    const int selected_x0 = tab_x[index];
+    const int selected_x1 = selected_x0 + tab_w[index];
+    if (selected_x0 < scroll_x) {
+      scroll_x = selected_x0;
+    } else if (selected_x1 > scroll_x + track_w) {
+      scroll_x = selected_x1 - track_w;
+    }
+    if (scroll_x < 0)
+      scroll_x = 0;
+    if (scroll_x > max_scroll)
+      scroll_x = max_scroll;
+  }
+
+  int changed = 0;
+  if (overflow && hovered && ctx->input.mouse_wheel != 0) {
+    scroll_x -= ctx->input.mouse_wheel * 20;
+    if (scroll_x < 0)
+      scroll_x = 0;
+    if (scroll_x > max_scroll)
+      scroll_x = max_scroll;
+  }
+
+  if (ctx->input.mouse_pressed && topmost && hovered) {
+    if (overflow &&
+        point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y, ix, iy, nav_btn_w,
+                      bar_h)) {
+      scroll_x -= 40;
+      if (scroll_x < 0)
+        scroll_x = 0;
+    } else if (overflow && point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y,
+                                         ix + w - nav_btn_w, iy, nav_btn_w,
+                                         bar_h)) {
+      scroll_x += 40;
+      if (scroll_x > max_scroll)
+        scroll_x = max_scroll;
+    } else if (point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y, track_x, iy,
+                             track_w, bar_h)) {
+      const int local_click = (ctx->input.mouse_x - track_x) + scroll_x;
+      for (int i = 0; i < tab_count; ++i) {
+        if (local_click >= tab_x[i] && local_click < tab_x[i] + tab_w[i]) {
+          if (*selected != i) {
+            *selected = i;
+            changed = 1;
+          }
+          break;
+        }
+      }
+    }
+  }
+
+  if (tab_state) {
+    tab_state->scroll_x = scroll_x;
+    tab_state->last_selected = *selected;
+  }
+
+  mdgui_fill_rect_idx(nullptr, CLR_BUTTON_SURFACE, ix, iy, w, bar_h);
+  mdgui_draw_hline_idx(nullptr, CLR_WINDOW_BORDER, ix - 1, iy - 1, ix + w + 1);
+  mdgui_draw_hline_idx(nullptr, CLR_WINDOW_BORDER, ix - 1, iy + bar_h, ix + w + 1);
+  mdgui_draw_vline_idx(nullptr, CLR_WINDOW_BORDER, ix - 1, iy - 1, iy + bar_h);
+  mdgui_draw_vline_idx(nullptr, CLR_WINDOW_BORDER, ix + w, iy - 1, iy + bar_h);
+
+  if (overflow) {
+    const int left_hover = topmost && point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y,
+                                                    ix, iy, nav_btn_w, bar_h);
+    const int right_hover = topmost && point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y,
+                                                     ix + w - nav_btn_w, iy, nav_btn_w, bar_h);
+    mdgui_fill_rect_idx(nullptr, left_hover ? CLR_ACCENT : CLR_BUTTON_PRESSED, ix, iy,
+                        nav_btn_w, bar_h);
+    mdgui_fill_rect_idx(nullptr, right_hover ? CLR_ACCENT : CLR_BUTTON_PRESSED,
+                        ix + w - nav_btn_w, iy, nav_btn_w, bar_h);
+    mdgui_draw_line_idx(nullptr, CLR_TEXT_LIGHT, ix + 6, iy + 3, ix + 3, iy + 5);
+    mdgui_draw_line_idx(nullptr, CLR_TEXT_LIGHT, ix + 6, iy + 7, ix + 3, iy + 5);
+    const int rx = ix + w - nav_btn_w;
+    mdgui_draw_line_idx(nullptr, CLR_TEXT_LIGHT, rx + 3, iy + 3, rx + 6, iy + 5);
+    mdgui_draw_line_idx(nullptr, CLR_TEXT_LIGHT, rx + 3, iy + 7, rx + 6, iy + 5);
+  }
+
+  if (set_widget_clip_intersect_content(ctx, track_x, iy, track_w, bar_h)) {
+    for (int i = 0; i < tab_count; ++i) {
+      const int tx = track_x + tab_x[i] - scroll_x;
+      const int tw = tab_w[i];
+      if (tx + tw <= track_x || tx >= track_x + track_w)
+        continue;
+      const bool active = (*selected == i);
+      mdgui_fill_rect_idx(nullptr, active ? CLR_ACCENT : CLR_BUTTON_SURFACE, tx,
+                          iy + 1, tw, bar_h - 2);
+      mdgui_draw_vline_idx(nullptr, CLR_WINDOW_BORDER, tx + tw - 1, iy + 1,
+                           iy + bar_h - 2);
+      if (mdgui_fonts[1]) {
+        const char *label = tabs[i] ? tabs[i] : "";
+        mdgui_fonts[1]->drawText(label, nullptr, tx + 4, iy + 2, CLR_MENU_TEXT);
+      }
+    }
+  }
+  set_content_clip(ctx);
+
+  note_content_bounds(ctx, ix + w, logical_y + bar_h);
+  layout_commit_widget(ctx, local_x, logical_y, w, bar_h, ctx->style.spacing_y);
+  return changed;
+}
+
+int mdgui_begin_tab_pane(MDGUI_Context *ctx, const char *id,
+                         const char **tabs, int tab_count, int *selected,
+                         int w) {
+  if (!ctx || !tabs || tab_count <= 0 || !selected || ctx->current_window < 0)
+    return 0;
+  mdgui_tab_bar(ctx, id, tabs, tab_count, selected, w);
+  mdgui_spacing(ctx, 2);
+  if (*selected < 0)
+    *selected = 0;
+  if (*selected >= tab_count)
+    *selected = tab_count - 1;
+  return 1;
+}
+
+void mdgui_end_tab_pane(MDGUI_Context *ctx) {
+  if (!ctx || ctx->current_window < 0)
+    return;
+  mdgui_spacing(ctx, 2);
+}
+
 int mdgui_input_text(MDGUI_Context *ctx, const char *label, char *buffer,
                      int buffer_size, int w) {
   if (!ctx || !buffer || buffer_size <= 1 || ctx->current_window < 0)
@@ -6898,9 +7098,13 @@ void mdgui_show_demo_window(MDGUI_Context *ctx) {
   static float progress = 0.35f;
   static int quality_idx = 0;
   static int theme_idx = MDGUI_THEME_DEFAULT;
+  static int pane_tab = 0;
   static const char *quality_items[] = {"Nearest", "Bilinear", "CRT Mask"};
   static const char *theme_items[] = {"Default",  "Dark",     "Amber",
                                       "Graphite", "Midnight", "Olive"};
+  static const char *pane_tabs[] = {"Scene",   "Inspector", "Console",
+                                    "Profiler","Assets",    "Settings",
+                                    "History"};
   if (!show_demo)
     return;
 
@@ -6964,6 +7168,29 @@ void mdgui_show_demo_window(MDGUI_Context *ctx) {
         progress += 0.1f;
         if (progress > 1.0f)
           progress = 0.0f;
+      }
+      mdgui_unindent(ctx);
+    }
+
+    if (mdgui_collapsing_header(ctx, "demo.tabs", "Pane Tabs", -16, 1)) {
+      mdgui_indent(ctx, 8);
+      mdgui_tab_bar(ctx, "demo.panes", pane_tabs,
+                    (int)(sizeof(pane_tabs) / sizeof(pane_tabs[0])), &pane_tab,
+                    -16);
+      if (pane_tab == 0) {
+        mdgui_label(ctx, "Scene pane: viewport controls.");
+      } else if (pane_tab == 1) {
+        mdgui_label(ctx, "Inspector pane: entity properties.");
+      } else if (pane_tab == 2) {
+        mdgui_label(ctx, "Console pane: logs + commands.");
+      } else if (pane_tab == 3) {
+        mdgui_label(ctx, "Profiler pane: frame metrics.");
+      } else if (pane_tab == 4) {
+        mdgui_label(ctx, "Assets pane: project files.");
+      } else if (pane_tab == 5) {
+        mdgui_label(ctx, "Settings pane: runtime options.");
+      } else {
+        mdgui_label(ctx, "History pane: undo / redo timeline.");
       }
       mdgui_unindent(ctx);
     }
