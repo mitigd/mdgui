@@ -6206,15 +6206,20 @@ const char *mdgui_show_file_browser(MDGUI_Context *ctx) {
     file_browser_open_path(ctx, fallback.c_str());
   }
 
-  mdgui_label(ctx, "Directory:");
   mdgui_label(ctx, ctx->file_browser_cwd.c_str());
-  mdgui_label(ctx, "Drives:");
+  const int drive_button_w = 64;
+  const int drive_stride = drive_button_w + ctx->style.spacing_x;
+  const int drive_avail_w = resolve_dynamic_width(ctx, 0, 0, drive_button_w);
+  int drive_columns = (drive_avail_w + ctx->style.spacing_x) / drive_stride;
+  if (drive_columns < 1)
+    drive_columns = 1;
   for (int i = 0; i < (int)ctx->file_browser_drives.size(); ++i) {
     const std::string &drive = ctx->file_browser_drives[(size_t)i];
-    if (mdgui_button(ctx, drive.c_str(), 64, 12)) {
+    if (mdgui_button(ctx, drive.c_str(), drive_button_w, 12)) {
       file_browser_open_path(ctx, drive.c_str());
     }
-    if (((i + 1) % 4) != 0 && (i + 1) < (int)ctx->file_browser_drives.size())
+    if (((i + 1) % drive_columns) != 0 &&
+        (i + 1) < (int)ctx->file_browser_drives.size())
       mdgui_same_line(ctx);
   }
   if (ctx->file_browser_drives.empty()) {
