@@ -1475,7 +1475,8 @@ static void draw_open_menu_overlay(MDGUI_Context *ctx) {
 
 static void draw_cached_window_menu_overlay(MDGUI_Context *ctx,
                                             MDGUI_Window &win) {
-  if (!ctx || win.open_menu_path.empty() || win.menu_overlay_defs.empty())
+  if (!ctx || win.closed || win.open_menu_path.empty() ||
+      win.menu_overlay_defs.empty())
     return;
   const int item_h = (win.menu_overlay_item_h > 0) ? win.menu_overlay_item_h : 10;
 
@@ -2463,8 +2464,10 @@ int mdgui_begin_window_ex(MDGUI_Context *ctx, const char *title, int x, int y,
     win.tile_excluded = true;
   }
 
-  if (win.closed)
+  if (win.closed) {
+    ctx->current_window = -1;
     return 0;
+  }
   win.is_message_box = false;
 
   const int screen_w = get_logical_render_w(ctx);
@@ -5383,9 +5386,46 @@ void mdgui_set_window_open(MDGUI_Context *ctx, const char *title, int open) {
     return;
   for (int i = 0; i < (int)ctx->windows.size(); ++i) {
     if (ctx->windows[i].id == title) {
-      ctx->windows[i].closed = (open == 0);
+      auto &win = ctx->windows[i];
+      win.closed = (open == 0);
       if (open) {
-        ctx->windows[i].z = ++ctx->z_counter;
+        win.z = ++ctx->z_counter;
+      } else {
+        win.open_menu_index = -1;
+        win.open_menu_path.clear();
+        win.menu_overlay_defs.clear();
+        win.text_scroll_dragging = false;
+        if (ctx->current_window == i)
+          ctx->current_window = -1;
+        if (ctx->dragging_window == i)
+          ctx->dragging_window = -1;
+        if (ctx->resizing_window == i)
+          ctx->resizing_window = -1;
+        if (ctx->active_text_input_window == i) {
+          ctx->active_text_input_window = -1;
+          ctx->active_text_input_id = 0;
+          ctx->active_text_input_cursor = 0;
+          ctx->active_text_input_sel_anchor = 0;
+          ctx->active_text_input_sel_start = 0;
+          ctx->active_text_input_sel_end = 0;
+          ctx->active_text_input_drag_select = false;
+          ctx->active_text_input_multiline = false;
+          ctx->active_text_input_scroll_y = 0;
+        }
+        if (ctx->combo_overlay_window == i) {
+          ctx->combo_overlay_pending = false;
+          ctx->combo_overlay_window = -1;
+          ctx->combo_overlay_items = nullptr;
+        }
+        if (ctx->combo_capture_window == i) {
+          ctx->combo_capture_active = false;
+          ctx->combo_capture_seen_this_frame = false;
+          ctx->combo_capture_window = -1;
+          ctx->combo_capture_x = 0;
+          ctx->combo_capture_y = 0;
+          ctx->combo_capture_w = 0;
+          ctx->combo_capture_h = 0;
+        }
       }
       return;
     }
