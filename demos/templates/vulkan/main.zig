@@ -685,7 +685,7 @@ fn drawMainWindow(
             @ptrCast(@constCast(&main_pane_tabs[0])),
             @intCast(main_pane_tabs.len),
             &main_pane_tab_index,
-            -16,
+            0,
         ) != 0) {
             switch (main_pane_tab_index) {
                 0 => c.mdgui_label_wrapped(ctx, "Home pane: emulator summary + quick actions.", -16),
