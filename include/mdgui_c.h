@@ -70,6 +70,13 @@ typedef struct MDGUI_FontCallbacks {
   int (*get_line_height)(void *user_data);
 } MDGUI_FontCallbacks;
 
+typedef enum MDGUI_BuiltinFontVariant {
+  MDGUI_BUILTIN_FONT_8X8 = 0,
+  MDGUI_BUILTIN_FONT_6X8 = 1,
+  MDGUI_BUILTIN_FONT_5X7 = 2,
+  MDGUI_BUILTIN_FONT_4X6 = 3,
+} MDGUI_BuiltinFontVariant;
+
 typedef void (*MDGUI_WindowDrawFn)(MDGUI_Context *ctx, int content_x,
                                    int content_y, int content_w, int content_h,
                                    void *user_data);
@@ -138,6 +145,8 @@ void mdgui_set_renderer(MDGUI_Context *ctx, void *sdl_renderer);
 void mdgui_set_backend(MDGUI_Context *ctx, const MDGUI_RenderBackend *backend);
 
 MDGUI_Font *mdgui_font_create_builtin(int scale);
+MDGUI_Font *mdgui_font_create_builtin_variant(MDGUI_BuiltinFontVariant variant,
+                                              int scale);
 MDGUI_Font *mdgui_font_create_custom(const MDGUI_FontCallbacks *callbacks);
 MDGUI_Font *mdgui_font_create_from_file(const char *path, float pixel_height);
 void mdgui_font_destroy(MDGUI_Font *font);

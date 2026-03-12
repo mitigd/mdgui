@@ -1,5 +1,8 @@
 #include "mdgui_primitives.h"
 #include "mdgui_c.h"
+#include "mdgui_font4x6.h"
+#include "mdgui_font5x7.h"
+#include "mdgui_font6x8.h"
 #include "mdgui_font8x8.h"
 #define STB_TRUETYPE_IMPLEMENTATION
 #include "stb_truetype.h"
@@ -196,26 +199,36 @@ unsigned char apply_alpha_mod(unsigned char a) {
 }
 
 void draw_glyph_bits(const unsigned char *glyph, int x, int y,
-                     unsigned char color_idx, int scale = 1) {
+                     unsigned char color_idx, int scale = 1, int glyph_w = 8,
+                     int glyph_h = 8) {
   if (!backend_ready())
     return;
   if (scale < 1)
     scale = 1;
   const Color c = palette_color(color_idx);
-  for (int py = 0; py < 8; py++) {
+  const unsigned char alpha = apply_alpha_mod(c.a);
+  for (int py = 0; py < glyph_h; py++) {
     const unsigned char row = glyph[py];
-    for (int px = 0; px < 8; px++) {
-      if (row & (1u << px)) {
-        const int dx = x + px * scale;
-        const int dy = y + py * scale;
-        if (scale == 1) {
-          g_backend.draw_point_rgba(g_backend.user_data, c.r, c.g, c.b,
-                                    apply_alpha_mod(c.a), dx, dy);
-        } else {
-          g_backend.fill_rect_rgba(g_backend.user_data, c.r, c.g, c.b,
-                                   apply_alpha_mod(c.a), dx, dy, scale,
-                                   scale);
-        }
+    int px = 0;
+    while (px < glyph_w) {
+      while (px < glyph_w && !(row & (1u << px)))
+        ++px;
+      if (px >= glyph_w)
+        break;
+
+      const int run_start = px;
+      while (px < glyph_w && (row & (1u << px)))
+        ++px;
+
+      const int dx = x + run_start * scale;
+      const int dy = y + py * scale;
+      const int run_width = (px - run_start) * scale;
+      if (scale == 1 && run_width == 1) {
+        g_backend.draw_point_rgba(g_backend.user_data, c.r, c.g, c.b, alpha, dx,
+                                  dy);
+      } else {
+        g_backend.fill_rect_rgba(g_backend.user_data, c.r, c.g, c.b, alpha, dx,
+                                 dy, run_width, scale);
       }
     }
   }
@@ -331,29 +344,38 @@ void draw_file_font_quad(const MDGUI_FileFontData *data,
   }
 }
 
-const unsigned char *glyph_for_char(unsigned char c) {
+const unsigned char *glyph_for_char(unsigned char c, int glyph_w = 8,
+                                    int glyph_h = 8) {
   if (c >= 128)
     c = '?';
+  if (glyph_w == 6 && glyph_h == 8)
+    return (const unsigned char *)mdgui_font6x8_basic[c];
+  if (glyph_w == 5 && glyph_h == 7)
+    return (const unsigned char *)mdgui_font5x7_basic[c];
+  if (glyph_w == 4 && glyph_h == 6)
+    return (const unsigned char *)mdgui_font4x6_basic[c];
   return (const unsigned char *)mdgui_font8x8_basic[c];
 }
 
-int glyph_width(unsigned char c) {
+int glyph_width(unsigned char c, int glyph_w = 8, int glyph_h = 8) {
+  const int space_width = std::max(2, glyph_w / 2 + 1);
   if (c == ' ')
-    return 4;
-  const unsigned char *glyph = glyph_for_char(c);
+    return space_width;
+
+  const unsigned char *glyph = glyph_for_char(c, glyph_w, glyph_h);
+
   int max_x = -1;
-  for (int py = 0; py < 8; py++) {
+  for (int py = 0; py < glyph_h; py++) {
     const unsigned char row = glyph[py];
-    for (int px = 0; px < 8; px++) {
+    for (int px = 0; px < glyph_w; px++) {
       if (row & (1u << px)) {
-        if (px > max_x)
-          max_x = px;
+        max_x = std::max(max_x, px);
       }
     }
   }
   if (max_x < 0)
-    return 4;
-  return max_x + 2;
+    return space_width;
+  return std::min(glyph_w + 1, max_x + 2);
 }
 } // namespace
 
@@ -502,20 +524,28 @@ void mdgui_draw_line_idx(char *d, int idx, int x1, int y1, int x2, int y2) {
 
 MDGUI_Font *mdgui_fonts[10] = {nullptr};
 
-MDGUI_Font::MDGUI_Font() : atlas_raw(nullptr), scale_(1), custom_(false),
-                           callbacks_(nullptr), file_font_(nullptr) {}
+MDGUI_Font::MDGUI_Font()
+    : atlas_raw(nullptr), scale_(1), builtin_width_(8), builtin_height_(8),
+      custom_(false), callbacks_(nullptr), file_font_(nullptr) {}
 
 MDGUI_Font::MDGUI_Font(int builtin_scale)
-    : atlas_raw(nullptr), scale_(std::max(1, builtin_scale)), custom_(false),
-      callbacks_(nullptr), file_font_(nullptr) {}
+    : MDGUI_Font(builtin_scale, 8, 8) {}
+
+MDGUI_Font::MDGUI_Font(int builtin_scale, int builtin_width, int builtin_height)
+    : atlas_raw(nullptr), scale_(std::max(1, builtin_scale)),
+      builtin_width_(std::max(1, std::min(8, builtin_width))),
+      builtin_height_(std::max(1, std::min(8, builtin_height))),
+      custom_(false), callbacks_(nullptr), file_font_(nullptr) {}
 
 MDGUI_Font::MDGUI_Font(const MDGUI_FontCallbacks &callbacks)
-    : atlas_raw(nullptr), scale_(1), custom_(true),
+    : atlas_raw(nullptr), scale_(1), builtin_width_(8), builtin_height_(8),
+      custom_(true),
       callbacks_(new (std::nothrow) MDGUI_FontCallbacks(callbacks)),
       file_font_(nullptr) {}
 
 MDGUI_Font::MDGUI_Font(const char *file_path, float pixel_height)
-    : atlas_raw(nullptr), scale_(1), custom_(false), callbacks_(nullptr),
+    : atlas_raw(nullptr), scale_(1), builtin_width_(8), builtin_height_(8),
+      custom_(false), callbacks_(nullptr),
       file_font_(create_file_font_data(file_path, pixel_height)) {}
 
 MDGUI_Font::~MDGUI_Font() {
@@ -549,10 +579,11 @@ int MDGUI_Font::drawChar(unsigned char c, int x, int y, int colorIdx) {
     return std::max(1, (int)(xpos - (float)x + 0.5f));
   }
 
-  const unsigned char *glyph = glyph_for_char(c);
-  const int xw = glyph_width(c) * scale_;
+  const unsigned char *glyph = glyph_for_char(c, builtin_width_, builtin_height_);
+  const int xw = glyph_width(c, builtin_width_, builtin_height_) * scale_;
 
-  if (scale_ == 1 && colorIdx >= 0 && colorIdx <= 255) {
+  if (builtin_width_ == 8 && builtin_height_ == 8 && scale_ == 1 &&
+      colorIdx >= 0 && colorIdx <= 255) {
     if (!draw_glyph_fast(c, x + 1, y + 1, 0))
       draw_glyph_bits(glyph, x + 1, y + 1, 0);
     if (!draw_glyph_fast(c, x, y, (unsigned char)colorIdx))
@@ -560,9 +591,11 @@ int MDGUI_Font::drawChar(unsigned char c, int x, int y, int colorIdx) {
     return xw;
   }
 
-  draw_glyph_bits(glyph, x + scale_, y + scale_, 0, scale_);
-  draw_glyph_bits(glyph, x, y, (colorIdx >= 0 && colorIdx <= 255) ? colorIdx : 15,
-                  scale_);
+  draw_glyph_bits(glyph, x + scale_, y + scale_, 0, scale_, builtin_width_,
+                  builtin_height_);
+  draw_glyph_bits(glyph, x, y,
+                  (colorIdx >= 0 && colorIdx <= 255) ? colorIdx : 15, scale_,
+                  builtin_width_, builtin_height_);
   return xw;
 }
 
@@ -585,7 +618,7 @@ int MDGUI_Font::measureTextWidth(const char *s) const {
   }
   int w = 0;
   for (const unsigned char *p = (const unsigned char *)s; *p; ++p) {
-    w += glyph_width(*p) * scale_;
+    w += glyph_width(*p, builtin_width_, builtin_height_) * scale_;
   }
   return w;
 }
@@ -598,7 +631,7 @@ int MDGUI_Font::lineHeight() const {
   }
   if (file_font_ && file_font_->ready)
     return file_font_->line_height;
-  return 8 * scale_;
+  return builtin_height_ * scale_;
 }
 
 void MDGUI_Font::drawText(const char *s, char *d, int x, int y, int colorIdx) {
@@ -635,6 +668,22 @@ void MDGUI_Font::drawText(const char *s, char *d, int x, int y) {
 extern "C" {
 MDGUI_Font *mdgui_font_create_builtin(int scale) {
   return new (std::nothrow) MDGUI_Font(scale);
+}
+
+MDGUI_Font *
+mdgui_font_create_builtin_variant(MDGUI_BuiltinFontVariant variant, int scale) {
+  switch (variant) {
+  case MDGUI_BUILTIN_FONT_8X8:
+    return new (std::nothrow) MDGUI_Font(scale, 8, 8);
+  case MDGUI_BUILTIN_FONT_6X8:
+    return new (std::nothrow) MDGUI_Font(scale, 6, 8);
+  case MDGUI_BUILTIN_FONT_5X7:
+    return new (std::nothrow) MDGUI_Font(scale, 5, 7);
+  case MDGUI_BUILTIN_FONT_4X6:
+    return new (std::nothrow) MDGUI_Font(scale, 4, 6);
+  default:
+    return nullptr;
+  }
 }
 
 MDGUI_Font *mdgui_font_create_custom(const MDGUI_FontCallbacks *callbacks) {

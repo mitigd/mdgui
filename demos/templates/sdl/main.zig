@@ -84,6 +84,21 @@ fn hasFontExtension(name: []const u8) bool {
         std.ascii.endsWithIgnoreCase(name, ".ttf");
 }
 
+fn appendBuiltinDemoFont(
+    allocator: std.mem.Allocator,
+    demo_fonts: *DemoFonts,
+    label: [:0]const u8,
+    variant: c.MDGUI_BuiltinFontVariant,
+) !void {
+    const font = c.mdgui_font_create_builtin_variant(variant, 1);
+    if (font == null) return error.OutOfMemory;
+    try demo_fonts.options.append(allocator, .{
+        .label_z = try allocator.dupeZ(u8, label),
+        .path_z = null,
+        .font = font,
+    });
+}
+
 fn loadDemoFonts(allocator: std.mem.Allocator, ctx: ?*c.MDGUI_Context) !DemoFonts {
     var demo_fonts = DemoFonts.init(allocator);
 
@@ -92,6 +107,9 @@ fn loadDemoFonts(allocator: std.mem.Allocator, ctx: ?*c.MDGUI_Context) !DemoFont
         .path_z = null,
         .font = null,
     });
+    try appendBuiltinDemoFont(allocator, &demo_fonts, "Builtin 6x8", c.MDGUI_BUILTIN_FONT_6X8);
+    try appendBuiltinDemoFont(allocator, &demo_fonts, "Builtin 5x7", c.MDGUI_BUILTIN_FONT_5X7);
+    try appendBuiltinDemoFont(allocator, &demo_fonts, "Builtin 4x6", c.MDGUI_BUILTIN_FONT_4X6);
 
     var dir = try std.fs.cwd().openDir("fonts", .{ .iterate = true });
     defer dir.close();

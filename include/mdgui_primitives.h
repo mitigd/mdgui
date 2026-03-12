@@ -11,6 +11,7 @@ public:
   uint8_t *atlas_raw;
   MDGUI_Font();
   explicit MDGUI_Font(int builtin_scale);
+  MDGUI_Font(int builtin_scale, int builtin_width, int builtin_height);
   explicit MDGUI_Font(const MDGUI_FontCallbacks &callbacks);
   explicit MDGUI_Font(const char *file_path, float pixel_height);
   ~MDGUI_Font();
@@ -22,6 +23,8 @@ public:
 
 private:
   int scale_;
+  int builtin_width_;
+  int builtin_height_;
   bool custom_;
   MDGUI_FontCallbacks *callbacks_;
   MDGUI_FileFontData *file_font_;
