@@ -521,6 +521,7 @@ pub fn main() !void {
     c.mdgui_set_window_scrollbar_visible(ctx, "PERF GRAPH", 0);
     c.mdgui_set_windows_locked(ctx, if (startup_lock_tiled_windows) 1 else 0);
     c.mdgui_set_status_bar_visible(ctx, 1);
+    c.mdgui_set_file_browser_path_subpass_enabled(ctx, 1);
 
     var running = true;
     var input = c.MDGUI_Input{

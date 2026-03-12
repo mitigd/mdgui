@@ -146,6 +146,31 @@ struct MDGUI_Context {
     size_t parent_indent_stack_size;
   };
 
+  struct SubpassState {
+    MDGUI_Input parent_input;
+    int parent_origin_x;
+    int parent_origin_y;
+    int parent_content_y;
+    int parent_content_req_right;
+    int parent_content_req_bottom;
+    bool parent_window_has_nonlabel_widget;
+    unsigned char parent_alpha_mod;
+    int parent_layout_indent;
+    size_t parent_indent_stack_size;
+    bool parent_layout_same_line;
+    bool parent_layout_has_last_item;
+    int parent_layout_last_item_x;
+    int parent_layout_last_item_y;
+    int parent_layout_last_item_w;
+    int parent_layout_last_item_h;
+    int parent_local_x;
+    int parent_logical_y;
+    int parent_region_w;
+    int parent_region_h;
+    int local_w;
+    int local_h;
+  };
+
   MDGUI_RenderBackend backend;
   MDGUI_Input input;
 
@@ -310,6 +335,8 @@ struct MDGUI_Context {
   int file_browser_open_x;
   int file_browser_open_y;
   std::vector<NestedRenderState> nested_render_stack;
+  std::vector<SubpassState> subpass_stack;
+  bool file_browser_path_subpass_enabled;
 };
 
 static void note_content_bounds(MDGUI_Context *ctx, int right, int bottom) {
@@ -356,18 +383,54 @@ static void font_draw_text(MDGUI_Context *ctx, const char *text, int x, int y,
   font->drawText(text, nullptr, x, y, color_idx);
 }
 
+static const MDGUI_Context::SubpassState *current_subpass(
+    const MDGUI_Context *ctx) {
+  if (!ctx || ctx->subpass_stack.empty())
+    return nullptr;
+  return &ctx->subpass_stack.back();
+}
+
+static int current_viewport_x(const MDGUI_Context *ctx) {
+  if (const auto *subpass = current_subpass(ctx))
+    return 0;
+  if (!ctx || ctx->current_window < 0 ||
+      ctx->current_window >= (int)ctx->windows.size())
+    return 0;
+  return ctx->windows[ctx->current_window].x + 2;
+}
+
+static int current_viewport_width(const MDGUI_Context *ctx) {
+  if (const auto *subpass = current_subpass(ctx))
+    return subpass->local_w;
+  if (!ctx || ctx->current_window < 0 ||
+      ctx->current_window >= (int)ctx->windows.size())
+    return 0;
+  return ctx->windows[ctx->current_window].w - 4;
+}
+
+static void layout_prepare_widget(MDGUI_Context *ctx, int *out_local_x,
+                                  int *out_logical_y);
+static int layout_resolve_width(MDGUI_Context *ctx, int local_x, int requested_w,
+                                int min_w);
+
 static void set_content_clip(MDGUI_Context *ctx) {
   if (!ctx || ctx->current_window < 0 ||
       ctx->current_window >= (int)ctx->windows.size())
     return;
-  const auto &win = ctx->windows[ctx->current_window];
-  int clip_w = win.w - 4;
-  int clip_h = (win.y + win.h - 4) - ctx->origin_y;
+  int clip_x = current_viewport_x(ctx);
+  int clip_w = current_viewport_width(ctx);
+  int clip_h = 0;
+  if (const auto *subpass = current_subpass(ctx)) {
+    clip_h = subpass->local_h - ctx->origin_y;
+  } else {
+    const auto &win = ctx->windows[ctx->current_window];
+    clip_h = (win.y + win.h - 4) - ctx->origin_y;
+  }
   if (clip_w < 1)
     clip_w = 1;
   if (clip_h < 1)
     clip_h = 1;
-  mdgui_backend_set_clip_rect(1, win.x + 2, ctx->origin_y, clip_w, clip_h);
+  mdgui_backend_set_clip_rect(1, clip_x, ctx->origin_y, clip_w, clip_h);
 }
 
 // Clips a widget drawing region to the current window content area.
@@ -379,10 +442,15 @@ static bool set_widget_clip_intersect_content(MDGUI_Context *ctx, int x, int y,
     return false;
 
   const auto &win = ctx->windows[ctx->current_window];
-  const int content_x1 = win.x + 2;
+  const int content_x1 = current_viewport_x(ctx);
   const int content_y1 = ctx->origin_y;
-  int content_x2 = content_x1 + (win.w - 4);
-  int content_y2 = content_y1 + ((win.y + win.h - 4) - ctx->origin_y);
+  int content_x2 = content_x1 + current_viewport_width(ctx);
+  int content_y2 = 0;
+  if (const auto *subpass = current_subpass(ctx)) {
+    content_y2 = content_y1 + (subpass->local_h - ctx->origin_y);
+  } else {
+    content_y2 = content_y1 + ((win.y + win.h - 4) - ctx->origin_y);
+  }
 
   const int widget_x1 = x;
   const int widget_y1 = y;
@@ -408,18 +476,20 @@ static int resolve_dynamic_width(MDGUI_Context *ctx, int local_x, int w,
                                  int min_w = 1) {
   if (!ctx || ctx->current_window < 0)
     return (w > 0) ? w : min_w;
-  const auto &win = ctx->windows[ctx->current_window];
   const int effective_local_x = local_x + ctx->layout_indent;
   // Reserve right gutter only when an active scrollbar is visible.
   int right_pad = 2;
-  if (ctx->current_window >= 0 &&
+  if (!current_subpass(ctx) && ctx->current_window >= 0 &&
       ctx->current_window < (int)ctx->windows.size()) {
     const auto &win = ctx->windows[ctx->current_window];
     if (win.scrollbar_visible && !win.is_message_box &&
         win.scrollbar_overflow_active)
       right_pad = 14;
   }
-  int avail = (win.x + win.w - right_pad) - (ctx->origin_x + effective_local_x);
+  const int viewport_x = current_viewport_x(ctx);
+  const int viewport_w = current_viewport_width(ctx);
+  int avail = (viewport_x + viewport_w - right_pad) -
+              (ctx->origin_x + effective_local_x);
   if (avail < min_w)
     avail = min_w;
   if (w == 0)
@@ -1430,6 +1500,8 @@ static int find_or_create_window(MDGUI_Context *ctx, const char *title, int x,
 static int is_current_window_topmost(MDGUI_Context *ctx, int margin = 0) {
   if (ctx->current_window < 0)
     return 0;
+  if (current_subpass(ctx))
+    return 1;
   const auto &w = ctx->windows[ctx->current_window];
   return top_window_at_point(ctx, ctx->input.mouse_x, ctx->input.mouse_y,
                              margin) == ctx->current_window ||
@@ -2272,6 +2344,7 @@ MDGUI_Context *mdgui_create_with_backend(const MDGUI_RenderBackend *backend) {
   ctx->file_browser_center_pending = false;
   ctx->file_browser_open_x = -1;
   ctx->file_browser_open_y = -1;
+  ctx->file_browser_path_subpass_enabled = false;
   ctx->layout_indent = ctx->style.content_pad_x;
   ctx->indent_stack.clear();
 
@@ -2333,6 +2406,36 @@ MDGUI_Font *mdgui_get_file_browser_path_font(MDGUI_Context *ctx) {
   return ctx->file_browser_path_font;
 }
 
+void mdgui_set_file_browser_path_subpass_enabled(MDGUI_Context *ctx,
+                                                 int enabled) {
+  if (!ctx)
+    return;
+  ctx->file_browser_path_subpass_enabled = (enabled != 0);
+}
+
+int mdgui_is_file_browser_path_subpass_enabled(MDGUI_Context *ctx) {
+  if (!ctx)
+    return 0;
+  return ctx->file_browser_path_subpass_enabled ? 1 : 0;
+}
+
+static void get_current_render_scale(MDGUI_Context *ctx, float *out_sx,
+                                     float *out_sy) {
+  float sx = 1.0f;
+  float sy = 1.0f;
+  if (ctx && ctx->backend.get_render_scale) {
+    ctx->backend.get_render_scale(ctx->backend.user_data, &sx, &sy);
+  }
+  if (sx <= 0.0f)
+    sx = 1.0f;
+  if (sy <= 0.0f)
+    sy = 1.0f;
+  if (out_sx)
+    *out_sx = sx;
+  if (out_sy)
+    *out_sy = sy;
+}
+
 void mdgui_set_renderer(MDGUI_Context *ctx, void *sdl_renderer) {
   MDGUI_RenderBackend backend = {};
   mdgui_make_sdl_backend(&backend, sdl_renderer);
@@ -2349,6 +2452,129 @@ void mdgui_set_backend(MDGUI_Context *ctx, const MDGUI_RenderBackend *backend) {
     memset(&ctx->backend, 0, sizeof(ctx->backend));
     mdgui_bind_backend(nullptr);
   }
+}
+
+int mdgui_begin_subpass(MDGUI_Context *ctx, const char *id, int x, int y, int w,
+                        int h, float scale, int *out_x, int *out_y,
+                        int *out_w, int *out_h) {
+  if (!ctx || !id || ctx->current_window < 0 || scale <= 0.0f ||
+      !ctx->backend.begin_subpass || !ctx->backend.end_subpass) {
+    return 0;
+  }
+  if (!ctx->subpass_stack.empty())
+    return 0;
+
+  int local_x = 0;
+  int logical_y = 0;
+  if (x == 0 && y == 0 && w == 0 && h == 0) {
+    layout_prepare_widget(ctx, &local_x, &logical_y);
+  } else {
+    local_x = x + ctx->layout_indent;
+    logical_y = ctx->content_y + y;
+  }
+
+  if (w <= 0)
+    w = layout_resolve_width(ctx, local_x, w, 1);
+  if (h <= 0)
+    h = 1;
+
+  const int abs_x = ctx->origin_x + local_x;
+  const int abs_y = logical_y - ctx->windows[ctx->current_window].text_scroll;
+  int local_w = 0;
+  int local_h = 0;
+  if (!ctx->backend.begin_subpass(ctx->backend.user_data, id, abs_x, abs_y, w,
+                                  h, scale, &local_w, &local_h)) {
+    return 0;
+  }
+
+  if (local_w < 1)
+    local_w = 1;
+  if (local_h < 1)
+    local_h = 1;
+
+  MDGUI_Context::SubpassState subpass{};
+  subpass.parent_input = ctx->input;
+  subpass.parent_origin_x = ctx->origin_x;
+  subpass.parent_origin_y = ctx->origin_y;
+  subpass.parent_content_y = ctx->content_y;
+  subpass.parent_content_req_right = ctx->content_req_right;
+  subpass.parent_content_req_bottom = ctx->content_req_bottom;
+  subpass.parent_window_has_nonlabel_widget = ctx->window_has_nonlabel_widget;
+  subpass.parent_alpha_mod = mdgui_backend_get_alpha_mod();
+  subpass.parent_layout_indent = ctx->layout_indent;
+  subpass.parent_indent_stack_size = ctx->indent_stack.size();
+  subpass.parent_layout_same_line = ctx->layout_same_line;
+  subpass.parent_layout_has_last_item = ctx->layout_has_last_item;
+  subpass.parent_layout_last_item_x = ctx->layout_last_item_x;
+  subpass.parent_layout_last_item_y = ctx->layout_last_item_y;
+  subpass.parent_layout_last_item_w = ctx->layout_last_item_w;
+  subpass.parent_layout_last_item_h = ctx->layout_last_item_h;
+  subpass.parent_local_x = local_x;
+  subpass.parent_logical_y = logical_y;
+  subpass.parent_region_w = w;
+  subpass.parent_region_h = h;
+  subpass.local_w = local_w;
+  subpass.local_h = local_h;
+  ctx->subpass_stack.push_back(subpass);
+
+  const float input_scale_x =
+      (w > 0) ? ((float)local_w / (float)w) : 1.0f;
+  const float input_scale_y =
+      (h > 0) ? ((float)local_h / (float)h) : 1.0f;
+  ctx->input.mouse_x = (int)(((float)(ctx->input.mouse_x - abs_x) * input_scale_x) + 0.5f);
+  ctx->input.mouse_y = (int)(((float)(ctx->input.mouse_y - abs_y) * input_scale_y) + 0.5f);
+
+  ctx->origin_x = 0;
+  ctx->origin_y = 0;
+  ctx->content_y = 0;
+  ctx->content_req_right = 0;
+  ctx->content_req_bottom = 0;
+  ctx->layout_indent = 0;
+  ctx->layout_same_line = false;
+  ctx->layout_has_last_item = false;
+  ctx->window_has_nonlabel_widget = false;
+  mdgui_backend_set_alpha_mod(255);
+  set_content_clip(ctx);
+
+  if (out_x)
+    *out_x = 0;
+  if (out_y)
+    *out_y = 0;
+  if (out_w)
+    *out_w = local_w;
+  if (out_h)
+    *out_h = local_h;
+  return 1;
+}
+
+void mdgui_end_subpass(MDGUI_Context *ctx) {
+  if (!ctx || ctx->subpass_stack.empty())
+    return;
+
+  const auto subpass = ctx->subpass_stack.back();
+  ctx->subpass_stack.pop_back();
+  ctx->backend.end_subpass(ctx->backend.user_data);
+  ctx->input = subpass.parent_input;
+  ctx->origin_x = subpass.parent_origin_x;
+  ctx->origin_y = subpass.parent_origin_y;
+  ctx->content_y = subpass.parent_content_y;
+  ctx->content_req_right =
+      std::max(ctx->content_req_right, subpass.parent_content_req_right);
+  ctx->content_req_bottom =
+      std::max(ctx->content_req_bottom, subpass.parent_content_req_bottom);
+  ctx->window_has_nonlabel_widget =
+      ctx->window_has_nonlabel_widget || subpass.parent_window_has_nonlabel_widget;
+  ctx->layout_indent = subpass.parent_layout_indent;
+  if (ctx->indent_stack.size() > subpass.parent_indent_stack_size)
+    ctx->indent_stack.resize(subpass.parent_indent_stack_size);
+  ctx->layout_same_line = subpass.parent_layout_same_line;
+  ctx->layout_has_last_item = subpass.parent_layout_has_last_item;
+  ctx->layout_last_item_x = subpass.parent_layout_last_item_x;
+  ctx->layout_last_item_y = subpass.parent_layout_last_item_y;
+  ctx->layout_last_item_w = subpass.parent_layout_last_item_w;
+  ctx->layout_last_item_h = subpass.parent_layout_last_item_h;
+  mdgui_backend_set_alpha_mod(subpass.parent_alpha_mod);
+  set_content_clip(ctx);
 }
 
 void mdgui_begin_frame(MDGUI_Context *ctx, const MDGUI_Input *input) {
@@ -2465,6 +2691,9 @@ void mdgui_end_frame(MDGUI_Context *ctx) {
   if (!ctx)
     return;
   mdgui_bind_backend(&ctx->backend);
+  while (!ctx->subpass_stack.empty()) {
+    mdgui_end_subpass(ctx);
+  }
   if (!ctx->open_main_menu_path.empty() && ctx->input.mouse_pressed) {
     bool in_bar = point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y,
                                 ctx->main_menu_bar_x, ctx->main_menu_bar_y,
@@ -6291,8 +6520,42 @@ const char *mdgui_show_file_browser(MDGUI_Context *ctx) {
     file_browser_open_path(ctx, fallback.c_str());
   }
 
-  mdgui_label_font(ctx, ctx->file_browser_cwd.c_str(),
-                   ctx->file_browser_path_font);
+  if (ctx->file_browser_path_subpass_enabled) {
+    int path_local_x = 0;
+    int path_logical_y = 0;
+    layout_prepare_widget(ctx, &path_local_x, &path_logical_y);
+    const int path_parent_w = layout_resolve_width(ctx, path_local_x, 0, 20);
+    const int path_line_h =
+        std::max(ctx->style.label_h,
+                 font_line_height(ctx, ctx->file_browser_path_font));
+    const int path_top_inset = std::max(1, ctx->style.spacing_y / 2);
+    float parent_scale_x = 1.0f;
+    float parent_scale_y = 1.0f;
+    get_current_render_scale(ctx, &parent_scale_x, &parent_scale_y);
+    const float subpass_scale = 1.0f;
+    int path_parent_h =
+        (int)(((float)(path_line_h + path_top_inset) * subpass_scale) /
+              parent_scale_y +
+              0.999f);
+    if (path_parent_h < 1)
+      path_parent_h = 1;
+
+    if (mdgui_begin_subpass(ctx, "file_browser_path", 0, 0, path_parent_w,
+                            path_parent_h, subpass_scale, nullptr, nullptr,
+                            nullptr, nullptr) != 0) {
+      mdgui_label_font(ctx, ctx->file_browser_cwd.c_str(),
+                       ctx->file_browser_path_font);
+      mdgui_end_subpass(ctx);
+      layout_commit_widget(ctx, path_local_x, path_logical_y, path_parent_w,
+                           path_parent_h, ctx->style.spacing_y);
+    } else {
+      mdgui_label_font(ctx, ctx->file_browser_cwd.c_str(),
+                       ctx->file_browser_path_font);
+    }
+  } else {
+    mdgui_label_font(ctx, ctx->file_browser_cwd.c_str(),
+                     ctx->file_browser_path_font);
+  }
   const int drive_button_w = 64;
   const int drive_stride = drive_button_w + ctx->style.spacing_x;
   const int drive_avail_w = resolve_dynamic_width(ctx, 0, 0, drive_button_w);

@@ -1,7 +1,6 @@
 #include "mdgui_primitives.h"
 #include "mdgui_c.h"
 #include "mdgui_font8x8.h"
-#include "mdgui_primitives.h"
 #include <algorithm>
 #include <new>
 #include <string.h>

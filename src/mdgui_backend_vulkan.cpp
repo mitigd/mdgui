@@ -18,7 +18,17 @@ struct ClipRect {
 struct MDGUI_VkBackend {
   void *user_data = nullptr;
   int (*get_render_size)(void *user_data, int *out_w, int *out_h) = nullptr;
+  int (*get_render_scale)(void *user_data, float *out_sx, float *out_sy) =
+      nullptr;
   unsigned long long (*get_ticks_ms)(void *user_data) = nullptr;
+
+  struct SubpassState {
+    bool active = false;
+    float origin_x = 0.0f;
+    float origin_y = 0.0f;
+    float scale_x = 1.0f;
+    float scale_y = 1.0f;
+  } subpass;
 
   ClipRect clip = {0, 0, 0, 0, 0};
   std::vector<MDGUI_VkVertex> vertices;
@@ -39,6 +49,30 @@ unsigned int pack_rgba(unsigned char r, unsigned char g, unsigned char b,
 bool same_clip(const ClipRect &a, const MDGUI_VkDrawCmd &b) {
   return a.enabled == b.clip_enabled && a.x == b.clip_x && a.y == b.clip_y &&
          a.w == b.clip_w && a.h == b.clip_h;
+}
+
+float transform_x(const MDGUI_VkBackend *backend, float x) {
+  if (!backend || !backend->subpass.active)
+    return x;
+  return backend->subpass.origin_x + x * backend->subpass.scale_x;
+}
+
+float transform_y(const MDGUI_VkBackend *backend, float y) {
+  if (!backend || !backend->subpass.active)
+    return y;
+  return backend->subpass.origin_y + y * backend->subpass.scale_y;
+}
+
+float transform_w(const MDGUI_VkBackend *backend, float w) {
+  if (!backend || !backend->subpass.active)
+    return w;
+  return w * backend->subpass.scale_x;
+}
+
+float transform_h(const MDGUI_VkBackend *backend, float h) {
+  if (!backend || !backend->subpass.active)
+    return h;
+  return h * backend->subpass.scale_y;
 }
 
 void ensure_command(MDGUI_VkBackend *backend, int textured) {
@@ -106,6 +140,7 @@ void vk_begin_frame(void *user_data) {
     backend->get_render_size(backend->user_data, &w, &h);
   backend->display_w = (w > 0) ? w : 320;
   backend->display_h = (h > 0) ? h : 240;
+  backend->subpass = {};
 }
 
 void vk_set_clip_rect(void *user_data, int enabled, int x, int y, int w,
@@ -114,10 +149,10 @@ void vk_set_clip_rect(void *user_data, int enabled, int x, int y, int w,
   if (!backend)
     return;
   backend->clip.enabled = enabled ? 1 : 0;
-  backend->clip.x = x;
-  backend->clip.y = y;
-  backend->clip.w = w;
-  backend->clip.h = h;
+  backend->clip.x = (int)(transform_x(backend, (float)x) + 0.5f);
+  backend->clip.y = (int)(transform_y(backend, (float)y) + 0.5f);
+  backend->clip.w = (int)(transform_w(backend, (float)w) + 0.5f);
+  backend->clip.h = (int)(transform_h(backend, (float)h) + 0.5f);
 }
 
 void vk_fill_rect_rgba(void *user_data, unsigned char r, unsigned char g,
@@ -126,7 +161,9 @@ void vk_fill_rect_rgba(void *user_data, unsigned char r, unsigned char g,
   MDGUI_VkBackend *backend = (MDGUI_VkBackend *)user_data;
   if (!backend)
     return;
-  push_quad(backend, (float)x, (float)y, (float)w, (float)h,
+  push_quad(backend, transform_x(backend, (float)x),
+            transform_y(backend, (float)y), transform_w(backend, (float)w),
+            transform_h(backend, (float)h),
             pack_rgba(r, g, b, a), 0.0f, 0.0f, 0.0f, 0.0f, 0);
 }
 
@@ -143,15 +180,19 @@ void vk_draw_line_rgba(void *user_data, unsigned char r, unsigned char g,
   if (y1 == y2) {
     const int x_min = (x1 < x2) ? x1 : x2;
     const int x_max = (x1 < x2) ? x2 : x1;
-    push_quad(backend, (float)x_min, (float)y1, (float)(x_max - x_min + 1), 1.0f,
-              rgba, 0.0f, 0.0f, 0.0f, 0.0f, 0);
+    push_quad(backend, transform_x(backend, (float)x_min),
+              transform_y(backend, (float)y1),
+              transform_w(backend, (float)(x_max - x_min + 1)),
+              transform_h(backend, 1.0f), rgba, 0.0f, 0.0f, 0.0f, 0.0f, 0);
     return;
   }
   if (x1 == x2) {
     const int y_min = (y1 < y2) ? y1 : y2;
     const int y_max = (y1 < y2) ? y2 : y1;
-    push_quad(backend, (float)x1, (float)y_min, 1.0f, (float)(y_max - y_min + 1),
-              rgba, 0.0f, 0.0f, 0.0f, 0.0f, 0);
+    push_quad(backend, transform_x(backend, (float)x1),
+              transform_y(backend, (float)y_min), transform_w(backend, 1.0f),
+              transform_h(backend, (float)(y_max - y_min + 1)), rgba, 0.0f,
+              0.0f, 0.0f, 0.0f, 0);
     return;
   }
 
@@ -166,8 +207,9 @@ void vk_draw_line_rgba(void *user_data, unsigned char r, unsigned char g,
   int err = dx - dy_abs;
 
   while (true) {
-    push_quad(backend, (float)cx, (float)cy, 1.0f, 1.0f, rgba, 0.0f, 0.0f, 0.0f,
-              0.0f, 0);
+    push_quad(backend, transform_x(backend, (float)cx),
+              transform_y(backend, (float)cy), transform_w(backend, 1.0f),
+              transform_h(backend, 1.0f), rgba, 0.0f, 0.0f, 0.0f, 0.0f, 0);
     if (cx == x2 && cy == y2)
       break;
     const int e2 = err * 2;
@@ -187,8 +229,10 @@ void vk_draw_point_rgba(void *user_data, unsigned char r, unsigned char g,
   MDGUI_VkBackend *backend = (MDGUI_VkBackend *)user_data;
   if (!backend)
     return;
-  push_quad(backend, (float)x, (float)y, 1.0f, 1.0f, pack_rgba(r, g, b, a),
-            0.0f, 0.0f, 0.0f, 0.0f, 0);
+  push_quad(backend, transform_x(backend, (float)x),
+            transform_y(backend, (float)y), transform_w(backend, 1.0f),
+            transform_h(backend, 1.0f), pack_rgba(r, g, b, a), 0.0f, 0.0f,
+            0.0f, 0.0f, 0);
 }
 
 int vk_draw_glyph_rgba(void *user_data, unsigned char glyph, int x, int y,
@@ -204,8 +248,10 @@ int vk_draw_glyph_rgba(void *user_data, unsigned char glyph, int x, int y,
   const float v0 = (float)(glyph / 16) * inv_rows;
   const float u1 = u0 + inv_cols;
   const float v1 = v0 + inv_rows;
-  push_quad(backend, (float)x, (float)y, 8.0f, 8.0f, pack_rgba(r, g, b, a), u0,
-            v0, u1, v1, 1);
+  push_quad(backend, transform_x(backend, (float)x),
+            transform_y(backend, (float)y), transform_w(backend, 8.0f),
+            transform_h(backend, 8.0f), pack_rgba(r, g, b, a), u0, v0, u1, v1,
+            1);
   return 1;
 }
 
@@ -228,6 +274,53 @@ int vk_get_render_size(void *user_data, int *out_w, int *out_h) {
   return 1;
 }
 
+int vk_get_render_scale(void *user_data, float *out_sx, float *out_sy) {
+  MDGUI_VkBackend *backend = (MDGUI_VkBackend *)user_data;
+  if (!backend || !backend->get_render_scale) {
+    if (out_sx)
+      *out_sx = 1.0f;
+    if (out_sy)
+      *out_sy = 1.0f;
+    return 0;
+  }
+  return backend->get_render_scale(backend->user_data, out_sx, out_sy);
+}
+
+int vk_begin_subpass(void *user_data, const char *id, int x, int y, int w,
+                     int h, float scale, int *out_w, int *out_h) {
+  MDGUI_VkBackend *backend = (MDGUI_VkBackend *)user_data;
+  (void)id;
+  if (!backend || scale <= 0.0f || w <= 0 || h <= 0 || backend->subpass.active)
+    return 0;
+
+  float parent_sx = 1.0f;
+  float parent_sy = 1.0f;
+  if (backend->get_render_scale)
+    backend->get_render_scale(backend->user_data, &parent_sx, &parent_sy);
+  if (parent_sx <= 0.0f)
+    parent_sx = 1.0f;
+  if (parent_sy <= 0.0f)
+    parent_sy = 1.0f;
+
+  backend->subpass.active = true;
+  backend->subpass.origin_x = (float)x;
+  backend->subpass.origin_y = (float)y;
+  backend->subpass.scale_x = scale / parent_sx;
+  backend->subpass.scale_y = scale / parent_sy;
+  if (out_w)
+    *out_w = (int)((w * parent_sx) / scale + 0.5f);
+  if (out_h)
+    *out_h = (int)((h * parent_sy) / scale + 0.5f);
+  return 1;
+}
+
+void vk_end_subpass(void *user_data) {
+  MDGUI_VkBackend *backend = (MDGUI_VkBackend *)user_data;
+  if (!backend)
+    return;
+  backend->subpass = {};
+}
+
 unsigned long long vk_get_ticks_ms(void *user_data) {
   MDGUI_VkBackend *backend = (MDGUI_VkBackend *)user_data;
   if (!backend || !backend->get_ticks_ms)
@@ -246,6 +339,7 @@ MDGUI_VkBackend *mdgui_vk_backend_create(
   if (callbacks) {
     backend->user_data = callbacks->user_data;
     backend->get_render_size = callbacks->get_render_size;
+    backend->get_render_scale = callbacks->get_render_scale;
     backend->get_ticks_ms = callbacks->get_ticks_ms;
   }
   return backend;
@@ -270,7 +364,10 @@ void mdgui_make_vulkan_backend(MDGUI_RenderBackend *out_backend,
   out_backend->draw_point_rgba = vk_draw_point_rgba;
   out_backend->draw_glyph_rgba = vk_draw_glyph_rgba;
   out_backend->get_render_size = vk_get_render_size;
+  out_backend->get_render_scale = vk_get_render_scale;
   out_backend->get_ticks_ms = vk_get_ticks_ms;
+  out_backend->begin_subpass = vk_begin_subpass;
+  out_backend->end_subpass = vk_end_subpass;
 }
 
 void mdgui_vk_backend_get_draw_data(const MDGUI_VkBackend *backend,

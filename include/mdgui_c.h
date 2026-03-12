@@ -34,7 +34,14 @@ typedef struct MDGUI_RenderBackend {
 
   // Required for layout and timing behavior.
   int (*get_render_size)(void *user_data, int *out_w, int *out_h);
+  int (*get_render_scale)(void *user_data, float *out_sx, float *out_sy);
   unsigned long long (*get_ticks_ms)(void *user_data);
+
+  // Optional offscreen subpass support. Returns non-zero on success and fills
+  // out the subpass-local logical size available to the caller.
+  int (*begin_subpass)(void *user_data, const char *id, int x, int y, int w,
+                       int h, float scale, int *out_w, int *out_h);
+  void (*end_subpass)(void *user_data);
 } MDGUI_RenderBackend;
 
 typedef struct MDGUI_Input {
@@ -142,6 +149,10 @@ void mdgui_pop_font(MDGUI_Context *ctx);
 
 void mdgui_begin_frame(MDGUI_Context *ctx, const MDGUI_Input *input);
 void mdgui_end_frame(MDGUI_Context *ctx);
+int mdgui_begin_subpass(MDGUI_Context *ctx, const char *id, int x, int y, int w,
+                        int h, float scale, int *out_x, int *out_y,
+                        int *out_w, int *out_h);
+void mdgui_end_subpass(MDGUI_Context *ctx);
 
 int mdgui_begin_window(MDGUI_Context *ctx, const char *title, int x, int y,
                        int w, int h);
@@ -204,6 +215,9 @@ void mdgui_set_file_browser_filters(MDGUI_Context *ctx, const char **extensions,
                                     int extension_count);
 void mdgui_set_file_browser_path_font(MDGUI_Context *ctx, MDGUI_Font *font);
 MDGUI_Font *mdgui_get_file_browser_path_font(MDGUI_Context *ctx);
+void mdgui_set_file_browser_path_subpass_enabled(MDGUI_Context *ctx,
+                                                 int enabled);
+int mdgui_is_file_browser_path_subpass_enabled(MDGUI_Context *ctx);
 void mdgui_set_window_open(MDGUI_Context *ctx, const char *title, int open);
 int mdgui_is_window_open(MDGUI_Context *ctx, const char *title);
 void mdgui_focus_window(MDGUI_Context *ctx, const char *title);

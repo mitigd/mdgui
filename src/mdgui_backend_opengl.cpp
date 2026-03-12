@@ -21,6 +21,9 @@ void mdgui_make_opengl_backend(MDGUI_RenderBackend *out_backend,
   out_backend->draw_point_rgba = callbacks->draw_point_rgba;
   out_backend->draw_glyph_rgba = callbacks->draw_glyph_rgba;
   out_backend->get_render_size = callbacks->get_render_size;
+  out_backend->get_render_scale = callbacks->get_render_scale;
   out_backend->get_ticks_ms = callbacks->get_ticks_ms;
+  out_backend->begin_subpass = callbacks->begin_subpass;
+  out_backend->end_subpass = callbacks->end_subpass;
 }
 }

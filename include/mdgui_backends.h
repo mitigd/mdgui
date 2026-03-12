@@ -25,7 +25,11 @@ typedef struct MDGUI_BackendCallbacks {
                          unsigned char r, unsigned char g, unsigned char b,
                          unsigned char a);
   int (*get_render_size)(void *user_data, int *out_w, int *out_h);
+  int (*get_render_scale)(void *user_data, float *out_sx, float *out_sy);
   unsigned long long (*get_ticks_ms)(void *user_data);
+  int (*begin_subpass)(void *user_data, const char *id, int x, int y, int w,
+                       int h, float scale, int *out_w, int *out_h);
+  void (*end_subpass)(void *user_data);
 } MDGUI_BackendCallbacks;
 
 // Vulkan backend emits ImGui-like draw data (vertices/indices/commands)
