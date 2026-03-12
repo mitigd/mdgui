@@ -3886,12 +3886,19 @@ int mdgui_slider(MDGUI_Context *ctx, const char *text, float *val, float min,
   layout_prepare_widget(ctx, &local_x, &logical_y);
   w = layout_resolve_width(ctx, local_x, w, 24);
   const int ix = ctx->origin_x + local_x;
+  MDGUI_Font *font = resolve_font(ctx);
   const int line_h = font_line_height(ctx);
   const int thumb_h = std::max(10, line_h + 2);
+  const int text_w = (text && font) ? font_measure_text(ctx, text) : 0;
+  const int content_left = win.x + 2;
+  const int content_right = win.x + win.w - 4;
+  const int right_label_x = ix + w + 4;
+  const int right_room = content_right - right_label_x;
+  const bool label_above = (text && font && text_w > 0 && text_w > right_room);
+  const int top_label_pad = label_above ? (line_h + 1) : 0;
+  const int iy = logical_y - win.text_scroll + top_label_pad;
   const int track_h = std::max(4, thumb_h / 3);
   const int thumb_w = 8;
-  MDGUI_Font *font = resolve_font(ctx);
-  const int iy = logical_y - win.text_scroll;
   const int track_y = iy + (thumb_h - track_h) / 2;
 
   // Track (inset 3D)
@@ -3935,13 +3942,8 @@ int mdgui_slider(MDGUI_Context *ctx, const char *text, float *val, float min,
     result = 1;
   }
 
-  const int text_w = (text && font) ? font_measure_text(ctx, text) : 0;
   int label_right = ix + w;
   if (text && font && text_w > 0) {
-    const int content_left = win.x + 2;
-    const int content_right = win.x + win.w - 4;
-    const int right_label_x = ix + w + 4;
-    const int right_room = content_right - right_label_x;
     int label_x = right_label_x;
     int label_y = iy + 1;
 
@@ -3961,8 +3963,9 @@ int mdgui_slider(MDGUI_Context *ctx, const char *text, float *val, float min,
     label_right = label_x + text_w;
   }
   note_content_bounds(ctx, std::max(ix + w, label_right),
-                      logical_y + thumb_h);
-  layout_commit_widget(ctx, local_x, logical_y, w, thumb_h, ctx->style.spacing_y);
+                      logical_y + top_label_pad + thumb_h);
+  layout_commit_widget(ctx, local_x, logical_y, w, top_label_pad + thumb_h,
+                       ctx->style.spacing_y);
   return result;
 }
 
