@@ -6,6 +6,7 @@ const c = @cImport({
 });
 
 const render_api_window_title = "WINDOW API";
+const perf_overlay_title = "Perf Overlay";
 const startup_tile_windows = true;
 const startup_lock_tiled_windows = false;
 const main_pane_tabs = [_][*:0]const u8{
@@ -41,6 +42,23 @@ const AnalyticsStats = struct {
     avg_fps: f32,
     min_fps: f32,
     max_fps: f32,
+};
+
+const OverlayContentFn = *const fn (?*c.MDGUI_Context, ?*anyopaque, c_int, c_int) void;
+
+const OverlayConfig = struct {
+    title: [*:0]const u8,
+    x: c_int,
+    y: c_int,
+    w: c_int,
+    h: c_int,
+    alpha: u8,
+    visible: bool,
+    use_subpass: bool,
+    subpass_scale: f32,
+    flags: c_int,
+    content: OverlayContentFn,
+    user_data: ?*anyopaque,
 };
 
 fn clamp01(v: f32) f32 {
@@ -549,7 +567,10 @@ fn drawPerfGraphWindow(ctx: ?*c.MDGUI_Context, analytics: *const Analytics) void
     c.mdgui_end_window(ctx);
 }
 
-fn drawPerfHudContent(ctx: ?*c.MDGUI_Context, analytics: *const Analytics) void {
+fn drawPerfOverlayContent(ctx: ?*c.MDGUI_Context, user_data: ?*anyopaque, content_w: c_int, content_h: c_int) void {
+    _ = content_w;
+    const analytics_ptr = user_data orelse return;
+    const analytics: *const Analytics = @ptrCast(@alignCast(analytics_ptr));
     const stats = analyticsStats(analytics);
     var line: [96]u8 = undefined;
     const txt = std.fmt.bufPrintZ(
@@ -564,6 +585,7 @@ fn drawPerfHudContent(ctx: ?*c.MDGUI_Context, analytics: *const Analytics) void 
     while (i < analytics.count) : (i += 1) {
         ordered[i] = analyticsSampleFrameMs(analytics, i);
     }
+    const graph_h: c_int = @max(18, content_h - 14);
     c.mdgui_frame_time_graph(
         ctx,
         &ordered[0],
@@ -571,48 +593,52 @@ fn drawPerfHudContent(ctx: ?*c.MDGUI_Context, analytics: *const Analytics) void 
         analytics.target_fps,
         analytics.graph_max_ms,
         0,
-        50,
+        graph_h,
     );
 }
 
-fn drawPerfHud(ctx: ?*c.MDGUI_Context, analytics: *const Analytics, use_subpass: bool) void {
-    c.mdgui_set_window_rect(ctx, "Perf HUD", 6, 13, 240, 78);
-    c.mdgui_set_window_open(ctx, "Perf HUD", 1);
-    c.mdgui_set_window_alpha(ctx, "Perf HUD", 214);
+fn drawConfigurableOverlay(ctx: ?*c.MDGUI_Context, config: *const OverlayConfig) void {
+    if (!config.visible) {
+        c.mdgui_set_window_open(ctx, config.title, 0);
+        return;
+    }
+
+    c.mdgui_set_window_rect(ctx, config.title, config.x, config.y, config.w, config.h);
+    c.mdgui_set_window_open(ctx, config.title, 1);
+    c.mdgui_set_window_alpha(ctx, config.title, config.alpha);
 
     var view_x: c_int = 0;
     var view_y: c_int = 0;
     var view_w: c_int = 0;
     var view_h: c_int = 0;
-    const flags = c.MDGUI_WINDOW_FLAG_NO_CHROME | c.MDGUI_WINDOW_FLAG_EXCLUDE_FROM_TILING;
     if (c.mdgui_begin_render_window_ex(
         ctx,
-        "Perf HUD",
-        6,
-        13,
-        240,
-        78,
+        config.title,
+        config.x,
+        config.y,
+        config.w,
+        config.h,
         0,
-        flags,
+        config.flags,
         &view_x,
         &view_y,
         &view_w,
         &view_h,
     ) == 0) return;
 
-    if (use_subpass) {
+    if (config.use_subpass) {
         var sx: c_int = 0;
         var sy: c_int = 0;
         var sw: c_int = 0;
         var sh: c_int = 0;
-        if (c.mdgui_begin_subpass(ctx, "perf_hud_subpass", 0, 0, 0, 0, 1.0, &sx, &sy, &sw, &sh) != 0) {
-            drawPerfHudContent(ctx, analytics);
+        if (c.mdgui_begin_subpass(ctx, "generic_overlay_subpass", 0, 0, 0, 0, config.subpass_scale, &sx, &sy, &sw, &sh) != 0) {
+            config.content(ctx, config.user_data, sw, sh);
             c.mdgui_end_subpass(ctx);
         } else {
-            drawPerfHudContent(ctx, analytics);
+            config.content(ctx, config.user_data, view_w, view_h);
         }
     } else {
-        drawPerfHudContent(ctx, analytics);
+        config.content(ctx, config.user_data, view_w, view_h);
     }
 
     c.mdgui_end_window(ctx);
@@ -759,8 +785,13 @@ pub fn main() !void {
     var show_about = false;
     var show_demo = true;
     var show_nested_test_area = false;
-    var show_perf_hud = false;
-    var perf_hud_use_subpass = true;
+    var show_perf_overlay = false;
+    var perf_overlay_use_subpass = true;
+    const perf_overlay_x: c_int = 6;
+    const perf_overlay_y: c_int = 13;
+    const perf_overlay_w: c_int = 240;
+    const perf_overlay_h: c_int = 78;
+    const perf_overlay_alpha: u8 = 214;
     var show_window_api_menu = false;
     var emu_view_fullscreen = false;
     var selected_rom_buf: [512]u8 = [_]u8{0} ** 512;
@@ -788,6 +819,7 @@ pub fn main() !void {
         var request_open_demo_window = false;
         var request_open_perf_analytics = false;
         var request_open_perf_graph = false;
+        var request_open_perf_overlay = false;
         var request_open_window_api = false;
         var frame_text_input: [64]u8 = [_]u8{0} ** 64;
         var frame_text_len: usize = 0;
@@ -1040,23 +1072,23 @@ pub fn main() !void {
                         request_open_perf_graph = true;
                     }
                 }
-                if (show_perf_hud) {
-                    if (c.mdgui_main_menu_item(ctx, "[x] Perf HUD") != 0) {
-                        show_perf_hud = false;
-                        c.mdgui_set_window_open(ctx, "Perf HUD", 0);
+                if (show_perf_overlay) {
+                    if (c.mdgui_main_menu_item(ctx, "[x] Perf Overlay") != 0) {
+                        show_perf_overlay = false;
+                        c.mdgui_set_window_open(ctx, perf_overlay_title, 0);
                     }
                 } else {
-                    if (c.mdgui_main_menu_item(ctx, "[ ] Perf HUD") != 0) {
-                        show_perf_hud = true;
+                    if (c.mdgui_main_menu_item(ctx, "[ ] Perf Overlay") != 0) {
+                        request_open_perf_overlay = true;
                     }
                 }
-                if (perf_hud_use_subpass) {
-                    if (c.mdgui_main_menu_item(ctx, "[x] Perf HUD Subpass (1x)") != 0) {
-                        perf_hud_use_subpass = false;
+                if (perf_overlay_use_subpass) {
+                    if (c.mdgui_main_menu_item(ctx, "[x] Perf Overlay Subpass (1x)") != 0) {
+                        perf_overlay_use_subpass = false;
                     }
                 } else {
-                    if (c.mdgui_main_menu_item(ctx, "[ ] Perf HUD Subpass (1x)") != 0) {
-                        perf_hud_use_subpass = true;
+                    if (c.mdgui_main_menu_item(ctx, "[ ] Perf Overlay Subpass (1x)") != 0) {
+                        perf_overlay_use_subpass = true;
                     }
                 }
                 if (c.mdgui_main_menu_item(ctx, "Window API") != 0) {
@@ -1115,6 +1147,13 @@ pub fn main() !void {
             retile_needed = false;
         }
         c.mdgui_set_windows_alpha(ctx, alphaByteFromFloat(windows_alpha));
+
+        if (request_open_perf_overlay) {
+            show_perf_overlay = true;
+            c.mdgui_set_window_open(ctx, perf_overlay_title, 1);
+            c.mdgui_focus_window(ctx, perf_overlay_title);
+            input.mouse_pressed = 0;
+        }
 
         const DrawKind = enum { main_window, demo, perf_analytics, emu_view, perf_graph };
         var draw_kinds: [5]DrawKind = undefined;
@@ -1180,11 +1219,21 @@ pub fn main() !void {
             }
         }
 
-        if (show_perf_hud) {
-            drawPerfHud(ctx, &analytics, perf_hud_use_subpass);
-        } else {
-            c.mdgui_set_window_open(ctx, "Perf HUD", 0);
-        }
+        const perf_overlay_config = OverlayConfig{
+            .title = perf_overlay_title,
+            .x = perf_overlay_x,
+            .y = perf_overlay_y,
+            .w = perf_overlay_w,
+            .h = perf_overlay_h,
+            .alpha = perf_overlay_alpha,
+            .visible = show_perf_overlay,
+            .use_subpass = perf_overlay_use_subpass,
+            .subpass_scale = 1.0,
+            .flags = c.MDGUI_WINDOW_FLAG_NO_CHROME | c.MDGUI_WINDOW_FLAG_EXCLUDE_FROM_TILING,
+            .content = drawPerfOverlayContent,
+            .user_data = @ptrCast(&analytics),
+        };
+        drawConfigurableOverlay(ctx, &perf_overlay_config);
 
         if (request_open_main_ui) {
             c.mdgui_set_window_open(ctx, "MDGUI", 1);
