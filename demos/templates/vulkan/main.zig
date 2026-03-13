@@ -316,23 +316,17 @@ fn drawWindowApiOverlay(ctx: ?*c.MDGUI_Context, renderer: ?*c.SDL_Renderer, over
     if (!overlay.draw_window_api) return;
     if (windowIsOccludedByFullscreen(ctx, render_api_window_title)) return;
 
-    _ = c.SDL_SetRenderDrawBlendMode(renderer, c.SDL_BLENDMODE_BLEND);
-    var clip = c.SDL_Rect{
+    const base = RectI{
         .x = overlay.window_api_x,
         .y = overlay.window_api_y,
         .w = overlay.window_api_w,
         .h = overlay.window_api_h,
     };
-    _ = c.SDL_SetRenderClipRect(renderer, &clip);
+    var visible_regions: [32]RectI = undefined;
+    const visible_count = computeVisibleOverlayRegions(ctx, render_api_window_title, base, &visible_regions);
+    if (visible_count == 0) return;
 
-    var bg = c.SDL_FRect{
-        .x = @floatFromInt(overlay.window_api_x),
-        .y = @floatFromInt(overlay.window_api_y),
-        .w = @floatFromInt(overlay.window_api_w),
-        .h = @floatFromInt(overlay.window_api_h),
-    };
-    _ = c.SDL_SetRenderDrawColor(renderer, 0x12, 0x12, 0x12, overlay.window_api_alpha);
-    _ = c.SDL_RenderFillRect(renderer, &bg);
+    _ = c.SDL_SetRenderDrawBlendMode(renderer, c.SDL_BLENDMODE_BLEND);
 
     var accent_r: u8 = 0x70;
     var accent_g: u8 = 0xf0;
@@ -347,26 +341,45 @@ fn drawWindowApiOverlay(ctx: ?*c.MDGUI_Context, renderer: ?*c.SDL_Renderer, over
     const dark_g: u8 = if (accent_g > 30) accent_g - 30 else 0;
     const dark_b: u8 = if (accent_b > 30) accent_b - 30 else 0;
 
-    const tile_w: c_int = 8;
-    const tile_h: c_int = 8;
-    var ty: c_int = 0;
-    while (ty < overlay.window_api_h) : (ty += tile_h) {
-        var tx: c_int = 0;
-        while (tx < overlay.window_api_w) : (tx += tile_w) {
-            if (@mod(@divTrunc(tx, tile_w) + @divTrunc(ty, tile_h), @as(c_int, 2)) == 0) {
-                _ = c.SDL_SetRenderDrawColor(renderer, light_r, light_g, light_b, overlay.window_api_alpha);
-            } else {
-                _ = c.SDL_SetRenderDrawColor(renderer, dark_r, dark_g, dark_b, overlay.window_api_alpha);
+    var r_i: usize = 0;
+    while (r_i < visible_count) : (r_i += 1) {
+        const vr = visible_regions[r_i];
+        var clip = c.SDL_Rect{
+            .x = vr.x,
+            .y = vr.y,
+            .w = vr.w,
+            .h = vr.h,
+        };
+        _ = c.SDL_SetRenderClipRect(renderer, &clip);
+        var bg = c.SDL_FRect{
+            .x = @floatFromInt(overlay.window_api_x),
+            .y = @floatFromInt(overlay.window_api_y),
+            .w = @floatFromInt(overlay.window_api_w),
+            .h = @floatFromInt(overlay.window_api_h),
+        };
+        _ = c.SDL_SetRenderDrawColor(renderer, 0x12, 0x12, 0x12, overlay.window_api_alpha);
+        _ = c.SDL_RenderFillRect(renderer, &bg);
+        const tile_w: c_int = 8;
+        const tile_h: c_int = 8;
+        var ty: c_int = 0;
+        while (ty < overlay.window_api_h) : (ty += tile_h) {
+            var tx: c_int = 0;
+            while (tx < overlay.window_api_w) : (tx += tile_w) {
+                if (@mod(@divTrunc(tx, tile_w) + @divTrunc(ty, tile_h), @as(c_int, 2)) == 0) {
+                    _ = c.SDL_SetRenderDrawColor(renderer, light_r, light_g, light_b, overlay.window_api_alpha);
+                } else {
+                    _ = c.SDL_SetRenderDrawColor(renderer, dark_r, dark_g, dark_b, overlay.window_api_alpha);
+                }
+                const cw: c_int = @min(tile_w, overlay.window_api_w - tx);
+                const ch: c_int = @min(tile_h, overlay.window_api_h - ty);
+                var cell = c.SDL_FRect{
+                    .x = @floatFromInt(overlay.window_api_x + tx),
+                    .y = @floatFromInt(overlay.window_api_y + ty),
+                    .w = @floatFromInt(cw),
+                    .h = @floatFromInt(ch),
+                };
+                _ = c.SDL_RenderFillRect(renderer, &cell);
             }
-            const cw: c_int = @min(tile_w, overlay.window_api_w - tx);
-            const ch: c_int = @min(tile_h, overlay.window_api_h - ty);
-            var cell = c.SDL_FRect{
-                .x = @floatFromInt(overlay.window_api_x + tx),
-                .y = @floatFromInt(overlay.window_api_y + ty),
-                .w = @floatFromInt(cw),
-                .h = @floatFromInt(ch),
-            };
-            _ = c.SDL_RenderFillRect(renderer, &cell);
         }
     }
 
@@ -378,35 +391,51 @@ fn drawNestedTestAreaOverlay(ctx: ?*c.MDGUI_Context, renderer: ?*c.SDL_Renderer,
     if (windowIsOccludedByFullscreen(ctx, "MDGUI")) return;
 
     _ = c.SDL_SetRenderDrawBlendMode(renderer, c.SDL_BLENDMODE_BLEND);
-    var clip = c.SDL_Rect{
+
+    const base = RectI{
         .x = overlay.nested_clip_x,
         .y = overlay.nested_clip_y,
         .w = overlay.nested_clip_w,
         .h = overlay.nested_clip_h,
     };
-    if (clip.w <= 0 or clip.h <= 0) return;
-    _ = c.SDL_SetRenderClipRect(renderer, &clip);
-
-    var bg = c.SDL_FRect{
-        .x = @floatFromInt(overlay.nested_test_area_x),
-        .y = @floatFromInt(overlay.nested_test_area_y),
-        .w = @floatFromInt(overlay.nested_test_area_w),
-        .h = @floatFromInt(overlay.nested_test_area_h),
-    };
-    _ = c.SDL_SetRenderDrawColor(renderer, 0x10, 0x10, 0x10, 0xff);
-    _ = c.SDL_RenderFillRect(renderer, &bg);
+    if (base.w <= 0 or base.h <= 0) return;
+    var visible_regions: [32]RectI = undefined;
+    const visible_count = computeVisibleOverlayRegions(ctx, "MDGUI", base, &visible_regions);
+    if (visible_count == 0) return;
 
     const ticks = c.SDL_GetTicks();
     const t = @as(c_int, @intCast(ticks % 2000));
     const local_x: c_int = -16 + @divTrunc(t * (overlay.nested_test_area_w + 32), 2000);
-    var sq = c.SDL_FRect{
+    const sq = c.SDL_FRect{
         .x = @floatFromInt(overlay.nested_test_area_x + local_x),
         .y = @floatFromInt(overlay.nested_test_area_y + 22),
         .w = 18,
         .h = 18,
     };
-    _ = c.SDL_SetRenderDrawColor(renderer, 0x30, 0xd0, 0x50, 0xff);
-    _ = c.SDL_RenderFillRect(renderer, &sq);
+
+    var r_i: usize = 0;
+    while (r_i < visible_count) : (r_i += 1) {
+        const vr = visible_regions[r_i];
+        var clip = c.SDL_Rect{
+            .x = vr.x,
+            .y = vr.y,
+            .w = vr.w,
+            .h = vr.h,
+        };
+        _ = c.SDL_SetRenderClipRect(renderer, &clip);
+
+        var bg = c.SDL_FRect{
+            .x = @floatFromInt(overlay.nested_test_area_x),
+            .y = @floatFromInt(overlay.nested_test_area_y),
+            .w = @floatFromInt(overlay.nested_test_area_w),
+            .h = @floatFromInt(overlay.nested_test_area_h),
+        };
+        _ = c.SDL_SetRenderDrawColor(renderer, 0x10, 0x10, 0x10, 0xff);
+        _ = c.SDL_RenderFillRect(renderer, &bg);
+
+        _ = c.SDL_SetRenderDrawColor(renderer, 0x30, 0xd0, 0x50, 0xff);
+        _ = c.SDL_RenderFillRect(renderer, &sq);
+    }
 
     _ = c.SDL_SetRenderClipRect(renderer, null);
 }
@@ -415,6 +444,8 @@ fn renderDeferredOverlays(ctx: ?*c.MDGUI_Context, renderer: ?*c.SDL_Renderer, ov
     drawWindowApiOverlay(ctx, renderer, overlay);
     drawNestedTestAreaOverlay(ctx, renderer, overlay);
 }
+
+const RectI = struct { x: c_int, y: c_int, w: c_int, h: c_int };
 
 fn rectIntersection(
     ax: c_int,
@@ -425,13 +456,57 @@ fn rectIntersection(
     by: c_int,
     bw: c_int,
     bh: c_int,
-) ?struct { x: c_int, y: c_int, w: c_int, h: c_int } {
+) ?RectI {
     const x0 = @max(ax, bx);
     const y0 = @max(ay, by);
     const x1 = @min(ax + aw, bx + bw);
     const y1 = @min(ay + ah, by + bh);
     if (x1 <= x0 or y1 <= y0) return null;
     return .{ .x = x0, .y = y0, .w = x1 - x0, .h = y1 - y0 };
+}
+
+fn appendRectLimited(out: *[32]RectI, out_count: *usize, r: RectI) void {
+    if (r.w <= 0 or r.h <= 0) return;
+    if (out_count.* >= out.len) return;
+    out[out_count.*] = r;
+    out_count.* += 1;
+}
+
+fn subtractRectInto(base: RectI, cut: RectI, out: *[32]RectI, out_count: *usize) void {
+    const overlap = rectIntersection(base.x, base.y, base.w, base.h, cut.x, cut.y, cut.w, cut.h) orelse {
+        appendRectLimited(out, out_count, base);
+        return;
+    };
+
+    const base_x2 = base.x + base.w;
+    const base_y2 = base.y + base.h;
+    const overlap_x2 = overlap.x + overlap.w;
+    const overlap_y2 = overlap.y + overlap.h;
+
+    appendRectLimited(out, out_count, .{
+        .x = base.x,
+        .y = base.y,
+        .w = base.w,
+        .h = overlap.y - base.y,
+    });
+    appendRectLimited(out, out_count, .{
+        .x = base.x,
+        .y = overlap_y2,
+        .w = base.w,
+        .h = base_y2 - overlap_y2,
+    });
+    appendRectLimited(out, out_count, .{
+        .x = base.x,
+        .y = overlap.y,
+        .w = overlap.x - base.x,
+        .h = overlap.h,
+    });
+    appendRectLimited(out, out_count, .{
+        .x = overlap_x2,
+        .y = overlap.y,
+        .w = base_x2 - overlap_x2,
+        .h = overlap.h,
+    });
 }
 
 fn updateNestedOverlayClip(overlay: *DeferredOverlayState, draw_data: *const c.MDGUI_VkDrawData) void {
@@ -504,6 +579,59 @@ fn windowIsOccludedByFullscreen(ctx: ?*c.MDGUI_Context, title: [*:0]const u8) bo
     }
 
     return false;
+}
+
+fn computeVisibleOverlayRegions(
+    ctx: ?*c.MDGUI_Context,
+    title: [*:0]const u8,
+    base: RectI,
+    out_regions: *[32]RectI,
+) usize {
+    if (base.w <= 0 or base.h <= 0) return 0;
+    const target_z = c.mdgui_get_window_z(ctx, title);
+    if (target_z < 0) {
+        out_regions[0] = base;
+        return 1;
+    }
+
+    var regions: [32]RectI = undefined;
+    var region_count: usize = 1;
+    regions[0] = base;
+
+    const window_count = c.mdgui_get_window_count(ctx);
+    var wi: c_int = 0;
+    while (wi < window_count) : (wi += 1) {
+        var wx: c_int = 0;
+        var wy: c_int = 0;
+        var ww: c_int = 0;
+        var wh: c_int = 0;
+        var wz: c_int = 0;
+        var wopen: c_int = 0;
+        if (c.mdgui_get_window_rect_by_index(ctx, wi, &wx, &wy, &ww, &wh, &wz, &wopen) == 0) continue;
+        if (wopen == 0) continue;
+        if (wz <= target_z) continue;
+        if (ww <= 0 or wh <= 0) continue;
+
+        var next_regions: [32]RectI = undefined;
+        var next_count: usize = 0;
+        const occluder = RectI{ .x = wx, .y = wy, .w = ww, .h = wh };
+        var i: usize = 0;
+        while (i < region_count) : (i += 1) {
+            subtractRectInto(regions[i], occluder, &next_regions, &next_count);
+        }
+        region_count = next_count;
+        i = 0;
+        while (i < region_count) : (i += 1) {
+            regions[i] = next_regions[i];
+        }
+        if (region_count == 0) break;
+    }
+
+    var i: usize = 0;
+    while (i < region_count) : (i += 1) {
+        out_regions[i] = regions[i];
+    }
+    return region_count;
 }
 
 fn analyticsPush(a: *Analytics, frame_ms: f32) void {
@@ -834,6 +962,75 @@ fn drawPerfGraphWindow(ctx: ?*c.MDGUI_Context, analytics: *const Analytics) void
     c.mdgui_end_window(ctx);
 }
 
+fn drawPerfHudContent(ctx: ?*c.MDGUI_Context, analytics: *const Analytics) void {
+    const stats = analyticsStats(analytics);
+    var line: [96]u8 = undefined;
+    const txt = std.fmt.bufPrintZ(
+        &line,
+        "FPS {d:.1} | {d:.2} ms | min/max {d:.1}/{d:.1}",
+        .{ stats.current_fps, stats.current_ms, stats.min_fps, stats.max_fps },
+    ) catch "stats";
+    c.mdgui_label(ctx, txt.ptr);
+
+    var ordered: [Analytics.history_len]f32 = [_]f32{16.67} ** Analytics.history_len;
+    var i: usize = 0;
+    while (i < analytics.count) : (i += 1) {
+        ordered[i] = analyticsSampleFrameMs(analytics, i);
+    }
+    c.mdgui_frame_time_graph(
+        ctx,
+        &ordered[0],
+        @as(c_int, @intCast(analytics.count)),
+        analytics.target_fps,
+        analytics.graph_max_ms,
+        0,
+        50,
+    );
+}
+
+fn drawPerfHud(ctx: ?*c.MDGUI_Context, analytics: *const Analytics, use_subpass: bool) void {
+    c.mdgui_set_window_rect(ctx, "Perf HUD", 6, 13, 240, 78);
+    c.mdgui_set_window_open(ctx, "Perf HUD", 1);
+    c.mdgui_set_window_alpha(ctx, "Perf HUD", 214);
+
+    var view_x: c_int = 0;
+    var view_y: c_int = 0;
+    var view_w: c_int = 0;
+    var view_h: c_int = 0;
+    const flags = c.MDGUI_WINDOW_FLAG_NO_CHROME | c.MDGUI_WINDOW_FLAG_EXCLUDE_FROM_TILING;
+    if (c.mdgui_begin_render_window_ex(
+        ctx,
+        "Perf HUD",
+        6,
+        13,
+        240,
+        78,
+        0,
+        flags,
+        &view_x,
+        &view_y,
+        &view_w,
+        &view_h,
+    ) == 0) return;
+
+    if (use_subpass) {
+        var sx: c_int = 0;
+        var sy: c_int = 0;
+        var sw: c_int = 0;
+        var sh: c_int = 0;
+        if (c.mdgui_begin_subpass(ctx, "perf_hud_subpass", 0, 0, 0, 0, 1.0, &sx, &sy, &sw, &sh) != 0) {
+            drawPerfHudContent(ctx, analytics);
+            c.mdgui_end_subpass(ctx);
+        } else {
+            drawPerfHudContent(ctx, analytics);
+        }
+    } else {
+        drawPerfHudContent(ctx, analytics);
+    }
+
+    c.mdgui_end_window(ctx);
+}
+
 fn getLogicalRenderSize(renderer: ?*c.SDL_Renderer, out_w: *c_int, out_h: *c_int) void {
     var rw: c_int = 640;
     var rh: c_int = 360;
@@ -991,6 +1188,8 @@ pub fn main() !void {
     var show_about = false;
     var show_demo = true;
     var show_nested_test_area = false;
+    var show_perf_hud = false;
+    var perf_hud_use_subpass = true;
     var show_window_api_menu = false;
     var emu_view_fullscreen = false;
     var selected_rom_buf: [512]u8 = [_]u8{0} ** 512;
@@ -1270,6 +1469,25 @@ pub fn main() !void {
                         request_open_perf_graph = true;
                     }
                 }
+                if (show_perf_hud) {
+                    if (c.mdgui_main_menu_item(ctx, "[x] Perf HUD") != 0) {
+                        show_perf_hud = false;
+                        c.mdgui_set_window_open(ctx, "Perf HUD", 0);
+                    }
+                } else {
+                    if (c.mdgui_main_menu_item(ctx, "[ ] Perf HUD") != 0) {
+                        show_perf_hud = true;
+                    }
+                }
+                if (perf_hud_use_subpass) {
+                    if (c.mdgui_main_menu_item(ctx, "[x] Perf HUD Subpass (1x)") != 0) {
+                        perf_hud_use_subpass = false;
+                    }
+                } else {
+                    if (c.mdgui_main_menu_item(ctx, "[ ] Perf HUD Subpass (1x)") != 0) {
+                        perf_hud_use_subpass = true;
+                    }
+                }
                 if (c.mdgui_main_menu_item(ctx, "Window API") != 0) {
                     const is_open = c.mdgui_is_window_open(ctx, render_api_window_title) != 0;
                     if (is_open) {
@@ -1391,6 +1609,12 @@ pub fn main() !void {
                 .emu_view => drawWindowApiDemo(ctx, renderer, &deferred_overlay, show_window_api_menu),
                 .perf_graph => drawPerfGraphWindow(ctx, &analytics),
             }
+        }
+
+        if (show_perf_hud) {
+            drawPerfHud(ctx, &analytics, perf_hud_use_subpass);
+        } else {
+            c.mdgui_set_window_open(ctx, "Perf HUD", 0);
         }
 
         if (request_open_main_ui) {

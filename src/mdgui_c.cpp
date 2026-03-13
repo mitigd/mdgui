@@ -107,6 +107,7 @@ struct MDGUI_Window {
   int tile_side;
   bool tile_excluded;
   unsigned char alpha;
+  bool no_chrome;
   int chrome_min_w;
   int chrome_min_h;
   std::vector<CollapsingState> collapsing_states;
@@ -408,7 +409,8 @@ static int current_viewport_x(const MDGUI_Context *ctx) {
   if (!ctx || ctx->current_window < 0 ||
       ctx->current_window >= (int)ctx->windows.size())
     return 0;
-  return ctx->windows[ctx->current_window].x + 2;
+  const auto &win = ctx->windows[ctx->current_window];
+  return win.no_chrome ? win.x : (win.x + 2);
 }
 
 static int current_viewport_width(const MDGUI_Context *ctx) {
@@ -417,7 +419,8 @@ static int current_viewport_width(const MDGUI_Context *ctx) {
   if (!ctx || ctx->current_window < 0 ||
       ctx->current_window >= (int)ctx->windows.size())
     return 0;
-  return ctx->windows[ctx->current_window].w - 4;
+  const auto &win = ctx->windows[ctx->current_window];
+  return win.no_chrome ? win.w : (win.w - 4);
 }
 
 static void layout_prepare_widget(MDGUI_Context *ctx, int *out_local_x,
@@ -1519,6 +1522,7 @@ static int find_or_create_window(MDGUI_Context *ctx, const char *title, int x,
   nw.tile_weight = 1;
   nw.tile_side = MDGUI_TILE_SIDE_AUTO;
   nw.tile_excluded = has_pending_tile_excluded_title(ctx, key);
+  nw.no_chrome = false;
   int pending_min_w = 0;
   int pending_min_h = 0;
   if (get_pending_window_min_size(ctx, key, &pending_min_w, &pending_min_h)) {
@@ -2907,10 +2911,13 @@ int mdgui_begin_window_ex(MDGUI_Context *ctx, const char *title, int x, int y,
   const int top_idx =
       top_window_at_point(ctx, ctx->input.mouse_x, ctx->input.mouse_y, 3);
   const int top_here = (top_idx == idx);
+  const bool no_chrome = (flags & MDGUI_WINDOW_FLAG_NO_CHROME) != 0;
+  win.no_chrome = no_chrome;
   const bool chrome_input_allowed = ctx->open_main_menu_path.empty();
-  const bool move_resize_allowed = chrome_input_allowed && !ctx->windows_locked;
-  const bool can_maximize = !win.disallow_maximize;
-  const int title_h = 12;
+  const bool move_resize_allowed =
+      !no_chrome && chrome_input_allowed && !ctx->windows_locked;
+  const bool can_maximize = !no_chrome && !win.disallow_maximize;
+  const int title_h = no_chrome ? 0 : 12;
   if (win.user_min_w < 50)
     win.user_min_w = 50;
   if (win.user_min_h < 30)
@@ -2974,8 +2981,8 @@ int mdgui_begin_window_ex(MDGUI_Context *ctx, const char *title, int x, int y,
   const int max_y = win.y + 1;
   const int title_text_w =
       (title && mdgui_fonts[1]) ? mdgui_fonts[1]->measureTextWidth(title) : 0;
-  int chrome_min_w = 26;
-  if (title_text_w > 0) {
+  int chrome_min_w = no_chrome ? 1 : 26;
+  if (!no_chrome && title_text_w > 0) {
     const int title_need = 5 + title_text_w + 6 + btn_w + 2 + btn_w + 2;
     if (title_need > chrome_min_w)
       chrome_min_w = title_need;
@@ -2983,7 +2990,7 @@ int mdgui_begin_window_ex(MDGUI_Context *ctx, const char *title, int x, int y,
   if (chrome_min_w > win.min_w)
     win.min_w = chrome_min_w;
 
-  if (chrome_input_allowed && ctx->input.mouse_pressed && top_here) {
+  if (!no_chrome && chrome_input_allowed && ctx->input.mouse_pressed && top_here) {
     // If a combo popup is open in
     // this window, let combo logic
     // consume this click first; don't
@@ -3081,55 +3088,61 @@ int mdgui_begin_window_ex(MDGUI_Context *ctx, const char *title, int x, int y,
                                            ctx->input.mouse_y) == idx) ||
                       (win.z == ctx->z_counter);
   (void)focused;
+  const bool transparent_bg = (flags & MDGUI_WINDOW_FLAG_TRANSPARENT_BG) != 0;
 
   mdgui_backend_set_alpha_mod(win.alpha);
 
-  mdgui_fill_rect_idx(nullptr, CLR_BOX_TITLE, win.x, win.y, win.w, title_h);
-  mdgui_fill_rect_idx(nullptr, CLR_BOX_BODY, win.x, win.y + title_h, win.w,
-                      win.h - title_h - 2);
-  mdgui_fill_rect_idx(nullptr, CLR_BOX_BODY, win.x, win.y + win.h - 2, win.w,
-                      2);
+  if (no_chrome) {
+    if (!transparent_bg) {
+      mdgui_fill_rect_idx(nullptr, CLR_BOX_BODY, win.x, win.y, win.w, win.h);
+    }
+  } else {
+    mdgui_fill_rect_idx(nullptr, CLR_BOX_TITLE, win.x, win.y, win.w, title_h);
+    if (!transparent_bg) {
+      mdgui_fill_rect_idx(nullptr, CLR_BOX_BODY, win.x, win.y + title_h, win.w,
+                          win.h - title_h - 2);
+      mdgui_fill_rect_idx(nullptr, CLR_BOX_BODY, win.x, win.y + win.h - 2, win.w,
+                          2);
+    }
 
-  // Draw 3D-style Close button
-  mdgui_fill_rect_idx(nullptr, CLR_BUTTON_SURFACE, close_x, close_y, btn_w,
-                      btn_h);
-  // Draw X as two diagonal lines with
-  // margin
-  mdgui_draw_line_idx(nullptr, CLR_TEXT_LIGHT, close_x + 2, close_y + 2,
-                      close_x + 6, close_y + 6);
-  mdgui_draw_line_idx(nullptr, CLR_TEXT_LIGHT, close_x + 6, close_y + 2,
-                      close_x + 2, close_y + 6);
-
-  // Draw 3D-style Maximize button
-  // when allowed for this window.
-  if (can_maximize) {
-    mdgui_fill_rect_idx(nullptr, CLR_BUTTON_SURFACE, max_x, max_y, btn_w,
+    // Draw 3D-style Close button
+    mdgui_fill_rect_idx(nullptr, CLR_BUTTON_SURFACE, close_x, close_y, btn_w,
                         btn_h);
-    mdgui_fill_rect_idx(nullptr, CLR_TEXT_LIGHT, max_x + 2, max_y + 2,
-                        btn_w - 4, btn_h - 4);
-    mdgui_fill_rect_idx(nullptr, CLR_BUTTON_SURFACE, max_x + 3, max_y + 4,
-                        btn_w - 6, btn_h - 7);
+    // Draw X as two diagonal lines with margin
+    mdgui_draw_line_idx(nullptr, CLR_TEXT_LIGHT, close_x + 2, close_y + 2,
+                        close_x + 6, close_y + 6);
+    mdgui_draw_line_idx(nullptr, CLR_TEXT_LIGHT, close_x + 6, close_y + 2,
+                        close_x + 2, close_y + 6);
+
+    // Draw 3D-style Maximize button when allowed for this window.
+    if (can_maximize) {
+      mdgui_fill_rect_idx(nullptr, CLR_BUTTON_SURFACE, max_x, max_y, btn_w,
+                          btn_h);
+      mdgui_fill_rect_idx(nullptr, CLR_TEXT_LIGHT, max_x + 2, max_y + 2,
+                          btn_w - 4, btn_h - 4);
+      mdgui_fill_rect_idx(nullptr, CLR_BUTTON_SURFACE, max_x + 3, max_y + 4,
+                          btn_w - 6, btn_h - 7);
+    }
+
+    if (title && mdgui_fonts[1]) {
+      const int title_text_y = win.y + ((title_h - 8) / 2);
+      mdgui_fonts[1]->drawText(title, nullptr, win.x + 5, title_text_y,
+                               CLR_TEXT_LIGHT);
+    }
+
+    // Draw border after fills so it renders on top.
+    mdgui_draw_hline_idx(nullptr, CLR_WINDOW_BORDER, win.x - 1, win.y - 1,
+                         win.x + win.w + 1);
+    mdgui_draw_hline_idx(nullptr, CLR_WINDOW_BORDER, win.x - 1, win.y + win.h - 1,
+                         win.x + win.w + 1);
+    mdgui_draw_vline_idx(nullptr, CLR_WINDOW_BORDER, win.x - 1, win.y - 1,
+                         win.y + win.h);
+    mdgui_draw_vline_idx(nullptr, CLR_WINDOW_BORDER, win.x + win.w, win.y - 1,
+                         win.y + win.h);
   }
 
-  if (title && mdgui_fonts[1]) {
-    const int title_text_y = win.y + ((title_h - 8) / 2);
-    mdgui_fonts[1]->drawText(title, nullptr, win.x + 5, title_text_y,
-                             CLR_TEXT_LIGHT);
-  }
-
-  // Draw border after fills so it
-  // renders on top
-  mdgui_draw_hline_idx(nullptr, CLR_WINDOW_BORDER, win.x - 1, win.y - 1,
-                       win.x + win.w + 1);
-  mdgui_draw_hline_idx(nullptr, CLR_WINDOW_BORDER, win.x - 1, win.y + win.h - 1,
-                       win.x + win.w + 1);
-  mdgui_draw_vline_idx(nullptr, CLR_WINDOW_BORDER, win.x - 1, win.y - 1,
-                       win.y + win.h);
-  mdgui_draw_vline_idx(nullptr, CLR_WINDOW_BORDER, win.x + win.w, win.y - 1,
-                       win.y + win.h);
-
-  ctx->origin_x = win.x + 2;
-  ctx->origin_y = win.y + title_h + 2;
+  ctx->origin_x = no_chrome ? win.x : (win.x + 2);
+  ctx->origin_y = no_chrome ? win.y : (win.y + title_h + 2);
   ctx->content_y = ctx->origin_y + ctx->style.content_pad_y;
   ctx->menu_index = 0;
   ctx->menu_next_x = ctx->origin_x;
@@ -3145,8 +3158,8 @@ int mdgui_begin_window_ex(MDGUI_Context *ctx, const char *title, int x, int y,
   ctx->menu_bar_h = 0;
   ctx->menu_defs.clear();
   ctx->menu_build_stack.clear();
-  ctx->content_req_right = win.x + 6;
-  ctx->content_req_bottom = win.y + title_h + 6;
+  ctx->content_req_right = no_chrome ? (win.x + 1) : (win.x + 6);
+  ctx->content_req_bottom = no_chrome ? (win.y + 1) : (win.y + title_h + 6);
   ctx->layout_same_line = false;
   ctx->layout_has_last_item = false;
   ctx->layout_last_item_x = 0;
@@ -3164,7 +3177,8 @@ int mdgui_begin_window_ex(MDGUI_Context *ctx, const char *title, int x, int y,
   ctx->layout_indent = ctx->style.content_pad_x;
   ctx->indent_stack.clear();
   ctx->window_has_nonlabel_widget = false;
-  note_content_bounds(ctx, win.x + chrome_min_w, win.y + title_h + 2);
+  note_content_bounds(ctx, win.x + chrome_min_w,
+                      no_chrome ? (win.y + 1) : (win.y + title_h + 2));
 
   set_content_clip(ctx);
   return 1;
@@ -6120,6 +6134,52 @@ void mdgui_set_window_rect(MDGUI_Context *ctx, const char *title, int x, int y,
   }
 }
 
+int mdgui_get_window_rect(MDGUI_Context *ctx, const char *title, int *x, int *y,
+                          int *w, int *h) {
+  if (!ctx || !title)
+    return 0;
+  for (auto &win : ctx->windows) {
+    if (win.id == title && !win.closed) {
+      if (x)
+        *x = win.x;
+      if (y)
+        *y = win.y;
+      if (w)
+        *w = win.w;
+      if (h)
+        *h = win.h;
+      return 1;
+    }
+  }
+  return 0;
+}
+
+int mdgui_get_window_count(MDGUI_Context *ctx) {
+  if (!ctx)
+    return 0;
+  return (int)ctx->windows.size();
+}
+
+int mdgui_get_window_rect_by_index(MDGUI_Context *ctx, int index, int *x, int *y,
+                                   int *w, int *h, int *z, int *open) {
+  if (!ctx || index < 0 || index >= (int)ctx->windows.size())
+    return 0;
+  const auto &win = ctx->windows[(size_t)index];
+  if (x)
+    *x = win.x;
+  if (y)
+    *y = win.y;
+  if (w)
+    *w = win.w;
+  if (h)
+    *h = win.h;
+  if (z)
+    *z = win.z;
+  if (open)
+    *open = win.closed ? 0 : 1;
+  return 1;
+}
+
 void mdgui_set_window_min_size(MDGUI_Context *ctx, const char *title, int min_w,
                                int min_h) {
   if (!ctx || !title)
@@ -6524,14 +6584,17 @@ int mdgui_begin_render_window_ex(MDGUI_Context *ctx, const char *title, int x,
   if (ctx->current_window >= 0 &&
       ctx->current_window < (int)ctx->windows.size()) {
     auto &parent = ctx->windows[ctx->current_window];
+    const auto *subpass = current_subpass(ctx);
+    const bool no_chrome = (flags & MDGUI_WINDOW_FLAG_NO_CHROME) != 0;
     const int requested_h = h;
     w = resolve_dynamic_width(ctx, x, w, 8);
     const int ix = ctx->origin_x + x + ctx->layout_indent;
     const int logical_y = ctx->content_y + y;
-    const int iy = logical_y - parent.text_scroll;
+    const int iy = subpass ? logical_y : (logical_y - parent.text_scroll);
 
     if (requested_h == 0 || requested_h < 0) {
-      const int viewport_bottom = parent.y + parent.h - 4;
+      const int viewport_bottom =
+          subpass ? subpass->local_h : (parent.y + parent.h - 4);
       int avail_h = viewport_bottom - logical_y;
       if (requested_h < 0)
         avail_h += requested_h;
@@ -6545,10 +6608,15 @@ int mdgui_begin_render_window_ex(MDGUI_Context *ctx, const char *title, int x,
     // frame/body) so border can never
     // bleed outside tiled/visible
     // parent content.
-    const int parent_clip_x = parent.x + 2;
+    const int parent_clip_x = current_viewport_x(ctx);
     const int parent_clip_y = ctx->origin_y;
-    int parent_clip_w = parent.w - 4;
-    int parent_clip_h = (parent.y + parent.h - 4) - parent_clip_y;
+    int parent_clip_w = current_viewport_width(ctx);
+    int parent_clip_h = 0;
+    if (subpass) {
+      parent_clip_h = subpass->local_h - parent_clip_y;
+    } else {
+      parent_clip_h = (parent.y + parent.h - 4) - parent_clip_y;
+    }
     if (parent_clip_w < 1)
       parent_clip_w = 1;
     if (parent_clip_h < 1)
@@ -6556,10 +6624,10 @@ int mdgui_begin_render_window_ex(MDGUI_Context *ctx, const char *title, int x,
     mdgui_backend_set_clip_rect(1, parent_clip_x, parent_clip_y, parent_clip_w,
                                 parent_clip_h);
 
-    const int cx = ix + 1;
-    const int cy = iy + 1;
-    int cw = w - 2;
-    int ch = h - 2;
+    const int cx = no_chrome ? ix : (ix + 1);
+    const int cy = no_chrome ? iy : (iy + 1);
+    int cw = no_chrome ? w : (w - 2);
+    int ch = no_chrome ? h : (h - 2);
     if (cw < 1)
       cw = 1;
     if (ch < 1)
@@ -6612,13 +6680,18 @@ int mdgui_begin_render_window_ex(MDGUI_Context *ctx, const char *title, int x,
     nested.parent_layout_indent = ctx->layout_indent;
     nested.parent_indent_stack_size = ctx->indent_stack.size();
     ctx->nested_render_stack.push_back(nested);
+    const bool transparent_bg = (flags & MDGUI_WINDOW_FLAG_TRANSPARENT_BG) != 0;
     const int frame_x1 = ix - 1;
     const int frame_y1 = iy - 1;
     const int frame_x2 = ix + w + 1;
     const int frame_y2 = iy + h + 1;
-    mdgui_draw_frame_idx(nullptr, CLR_WINDOW_BORDER, frame_x1, frame_y1,
-                         frame_x2, frame_y2);
-    mdgui_fill_rect_idx(nullptr, CLR_BOX_BODY, ix, iy, w, h);
+    if (!no_chrome) {
+      mdgui_draw_frame_idx(nullptr, CLR_WINDOW_BORDER, frame_x1, frame_y1,
+                           frame_x2, frame_y2);
+    }
+    if (!transparent_bg) {
+      mdgui_fill_rect_idx(nullptr, CLR_BOX_BODY, ix, iy, w, h);
+    }
     note_content_bounds(ctx, ix + w, logical_y + h);
 
     ctx->origin_x = cx;

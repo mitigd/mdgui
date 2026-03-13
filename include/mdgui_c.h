@@ -136,6 +136,8 @@ enum {
   MDGUI_WINDOW_FLAG_NONE = 0,
   MDGUI_WINDOW_FLAG_CENTER_ON_FIRST_USE = 1 << 0,
   MDGUI_WINDOW_FLAG_EXCLUDE_FROM_TILING = 1 << 1,
+  MDGUI_WINDOW_FLAG_TRANSPARENT_BG = 1 << 2,
+  MDGUI_WINDOW_FLAG_NO_CHROME = 1 << 3,
 };
 
 MDGUI_Context *mdgui_create(void *sdl_renderer);
@@ -253,6 +255,11 @@ int mdgui_is_window_open(MDGUI_Context *ctx, const char *title);
 void mdgui_focus_window(MDGUI_Context *ctx, const char *title);
 void mdgui_set_window_rect(MDGUI_Context *ctx, const char *title, int x, int y,
                            int w, int h);
+int mdgui_get_window_rect(MDGUI_Context *ctx, const char *title, int *x, int *y,
+                          int *w, int *h);
+int mdgui_get_window_count(MDGUI_Context *ctx);
+int mdgui_get_window_rect_by_index(MDGUI_Context *ctx, int index, int *x, int *y,
+                                   int *w, int *h, int *z, int *open);
 void mdgui_set_window_min_size(MDGUI_Context *ctx, const char *title, int min_w,
                                int min_h);
 void mdgui_get_window_min_size(MDGUI_Context *ctx, const char *title,
