@@ -108,6 +108,7 @@ struct MDGUI_Window {
   bool tile_excluded;
   unsigned char alpha;
   bool no_chrome;
+  bool input_passthrough;
   int chrome_min_w;
   int chrome_min_h;
   std::vector<CollapsingState> collapsing_states;
@@ -654,6 +655,8 @@ reposition_child_menu_chain(std::vector<MDGUI_Context::MenuDef> &defs,
   }
 }
 
+static bool window_accepts_input(const MDGUI_Window &w);
+
 static int top_window_at_point(const MDGUI_Context *ctx, int px, int py,
                                int margin = 0) {
   if (ctx->combo_capture_active && ctx->combo_capture_window >= 0 &&
@@ -671,6 +674,8 @@ static int top_window_at_point(const MDGUI_Context *ctx, int px, int py,
   for (int i = 0; i < (int)ctx->windows.size(); ++i) {
     const auto &w = ctx->windows[i];
     if (w.closed)
+      continue;
+    if (!window_accepts_input(w))
       continue;
     if (w.w <= 0 || w.h <= 0)
       continue;
@@ -739,6 +744,10 @@ static void sanitize_overlay_state(MDGUI_OverlayState *state) {
     state->margin_right = 0;
   if (state->margin_bottom < 0)
     state->margin_bottom = 0;
+}
+
+static bool window_accepts_input(const MDGUI_Window &w) {
+  return !w.input_passthrough;
 }
 
 static bool has_pending_tile_excluded_title(const MDGUI_Context *ctx,
@@ -1560,6 +1569,7 @@ static int find_or_create_window(MDGUI_Context *ctx, const char *title, int x,
     nw.scrollbar_visible = pending_scrollbar_visible;
   }
   nw.alpha = ctx->default_window_alpha;
+  nw.input_passthrough = false;
   ctx->windows.push_back(nw);
   if (out_created)
     *out_created = true;
@@ -1572,6 +1582,8 @@ static int is_current_window_topmost(MDGUI_Context *ctx, int margin = 0) {
   if (current_subpass(ctx))
     return 1;
   const auto &w = ctx->windows[ctx->current_window];
+  if (!window_accepts_input(w))
+    return 0;
   return top_window_at_point(ctx, ctx->input.mouse_x, ctx->input.mouse_y,
                              margin) == ctx->current_window ||
          w.z >= ctx->z_counter;
@@ -6812,7 +6824,7 @@ void mdgui_overlay_handle_drag(MDGUI_Input *input,
   if (!input || !state) {
     return;
   }
-  if (!state->visible || !state->allow_mouse_drag) {
+  if (!state->visible || !state->allow_mouse_drag || state->click_through) {
     state->dragging = 0;
     return;
   }
@@ -6860,6 +6872,7 @@ int mdgui_begin_overlay(MDGUI_Context *ctx, const MDGUI_OverlayConfig *config,
     return 0;
 
   sanitize_overlay_state(state);
+  const bool click_through = state->click_through != 0;
 
   if (!state->visible) {
     mdgui_set_window_open(ctx, config->title, 0);
@@ -6879,6 +6892,11 @@ int mdgui_begin_overlay(MDGUI_Context *ctx, const MDGUI_OverlayConfig *config,
                                     state->w, state->h, 0, config->window_flags,
                                     &view_x, &view_y, &view_w, &view_h)) {
     return 0;
+  }
+
+  if (ctx->current_window >= 0 &&
+      ctx->current_window < (int)ctx->windows.size()) {
+    ctx->windows[ctx->current_window].input_passthrough = click_through;
   }
 
   int base_x = view_x;
