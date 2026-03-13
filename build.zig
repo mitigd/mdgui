@@ -2,10 +2,10 @@ const std = @import("std");
 
 const mdgui_c_sources = &.{
     "src/mdgui_c.cpp",
-    "src/mdgui_glue.cpp",
-    "src/mdgui_backend_sdl.cpp",
-    "src/mdgui_backend_opengl.cpp",
-    "src/mdgui_backend_vulkan.cpp",
+    "mdgui_impl/glue/mdgui_glue.cpp",
+    "mdgui_impl/backends/mdgui_backend_sdl.cpp",
+    "mdgui_impl/backends/mdgui_backend_opengl.cpp",
+    "mdgui_impl/backends/mdgui_backend_vulkan.cpp",
 };
 
 fn addDemo(
