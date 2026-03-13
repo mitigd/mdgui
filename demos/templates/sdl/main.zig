@@ -48,49 +48,29 @@ const AnalyticsStats = struct {
     max_fps: f32,
 };
 
-const OverlayContentFn = *const fn (?*c.MDGUI_Context, ?*anyopaque, c_int, c_int, c_int, c_int) void;
-
-const OverlayConfig = struct {
-    title: [*:0]const u8,
-    x: c_int,
-    y: c_int,
-    w: c_int,
-    h: c_int,
-    alpha: u8,
-    visible: bool,
-    use_subpass: bool,
-    subpass_scale: f32,
-    flags: c_int,
-    margin_left: c_int,
-    margin_top: c_int,
-    margin_right: c_int,
-    margin_bottom: c_int,
-    content: OverlayContentFn,
-    user_data: ?*anyopaque,
-};
-
 const OverlayContentKind = enum {
     perf_metrics,
     custom_drawing,
 };
 
 const OverlayDemoState = struct {
-    visible: bool = false,
-    use_subpass: bool = true,
-    allow_mouse_drag: bool = false,
-    dragging: bool = false,
-    drag_off_x: c_int = 0,
-    drag_off_y: c_int = 0,
-    x: c_int = 6,
-    y: c_int = 13,
-    w: c_int = 240,
-    h: c_int = 78,
-    alpha: u8 = 214,
-    margin_left: c_int = 8,
-    margin_top: c_int = 6,
-    margin_right: c_int = 8,
-    margin_bottom: c_int = 6,
+    overlay: c.MDGUI_OverlayState,
     content_kind: OverlayContentKind = .perf_metrics,
+
+    fn init() OverlayDemoState {
+        var overlay: c.MDGUI_OverlayState = undefined;
+        c.mdgui_overlay_init_state(&overlay);
+        overlay.x = 6;
+        overlay.y = 13;
+        overlay.w = 240;
+        overlay.h = 78;
+        overlay.alpha = 214;
+        overlay.margin_left = 8;
+        overlay.margin_top = 6;
+        overlay.margin_right = 8;
+        overlay.margin_bottom = 6;
+        return .{ .overlay = overlay };
+    }
 };
 
 const OverlayRenderData = struct {
@@ -125,8 +105,11 @@ fn clampInt(v: c_int, min_v: c_int, max_v: c_int) c_int {
     return v;
 }
 
-fn pointInRect(px: c_int, py: c_int, x: c_int, y: c_int, w: c_int, h: c_int) bool {
-    return px >= x and py >= y and px < x + w and py < y + h;
+fn makeOverlayConfig() c.MDGUI_OverlayConfig {
+    var config: c.MDGUI_OverlayConfig = undefined;
+    c.mdgui_overlay_init_config(&config);
+    config.title = perf_overlay_title;
+    return config;
 }
 
 const DemoFontOption = struct {
@@ -314,6 +297,7 @@ fn analyticsHistogram(a: *const Analytics) [Analytics.histogram_bin_count]usize 
 fn drawAnalyticsWindow(ctx: ?*c.MDGUI_Context, renderer: ?*c.SDL_Renderer, analytics: *Analytics, overlay_state: *OverlayDemoState) void {
     if (!analytics.show_window) return;
     if (c.mdgui_begin_window(ctx, "PERF ANALYTICS", 10, 145, 240, 340) == 0) return;
+    const overlay = &overlay_state.overlay;
     var rw: c_int = 640;
     var rh: c_int = 360;
     getLogicalRenderSize(renderer, &rw, &rh);
@@ -366,55 +350,55 @@ fn drawAnalyticsWindow(ctx: ?*c.MDGUI_Context, renderer: ?*c.SDL_Renderer, analy
     if (c.mdgui_begin_collapsing_header_group(ctx, "perf.overlay", "Overlay Agnosticism", -16, 1, 6) != 0) {
         c.mdgui_label_wrapped(ctx, "Transparent overlays are configurable content surfaces. Adjust screen position, size, alpha, inner margins, or swap in custom drawing.", -16);
 
-        var overlay_visible = overlay_state.visible;
+        var overlay_visible = overlay.visible != 0;
         _ = c.mdgui_checkbox(ctx, "Show perf overlay", &overlay_visible);
-        overlay_state.visible = overlay_visible;
+        overlay.visible = if (overlay_visible) 1 else 0;
 
-        var use_subpass = overlay_state.use_subpass;
+        var use_subpass = overlay.use_subpass != 0;
         _ = c.mdgui_checkbox(ctx, "Use 1x subpass output", &use_subpass);
-        overlay_state.use_subpass = use_subpass;
+        overlay.use_subpass = if (use_subpass) 1 else 0;
 
-        var allow_mouse_drag = overlay_state.allow_mouse_drag;
+        var allow_mouse_drag = overlay.allow_mouse_drag != 0;
         _ = c.mdgui_checkbox(ctx, "Allow mouse move overlay", &allow_mouse_drag);
-        overlay_state.allow_mouse_drag = allow_mouse_drag;
+        overlay.allow_mouse_drag = if (allow_mouse_drag) 1 else 0;
 
-        const max_x = @max(0, rw - overlay_state.w);
-        var xf = @as(f32, @floatFromInt(overlay_state.x));
+        const max_x = @max(0, rw - overlay.w);
+        var xf = @as(f32, @floatFromInt(overlay.x));
         _ = c.mdgui_slider(ctx, "Overlay X", &xf, 0.0, @floatFromInt(max_x), -16);
-        overlay_state.x = clampInt(@as(c_int, @intFromFloat(xf + 0.5)), 0, max_x);
+        overlay.x = clampInt(@as(c_int, @intFromFloat(xf + 0.5)), 0, max_x);
 
-        const max_y = @max(0, rh - overlay_state.h);
-        var yf = @as(f32, @floatFromInt(overlay_state.y));
+        const max_y = @max(0, rh - overlay.h);
+        var yf = @as(f32, @floatFromInt(overlay.y));
         _ = c.mdgui_slider(ctx, "Overlay Y", &yf, 0.0, @floatFromInt(max_y), -16);
-        overlay_state.y = clampInt(@as(c_int, @intFromFloat(yf + 0.5)), 0, max_y);
+        overlay.y = clampInt(@as(c_int, @intFromFloat(yf + 0.5)), 0, max_y);
 
-        var wf = @as(f32, @floatFromInt(overlay_state.w));
+        var wf = @as(f32, @floatFromInt(overlay.w));
         _ = c.mdgui_slider(ctx, "Overlay width", &wf, 120.0, 420.0, -16);
-        overlay_state.w = clampInt(@as(c_int, @intFromFloat(wf + 0.5)), 120, 420);
+        overlay.w = clampInt(@as(c_int, @intFromFloat(wf + 0.5)), 120, 420);
 
-        var hf = @as(f32, @floatFromInt(overlay_state.h));
+        var hf = @as(f32, @floatFromInt(overlay.h));
         _ = c.mdgui_slider(ctx, "Overlay height", &hf, 48.0, 220.0, -16);
-        overlay_state.h = clampInt(@as(c_int, @intFromFloat(hf + 0.5)), 48, 220);
+        overlay.h = clampInt(@as(c_int, @intFromFloat(hf + 0.5)), 48, 220);
 
-        var alpha_f = alphaFloatFromByte(overlay_state.alpha);
+        var alpha_f = alphaFloatFromByte(overlay.alpha);
         _ = c.mdgui_slider(ctx, "Overlay alpha", &alpha_f, 0.1, 1.0, -16);
-        overlay_state.alpha = alphaByteFromFloat(alpha_f);
+        overlay.alpha = alphaByteFromFloat(alpha_f);
 
-        var margin_left_f = @as(f32, @floatFromInt(overlay_state.margin_left));
+        var margin_left_f = @as(f32, @floatFromInt(overlay.margin_left));
         _ = c.mdgui_slider(ctx, "Margin left", &margin_left_f, 0.0, 32.0, -16);
-        overlay_state.margin_left = clampInt(@as(c_int, @intFromFloat(margin_left_f + 0.5)), 0, 32);
+        overlay.margin_left = clampInt(@as(c_int, @intFromFloat(margin_left_f + 0.5)), 0, 32);
 
-        var margin_top_f = @as(f32, @floatFromInt(overlay_state.margin_top));
+        var margin_top_f = @as(f32, @floatFromInt(overlay.margin_top));
         _ = c.mdgui_slider(ctx, "Margin top", &margin_top_f, 0.0, 24.0, -16);
-        overlay_state.margin_top = clampInt(@as(c_int, @intFromFloat(margin_top_f + 0.5)), 0, 24);
+        overlay.margin_top = clampInt(@as(c_int, @intFromFloat(margin_top_f + 0.5)), 0, 24);
 
-        var margin_right_f = @as(f32, @floatFromInt(overlay_state.margin_right));
+        var margin_right_f = @as(f32, @floatFromInt(overlay.margin_right));
         _ = c.mdgui_slider(ctx, "Margin right", &margin_right_f, 0.0, 32.0, -16);
-        overlay_state.margin_right = clampInt(@as(c_int, @intFromFloat(margin_right_f + 0.5)), 0, 32);
+        overlay.margin_right = clampInt(@as(c_int, @intFromFloat(margin_right_f + 0.5)), 0, 32);
 
-        var margin_bottom_f = @as(f32, @floatFromInt(overlay_state.margin_bottom));
+        var margin_bottom_f = @as(f32, @floatFromInt(overlay.margin_bottom));
         _ = c.mdgui_slider(ctx, "Margin bottom", &margin_bottom_f, 0.0, 24.0, -16);
-        overlay_state.margin_bottom = clampInt(@as(c_int, @intFromFloat(margin_bottom_f + 0.5)), 0, 24);
+        overlay.margin_bottom = clampInt(@as(c_int, @intFromFloat(margin_bottom_f + 0.5)), 0, 24);
 
         if (overlay_state.content_kind == .perf_metrics) {
             if (c.mdgui_button(ctx, "Show Custom Drawing", -16, 18) != 0) {
@@ -757,101 +741,6 @@ fn drawCustomOverlayContent(ctx: ?*c.MDGUI_Context, user_data: ?*anyopaque, cont
     mdgui_draw_frame_idx(null, clr_text_light, cx, cy, cx + 20, cy + 20);
 }
 
-fn drawConfigurableOverlay(ctx: ?*c.MDGUI_Context, config: *const OverlayConfig) void {
-    if (!config.visible) {
-        c.mdgui_set_window_open(ctx, config.title, 0);
-        return;
-    }
-
-    c.mdgui_set_window_rect(ctx, config.title, config.x, config.y, config.w, config.h);
-    c.mdgui_set_window_open(ctx, config.title, 1);
-    c.mdgui_set_window_alpha(ctx, config.title, config.alpha);
-
-    var view_x: c_int = 0;
-    var view_y: c_int = 0;
-    var view_w: c_int = 0;
-    var view_h: c_int = 0;
-    if (c.mdgui_begin_render_window_ex(
-        ctx,
-        config.title,
-        config.x,
-        config.y,
-        config.w,
-        config.h,
-        0,
-        config.flags,
-        &view_x,
-        &view_y,
-        &view_w,
-        &view_h,
-    ) == 0) return;
-
-    if (config.use_subpass) {
-        var sx: c_int = 0;
-        var sy: c_int = 0;
-        var sw: c_int = 0;
-        var sh: c_int = 0;
-        if (c.mdgui_begin_subpass(ctx, "generic_overlay_subpass", 0, 0, 0, 0, config.subpass_scale, &sx, &sy, &sw, &sh) != 0) {
-            const content_x = sx + config.margin_left;
-            const content_y = sy + config.margin_top;
-            const content_w = @max(1, sw - config.margin_left - config.margin_right);
-            const content_h = @max(1, sh - config.margin_top - config.margin_bottom);
-            if (config.margin_top > 0) c.mdgui_spacing(ctx, config.margin_top);
-            if (config.margin_left > 0) c.mdgui_indent(ctx, config.margin_left);
-            config.content(ctx, config.user_data, content_x, content_y, content_w, content_h);
-            if (config.margin_left > 0) c.mdgui_unindent(ctx);
-            c.mdgui_end_subpass(ctx);
-        } else {
-            const content_x = view_x + config.margin_left;
-            const content_y = view_y + config.margin_top;
-            const content_w = @max(1, view_w - config.margin_left - config.margin_right);
-            const content_h = @max(1, view_h - config.margin_top - config.margin_bottom);
-            if (config.margin_top > 0) c.mdgui_spacing(ctx, config.margin_top);
-            if (config.margin_left > 0) c.mdgui_indent(ctx, config.margin_left);
-            config.content(ctx, config.user_data, content_x, content_y, content_w, content_h);
-            if (config.margin_left > 0) c.mdgui_unindent(ctx);
-        }
-    } else {
-        const content_x = view_x + config.margin_left;
-        const content_y = view_y + config.margin_top;
-        const content_w = @max(1, view_w - config.margin_left - config.margin_right);
-        const content_h = @max(1, view_h - config.margin_top - config.margin_bottom);
-        if (config.margin_top > 0) c.mdgui_spacing(ctx, config.margin_top);
-        if (config.margin_left > 0) c.mdgui_indent(ctx, config.margin_left);
-        config.content(ctx, config.user_data, content_x, content_y, content_w, content_h);
-        if (config.margin_left > 0) c.mdgui_unindent(ctx);
-    }
-
-    c.mdgui_end_window(ctx);
-}
-
-fn updateOverlayDrag(renderer: ?*c.SDL_Renderer, input: *c.MDGUI_Input, overlay_state: *OverlayDemoState, raw_mouse_down: bool) void {
-    if (!overlay_state.visible or !overlay_state.allow_mouse_drag) {
-        overlay_state.dragging = false;
-        return;
-    }
-
-    var rw: c_int = 640;
-    var rh: c_int = 360;
-    getLogicalRenderSize(renderer, &rw, &rh);
-
-    if (input.mouse_pressed != 0 and pointInRect(input.mouse_x, input.mouse_y, overlay_state.x, overlay_state.y, overlay_state.w, overlay_state.h)) {
-        overlay_state.dragging = true;
-        overlay_state.drag_off_x = input.mouse_x - overlay_state.x;
-        overlay_state.drag_off_y = input.mouse_y - overlay_state.y;
-        input.mouse_pressed = 0;
-    }
-
-    if (overlay_state.dragging and raw_mouse_down) {
-        overlay_state.x = clampInt(input.mouse_x - overlay_state.drag_off_x, 0, @max(0, rw - overlay_state.w));
-        overlay_state.y = clampInt(input.mouse_y - overlay_state.drag_off_y, 0, @max(0, rh - overlay_state.h));
-        input.mouse_pressed = 0;
-        input.mouse_down = 0;
-    }
-
-    if (!raw_mouse_down) overlay_state.dragging = false;
-}
-
 fn getLogicalRenderSize(renderer: ?*c.SDL_Renderer, out_w: *c_int, out_h: *c_int) void {
     var rw: c_int = 640;
     var rh: c_int = 360;
@@ -993,7 +882,7 @@ pub fn main() !void {
     var show_about = false;
     var show_demo = true;
     var show_nested_test_area = false;
-    var overlay_state = OverlayDemoState{};
+    var overlay_state = OverlayDemoState.init();
     var show_window_api_menu = false;
     var emu_view_fullscreen = false;
     var selected_rom_buf: [512]u8 = [_]u8{0} ** 512;
@@ -1145,7 +1034,11 @@ pub fn main() !void {
         if (frame_text_len > 0) {
             input.text_input = @ptrCast(&frame_text_input[0]);
         }
-        updateOverlayDrag(renderer, &input, &overlay_state, raw_mouse_down);
+        var overlay_bounds_w: c_int = 640;
+        var overlay_bounds_h: c_int = 360;
+        getLogicalRenderSize(renderer, &overlay_bounds_w, &overlay_bounds_h);
+        var overlay_config = makeOverlayConfig();
+        c.mdgui_overlay_handle_drag(&input, &overlay_config, &overlay_state.overlay, if (raw_mouse_down) 1 else 0, overlay_bounds_w, overlay_bounds_h);
 
         // Set background color based on current theme
         const theme = c.mdgui_get_theme();
@@ -1276,9 +1169,9 @@ pub fn main() !void {
                         request_open_perf_graph = true;
                     }
                 }
-                if (overlay_state.visible) {
+                if (overlay_state.overlay.visible != 0) {
                     if (c.mdgui_main_menu_item(ctx, "[x] Perf Overlay") != 0) {
-                        overlay_state.visible = false;
+                        overlay_state.overlay.visible = 0;
                         c.mdgui_set_window_open(ctx, perf_overlay_title, 0);
                     }
                 } else {
@@ -1286,13 +1179,13 @@ pub fn main() !void {
                         request_open_perf_overlay = true;
                     }
                 }
-                if (overlay_state.use_subpass) {
+                if (overlay_state.overlay.use_subpass != 0) {
                     if (c.mdgui_main_menu_item(ctx, "[x] Perf Overlay Subpass (1x)") != 0) {
-                        overlay_state.use_subpass = false;
+                        overlay_state.overlay.use_subpass = 0;
                     }
                 } else {
                     if (c.mdgui_main_menu_item(ctx, "[ ] Perf Overlay Subpass (1x)") != 0) {
-                        overlay_state.use_subpass = true;
+                        overlay_state.overlay.use_subpass = 1;
                     }
                 }
                 if (c.mdgui_main_menu_item(ctx, "Window API") != 0) {
@@ -1353,7 +1246,7 @@ pub fn main() !void {
         c.mdgui_set_windows_alpha(ctx, alphaByteFromFloat(windows_alpha));
 
         if (request_open_perf_overlay) {
-            overlay_state.visible = true;
+            overlay_state.overlay.visible = 1;
             c.mdgui_set_window_open(ctx, perf_overlay_title, 1);
             c.mdgui_focus_window(ctx, perf_overlay_title);
             input.mouse_pressed = 0;
@@ -1426,25 +1319,30 @@ pub fn main() !void {
         const overlay_render_data = OverlayRenderData{
             .analytics = &analytics,
         };
-        const perf_overlay_config = OverlayConfig{
-            .title = perf_overlay_title,
-            .x = overlay_state.x,
-            .y = overlay_state.y,
-            .w = overlay_state.w,
-            .h = overlay_state.h,
-            .alpha = overlay_state.alpha,
-            .visible = overlay_state.visible,
-            .use_subpass = overlay_state.use_subpass,
-            .subpass_scale = 1.0,
-            .flags = c.MDGUI_WINDOW_FLAG_NO_CHROME | c.MDGUI_WINDOW_FLAG_EXCLUDE_FROM_TILING,
-            .margin_left = overlay_state.margin_left,
-            .margin_top = overlay_state.margin_top,
-            .margin_right = overlay_state.margin_right,
-            .margin_bottom = overlay_state.margin_bottom,
-            .content = if (overlay_state.content_kind == .perf_metrics) drawPerfOverlayContent else drawCustomOverlayContent,
-            .user_data = @constCast(@ptrCast(&overlay_render_data)),
-        };
-        drawConfigurableOverlay(ctx, &perf_overlay_config);
+        var perf_overlay_config = makeOverlayConfig();
+        var perf_overlay_layout: c.MDGUI_OverlayLayout = undefined;
+        if (c.mdgui_begin_overlay(ctx, &perf_overlay_config, &overlay_state.overlay, &perf_overlay_layout) != 0) {
+            if (overlay_state.content_kind == .perf_metrics) {
+                drawPerfOverlayContent(
+                    ctx,
+                    @constCast(@ptrCast(&overlay_render_data)),
+                    perf_overlay_layout.content_x,
+                    perf_overlay_layout.content_y,
+                    perf_overlay_layout.content_w,
+                    perf_overlay_layout.content_h,
+                );
+            } else {
+                drawCustomOverlayContent(
+                    ctx,
+                    @constCast(@ptrCast(&overlay_render_data)),
+                    perf_overlay_layout.content_x,
+                    perf_overlay_layout.content_y,
+                    perf_overlay_layout.content_w,
+                    perf_overlay_layout.content_h,
+                );
+            }
+            c.mdgui_end_overlay(ctx, &perf_overlay_config, &overlay_state.overlay);
+        }
 
         if (request_open_main_ui) {
             c.mdgui_set_window_open(ctx, "MDGUI", 1);

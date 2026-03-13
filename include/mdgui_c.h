@@ -140,6 +140,43 @@ enum {
   MDGUI_WINDOW_FLAG_NO_CHROME = 1 << 3,
 };
 
+typedef struct MDGUI_OverlayConfig {
+  const char *title;
+  int window_flags;
+  float subpass_scale;
+  int clamp_to_bounds;
+  int consume_mouse_input_while_dragging;
+} MDGUI_OverlayConfig;
+
+typedef struct MDGUI_OverlayState {
+  int visible;
+  int use_subpass;
+  int allow_mouse_drag;
+  int dragging;
+  int drag_offset_x;
+  int drag_offset_y;
+  int x;
+  int y;
+  int w;
+  int h;
+  unsigned char alpha;
+  int margin_left;
+  int margin_top;
+  int margin_right;
+  int margin_bottom;
+} MDGUI_OverlayState;
+
+typedef struct MDGUI_OverlayLayout {
+  int view_x;
+  int view_y;
+  int view_w;
+  int view_h;
+  int content_x;
+  int content_y;
+  int content_w;
+  int content_h;
+} MDGUI_OverlayLayout;
+
 MDGUI_Context *mdgui_create(void *sdl_renderer);
 MDGUI_Context *mdgui_create_with_backend(const MDGUI_RenderBackend *backend);
 void mdgui_destroy(MDGUI_Context *ctx);
@@ -345,6 +382,17 @@ int mdgui_begin_render_window_ex(MDGUI_Context *ctx, const char *title, int x,
                                  int y, int w, int h, int show_menu, int flags,
                                  int *out_x, int *out_y, int *out_w,
                                  int *out_h);
+void mdgui_overlay_init_config(MDGUI_OverlayConfig *config);
+void mdgui_overlay_init_state(MDGUI_OverlayState *state);
+void mdgui_overlay_handle_drag(MDGUI_Input *input,
+                               const MDGUI_OverlayConfig *config,
+                               MDGUI_OverlayState *state, int raw_mouse_down,
+                               int bounds_w, int bounds_h);
+int mdgui_begin_overlay(MDGUI_Context *ctx, const MDGUI_OverlayConfig *config,
+                        MDGUI_OverlayState *state,
+                        MDGUI_OverlayLayout *out_layout);
+void mdgui_end_overlay(MDGUI_Context *ctx, const MDGUI_OverlayConfig *config,
+                       const MDGUI_OverlayState *state);
 void mdgui_run_window_pass(MDGUI_Context *ctx,
                            const MDGUI_WindowPassItem *items, int item_count);
 void mdgui_set_window_fullscreen(MDGUI_Context *ctx, const char *title,

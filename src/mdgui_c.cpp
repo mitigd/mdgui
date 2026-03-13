@@ -724,6 +724,23 @@ static int clampi(int v, int lo, int hi) {
   return v;
 }
 
+static void sanitize_overlay_state(MDGUI_OverlayState *state) {
+  if (!state)
+    return;
+  if (state->w < 1)
+    state->w = 1;
+  if (state->h < 1)
+    state->h = 1;
+  if (state->margin_left < 0)
+    state->margin_left = 0;
+  if (state->margin_top < 0)
+    state->margin_top = 0;
+  if (state->margin_right < 0)
+    state->margin_right = 0;
+  if (state->margin_bottom < 0)
+    state->margin_bottom = 0;
+}
+
 static bool has_pending_tile_excluded_title(const MDGUI_Context *ctx,
                                             const char *title) {
   if (!ctx || !title)
@@ -6765,6 +6782,153 @@ int mdgui_begin_render_window(MDGUI_Context *ctx, const char *title, int x,
   return mdgui_begin_render_window_ex(ctx, title, x, y, w, h, show_menu,
                                       MDGUI_WINDOW_FLAG_NONE, out_x, out_y,
                                       out_w, out_h);
+}
+
+void mdgui_overlay_init_config(MDGUI_OverlayConfig *config) {
+  if (!config)
+    return;
+  memset(config, 0, sizeof(*config));
+  config->subpass_scale = 1.0f;
+  config->clamp_to_bounds = 1;
+  config->consume_mouse_input_while_dragging = 1;
+  config->window_flags =
+      MDGUI_WINDOW_FLAG_NO_CHROME | MDGUI_WINDOW_FLAG_EXCLUDE_FROM_TILING;
+}
+
+void mdgui_overlay_init_state(MDGUI_OverlayState *state) {
+  if (!state)
+    return;
+  memset(state, 0, sizeof(*state));
+  state->use_subpass = 1;
+  state->w = 240;
+  state->h = 78;
+  state->alpha = 255;
+}
+
+void mdgui_overlay_handle_drag(MDGUI_Input *input,
+                               const MDGUI_OverlayConfig *config,
+                               MDGUI_OverlayState *state, int raw_mouse_down,
+                               int bounds_w, int bounds_h) {
+  if (!input || !state) {
+    return;
+  }
+  if (!state->visible || !state->allow_mouse_drag) {
+    state->dragging = 0;
+    return;
+  }
+
+  sanitize_overlay_state(state);
+
+  if (input->mouse_pressed &&
+      point_in_rect(input->mouse_x, input->mouse_y, state->x, state->y,
+                    state->w, state->h)) {
+    state->dragging = 1;
+    state->drag_offset_x = input->mouse_x - state->x;
+    state->drag_offset_y = input->mouse_y - state->y;
+    if (!config || config->consume_mouse_input_while_dragging) {
+      input->mouse_pressed = 0;
+    }
+  }
+
+  if (state->dragging && raw_mouse_down) {
+    int next_x = input->mouse_x - state->drag_offset_x;
+    int next_y = input->mouse_y - state->drag_offset_y;
+    if (!config || config->clamp_to_bounds) {
+      if (bounds_w > 0)
+        next_x = clampi(next_x, 0, std::max(0, bounds_w - state->w));
+      if (bounds_h > 0)
+        next_y = clampi(next_y, 0, std::max(0, bounds_h - state->h));
+    }
+    state->x = next_x;
+    state->y = next_y;
+    if (!config || config->consume_mouse_input_while_dragging) {
+      input->mouse_pressed = 0;
+      input->mouse_down = 0;
+    }
+  }
+
+  if (!raw_mouse_down)
+    state->dragging = 0;
+}
+
+int mdgui_begin_overlay(MDGUI_Context *ctx, const MDGUI_OverlayConfig *config,
+                        MDGUI_OverlayState *state,
+                        MDGUI_OverlayLayout *out_layout) {
+  if (out_layout)
+    memset(out_layout, 0, sizeof(*out_layout));
+  if (!ctx || !config || !config->title || !state)
+    return 0;
+
+  sanitize_overlay_state(state);
+
+  if (!state->visible) {
+    mdgui_set_window_open(ctx, config->title, 0);
+    return 0;
+  }
+
+  mdgui_set_window_rect(ctx, config->title, state->x, state->y, state->w,
+                        state->h);
+  mdgui_set_window_open(ctx, config->title, 1);
+  mdgui_set_window_alpha(ctx, config->title, state->alpha);
+
+  int view_x = 0;
+  int view_y = 0;
+  int view_w = 0;
+  int view_h = 0;
+  if (!mdgui_begin_render_window_ex(ctx, config->title, state->x, state->y,
+                                    state->w, state->h, 0, config->window_flags,
+                                    &view_x, &view_y, &view_w, &view_h)) {
+    return 0;
+  }
+
+  int base_x = view_x;
+  int base_y = view_y;
+  int base_w = view_w;
+  int base_h = view_h;
+  if (state->use_subpass && config->subpass_scale > 0.0f) {
+    int sx = 0;
+    int sy = 0;
+    int sw = 0;
+    int sh = 0;
+    if (mdgui_begin_subpass(ctx, config->title, 0, 0, 0, 0, config->subpass_scale,
+                            &sx, &sy, &sw, &sh)) {
+      base_x = sx;
+      base_y = sy;
+      base_w = sw;
+      base_h = sh;
+    }
+  }
+
+  if (state->margin_top > 0)
+    mdgui_spacing(ctx, state->margin_top);
+  if (state->margin_left > 0)
+    mdgui_indent(ctx, state->margin_left);
+
+  if (out_layout) {
+    out_layout->view_x = base_x;
+    out_layout->view_y = base_y;
+    out_layout->view_w = base_w;
+    out_layout->view_h = base_h;
+    out_layout->content_x = base_x + state->margin_left;
+    out_layout->content_y = base_y + state->margin_top;
+    out_layout->content_w =
+        std::max(1, base_w - state->margin_left - state->margin_right);
+    out_layout->content_h =
+        std::max(1, base_h - state->margin_top - state->margin_bottom);
+  }
+
+  return 1;
+}
+
+void mdgui_end_overlay(MDGUI_Context *ctx, const MDGUI_OverlayConfig *config,
+                       const MDGUI_OverlayState *state) {
+  if (!ctx || !config || !state)
+    return;
+  if (state->margin_left > 0)
+    mdgui_unindent(ctx);
+  if (state->use_subpass && !ctx->subpass_stack.empty())
+    mdgui_end_subpass(ctx);
+  mdgui_end_window(ctx);
 }
 
 void mdgui_run_window_pass(MDGUI_Context *ctx,
