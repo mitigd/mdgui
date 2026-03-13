@@ -2586,8 +2586,19 @@ int mdgui_begin_subpass(MDGUI_Context *ctx, const char *id, int x, int y, int w,
 
   if (w <= 0)
     w = layout_resolve_width(ctx, local_x, w, 1);
-  if (h <= 0)
-    h = 1;
+  if (h <= 0) {
+    int viewport_bottom = 0;
+    if (const auto *subpass = current_subpass(ctx)) {
+      viewport_bottom = subpass->local_h;
+    } else {
+      const auto &win = ctx->windows[ctx->current_window];
+      viewport_bottom = win.y + win.h - 4 + win.text_scroll;
+    }
+    int avail_h = viewport_bottom - logical_y;
+    if (h < 0)
+      avail_h += h;
+    h = (avail_h > 0) ? avail_h : 1;
+  }
 
   const int abs_x = ctx->origin_x + local_x;
   const int abs_y = logical_y - ctx->windows[ctx->current_window].text_scroll;
