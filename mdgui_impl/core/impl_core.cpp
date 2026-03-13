@@ -1,455 +1,118 @@
-#include <filesystem>
-#include <string.h>
-#include <string>
-#include <utility>
-#include <vector>
+#include "internal.hpp"
 
-extern MDGuiFont *mdgui_fonts[10];
-
-namespace {
-constexpr int CLR_BUTTON_SURFACE = 25;
-constexpr int CLR_BUTTON_LIGHT = 23;
-constexpr int CLR_BUTTON_DARK = 27;
-constexpr int CLR_BUTTON_PRESSED = 27;
-constexpr int CLR_BOX_BODY = 141;
-constexpr int CLR_BOX_TITLE = 143;
-constexpr int CLR_BOX_FOCUS_BORDER = 139;
-constexpr int CLR_MENU_BG = 241;
-constexpr int CLR_MENU_TEXT = 246;
-constexpr int CLR_MENU_SEL = 2;
-constexpr int CLR_TEXT_LIGHT = 15;
-constexpr int CLR_TEXT_DARK = 0;
-constexpr int CLR_MSG_BG = 243;
-constexpr int CLR_MSG_BAR = 244;
-constexpr int CLR_ACCENT = 247;
-constexpr int CLR_WINDOW_BORDER = 248;
-constexpr int MENU_POPUP_GAP_Y = 2;
-constexpr int RESERVED_TOP_LEVEL_MENU_SLOTS = 32;
-constexpr int STATUS_BAR_DEFAULT_H = 12;
-constexpr int MAIN_MENU_ITEM_H = 10;
-constexpr int TOAST_DEFAULT_DURATION_MS = 2400;
-constexpr int TOAST_MAX_VISIBLE = 6;
-
-struct MDGUI_Window {
-  struct MenuOverlayDef {
-    struct ItemDef {
-      std::string text;
-      int child_menu_index;
-      bool is_separator;
-    };
-    int x;
-    int y;
-    int w;
-    int parent_menu_index;
-    int parent_item_index;
-    std::vector<ItemDef> items;
-  };
-
-  struct CollapsingState {
-    std::string id;
-    bool open;
-  };
-
-  struct TabBarState {
-    std::string id;
-    int scroll_x;
-    int last_selected;
-  };
-
-  std::string id;
-  std::string title;
-  int x;
-  int y;
-  int w;
-  int h;
-  int z;
-  int open_menu_index;
-  bool is_maximized;
-  bool closed;
-  int restored_x, restored_y, restored_w, restored_h;
-  int last_edge_mask;
-  int min_w;
-  int min_h;
-  int user_min_w;
-  int user_min_h;
-  bool user_min_from_percent;
-  float user_min_w_percent;
-  float user_min_h_percent;
-  int open_combo_id;
-  std::vector<int> open_menu_path;
-  std::vector<MenuOverlayDef> menu_overlay_defs;
-  int menu_overlay_item_h;
-  int text_scroll;
-  bool text_scroll_dragging;
-  int text_scroll_drag_offset;
-  bool fixed_rect;
-  bool disallow_maximize;
-  bool is_message_box;
-  bool scrollbar_visible;
-  bool scrollbar_overflow_active;
-  int tile_weight;
-  int tile_side;
-  bool tile_excluded;
-  unsigned char alpha;
-  bool no_chrome;
-  bool input_passthrough;
-  int chrome_min_w;
-  int chrome_min_h;
-  std::vector<CollapsingState> collapsing_states;
-  std::vector<TabBarState> tab_bar_states;
-};
-
-struct FileBrowserEntry {
-  std::string label;
-  std::string full_path;
-  bool is_dir;
-};
-
-struct PendingWindowMinSize {
-  std::string title;
-  int min_w;
-  int min_h;
-  bool use_percent;
-  float min_w_percent;
-  float min_h_percent;
-};
-
-struct PendingWindowScrollbarVisibility {
-  std::string title;
-  bool visible;
-};
-} // namespace
-
-struct MDGUI_Context {
-  struct ToastItem {
-    std::string text;
-    unsigned long long expires_at_ms;
-  };
-
-  struct NestedRenderState {
-    int parent_origin_x;
-    int parent_origin_y;
-    int parent_content_y;
-    int parent_content_req_right;
-    int parent_content_req_bottom;
-    bool parent_window_has_nonlabel_widget;
-    unsigned char parent_alpha_mod;
-    int parent_content_y_after;
-    int parent_layout_indent;
-    size_t parent_indent_stack_size;
-  };
-
-  struct SubpassState {
-    MDGUI_Input parent_input;
-    int parent_origin_x;
-    int parent_origin_y;
-    int parent_content_y;
-    int parent_content_req_right;
-    int parent_content_req_bottom;
-    bool parent_window_has_nonlabel_widget;
-    unsigned char parent_alpha_mod;
-    int parent_layout_indent;
-    size_t parent_indent_stack_size;
-    bool parent_layout_same_line;
-    bool parent_layout_has_last_item;
-    int parent_layout_last_item_x;
-    int parent_layout_last_item_y;
-    int parent_layout_last_item_w;
-    int parent_layout_last_item_h;
-    int parent_local_x;
-    int parent_logical_y;
-    int parent_region_w;
-    int parent_region_h;
-    int local_w;
-    int local_h;
-  };
-
-  MDGUI_RenderBackend backend;
-  MDGUI_Input input;
-
-  std::vector<MDGUI_Window> windows;
-  int z_counter;
-  int dragging_window;
-  int drag_off_x;
-  int drag_off_y;
-
-  int current_window;
-  int origin_x;
-  int origin_y;
-  int content_y;
-
-  int menu_index;
-  int menu_next_x;
-  bool in_menu_bar;
-  bool in_menu;
-  int current_menu_index;
-  int building_menu_index;
-  int current_menu_x;
-  int current_menu_y;
-  int current_menu_w;
-  int current_menu_h;
-  int current_menu_item;
-  bool has_menu_bar;
-  int menu_bar_x;
-  int menu_bar_y;
-  int menu_bar_w;
-  int menu_bar_h;
-
-  struct MenuDef {
-    struct ItemDef {
-      std::string text;
-      int child_menu_index;
-      bool is_separator;
-    };
-    int x;
-    int y;
-    int w;
-    int parent_menu_index;
-    int parent_item_index;
-    std::vector<ItemDef> items;
-  };
-  std::vector<MenuDef> menu_defs;
-  std::vector<int> menu_build_stack;
-
-  int main_menu_index;
-  int main_menu_next_x;
-  bool in_main_menu_bar;
-  bool in_main_menu;
-  int open_main_menu_index;
-  int building_main_menu_index;
-  std::vector<MenuDef> main_menu_defs;
-  std::vector<int> main_menu_build_stack;
-  std::vector<int> open_main_menu_path;
-  std::vector<int> open_main_menu_item_path;
-  int main_menu_bar_x;
-  int main_menu_bar_y;
-  int main_menu_bar_w;
-  int main_menu_bar_h;
-  bool status_bar_visible;
-  int status_bar_h;
-  std::string status_bar_text;
-  std::vector<ToastItem> toasts;
-
-  // Resizing state
-  int resizing_window; // -1 if none
-  int resize_edge_mask;
-  int m_start_x, m_start_y;
-  int w_start_x, w_start_y, w_start_w, w_start_h;
-
-  // Cursor cache
-  SDL_Cursor *cursors[16];
-  int cursor_anim_count;
-  bool custom_cursor_enabled;
-  int cursor_request_idx;
-  int current_cursor_idx;
-
-  int content_req_right;
-  int content_req_bottom;
-
-  struct LayoutStyle {
-    int spacing_x;
-    int spacing_y;
-    int section_spacing_y;
-    int indent_step;
-    int label_h;
-    int content_pad_x;
-    int content_pad_y;
-  } style;
-
-  bool layout_same_line;
-  bool layout_has_last_item;
-  int layout_last_item_x;
-  int layout_last_item_y;
-  int layout_last_item_w;
-  int layout_last_item_h;
-  bool layout_columns_active;
-  int layout_columns_count;
-  int layout_columns_index;
-  int layout_columns_start_x;
-  int layout_columns_start_y;
-  int layout_columns_width;
-  int layout_columns_max_bottom;
-  std::vector<int> layout_columns_bottoms;
-  int layout_indent;
-  std::vector<int> indent_stack;
-  MDGUI_Font *default_font;
-  std::vector<MDGUI_Font *> font_stack;
-  MDGUI_Font *file_browser_path_font;
-  std::vector<std::string> demo_window_font_labels_storage;
-  std::vector<const char *> demo_window_font_labels;
-  std::vector<MDGUI_Font *> demo_window_fonts;
-  int demo_window_font_index;
-  bool window_has_nonlabel_widget;
-  bool windows_locked;
-  bool tile_manager_enabled;
-  unsigned char default_window_alpha;
-
-  bool combo_overlay_pending;
-  int combo_overlay_window;
-  int combo_overlay_x;
-  int combo_overlay_y;
-  int combo_overlay_w;
-  int combo_overlay_item_h;
-  int combo_overlay_item_count;
-  int combo_overlay_selected;
-  const char **combo_overlay_items;
-  bool combo_capture_active;
-  bool combo_capture_seen_this_frame;
-  int combo_capture_window;
-  int combo_capture_x;
-  int combo_capture_y;
-  int combo_capture_w;
-  int combo_capture_h;
-  int active_text_input_window;
-  int active_text_input_id;
-  int active_text_input_cursor;
-  int active_text_input_sel_anchor;
-  int active_text_input_sel_start;
-  int active_text_input_sel_end;
-  bool active_text_input_drag_select;
-  bool active_text_input_multiline;
-  int active_text_input_scroll_y;
-
-  bool file_browser_open;
-  bool file_browser_select_folders;
-  std::string file_browser_cwd;
-  std::vector<FileBrowserEntry> file_browser_entries;
-  int file_browser_selected;
-  int file_browser_scroll;
-  bool file_browser_scroll_dragging;
-  int file_browser_scroll_drag_offset;
-  std::vector<std::string> pending_tile_excluded_titles;
-  std::vector<PendingWindowMinSize> pending_window_min_sizes;
-  std::vector<PendingWindowScrollbarVisibility> pending_window_scrollbars;
-  int file_browser_last_click_idx;
-  Uint64 file_browser_last_click_ticks;
-  std::string file_browser_result;
-  std::vector<std::string> file_browser_ext_filters;
-  std::vector<std::string> file_browser_drives;
-  Uint64 file_browser_last_drive_scan_ticks;
-  std::string file_browser_last_selected_path;
-  bool file_browser_restore_scroll_pending;
-  bool file_browser_center_pending;
-  int file_browser_open_x;
-  int file_browser_open_y;
-  std::vector<NestedRenderState> nested_render_stack;
-  std::vector<SubpassState> subpass_stack;
-  bool file_browser_path_subpass_enabled;
-};
-
-static void note_content_bounds(MDGUI_Context *ctx, int right, int bottom) {
-  if (!ctx || ctx->current_window < 0)
+ void note_content_bounds(MDGUI_Context *ctx, int right, int bottom) {
+  if (!ctx || ctx->window.current_window < 0)
     return;
-  if (right > ctx->content_req_right)
-    ctx->content_req_right = right;
-  if (bottom > ctx->content_req_bottom)
-    ctx->content_req_bottom = bottom;
+  if (right > ctx->layout.content_req_right)
+    ctx->layout.content_req_right = right;
+  if (bottom > ctx->layout.content_req_bottom)
+    ctx->layout.content_req_bottom = bottom;
 }
 
-static MDGUI_Font *fallback_font() { return mdgui_fonts[1]; }
+ MDGUI_Font *fallback_font() { return mdgui_fonts[1]; }
 
-static MDGUI_Font *resolve_font(MDGUI_Context *ctx,
-                                MDGUI_Font *override_font = nullptr) {
+ MDGUI_Font *resolve_font(MDGUI_Context *ctx,
+                                MDGUI_Font *override_font) {
   if (override_font)
     return override_font;
-  if (ctx && !ctx->font_stack.empty() && ctx->font_stack.back())
-    return ctx->font_stack.back();
-  if (ctx && ctx->default_font)
-    return ctx->default_font;
+  if (ctx && !ctx->layout.font_stack.empty() && ctx->layout.font_stack.back())
+    return ctx->layout.font_stack.back();
+  if (ctx && ctx->layout.default_font)
+    return ctx->layout.default_font;
   return fallback_font();
 }
 
-static int font_line_height(MDGUI_Context *ctx,
-                            MDGUI_Font *override_font = nullptr) {
+ int font_line_height(MDGUI_Context *ctx,
+                            MDGUI_Font *override_font) {
   MDGUI_Font *font = resolve_font(ctx, override_font);
   const int h = mdgui_font_get_line_height(font);
   return (h > 0) ? h : 8;
 }
 
-static int font_measure_text(MDGUI_Context *ctx, const char *text,
-                             MDGUI_Font *override_font = nullptr) {
+ int font_measure_text(MDGUI_Context *ctx, const char *text,
+                             MDGUI_Font *override_font) {
   MDGUI_Font *font = resolve_font(ctx, override_font);
   return mdgui_font_measure_text(font, text);
 }
 
-static void font_draw_text(MDGUI_Context *ctx, const char *text, int x, int y,
+ void font_draw_text(MDGUI_Context *ctx, const char *text, int x, int y,
                            int color_idx,
-                           MDGUI_Font *override_font = nullptr) {
+                           MDGUI_Font *override_font) {
   MDGUI_Font *font = resolve_font(ctx, override_font);
   if (!font || !text)
     return;
   font->drawText(text, nullptr, x, y, color_idx);
 }
 
-static const MDGUI_Context::SubpassState *current_subpass(
+ const MDGUI_Context::SubpassState *current_subpass(
     const MDGUI_Context *ctx) {
-  if (!ctx || ctx->subpass_stack.empty())
+  if (!ctx || ctx->window.subpass_stack.empty())
     return nullptr;
-  return &ctx->subpass_stack.back();
+  return &ctx->window.subpass_stack.back();
 }
 
-static int current_viewport_x(const MDGUI_Context *ctx) {
+ int current_viewport_x(const MDGUI_Context *ctx) {
   if (const auto *subpass = current_subpass(ctx))
     return 0;
-  if (!ctx || ctx->current_window < 0 ||
-      ctx->current_window >= (int)ctx->windows.size())
+  if (!ctx || ctx->window.current_window < 0 ||
+      ctx->window.current_window >= (int)ctx->window.windows.size())
     return 0;
-  const auto &win = ctx->windows[ctx->current_window];
+  const auto &win = ctx->window.windows[ctx->window.current_window];
   return win.no_chrome ? win.x : (win.x + 2);
 }
 
-static int current_viewport_width(const MDGUI_Context *ctx) {
+ int current_viewport_width(const MDGUI_Context *ctx) {
   if (const auto *subpass = current_subpass(ctx))
     return subpass->local_w;
-  if (!ctx || ctx->current_window < 0 ||
-      ctx->current_window >= (int)ctx->windows.size())
+  if (!ctx || ctx->window.current_window < 0 ||
+      ctx->window.current_window >= (int)ctx->window.windows.size())
     return 0;
-  const auto &win = ctx->windows[ctx->current_window];
+  const auto &win = ctx->window.windows[ctx->window.current_window];
   return win.no_chrome ? win.w : (win.w - 4);
 }
 
-static void layout_prepare_widget(MDGUI_Context *ctx, int *out_local_x,
+ void layout_prepare_widget(MDGUI_Context *ctx, int *out_local_x,
                                   int *out_logical_y);
-static int layout_resolve_width(MDGUI_Context *ctx, int local_x, int requested_w,
+ int layout_resolve_width(MDGUI_Context *ctx, int local_x, int requested_w,
                                 int min_w);
 
-static void set_content_clip(MDGUI_Context *ctx) {
-  if (!ctx || ctx->current_window < 0 ||
-      ctx->current_window >= (int)ctx->windows.size())
+ void set_content_clip(MDGUI_Context *ctx) {
+  if (!ctx || ctx->window.current_window < 0 ||
+      ctx->window.current_window >= (int)ctx->window.windows.size())
     return;
   int clip_x = current_viewport_x(ctx);
   int clip_w = current_viewport_width(ctx);
   int clip_h = 0;
   if (const auto *subpass = current_subpass(ctx)) {
-    clip_h = subpass->local_h - ctx->origin_y;
+    clip_h = subpass->local_h - ctx->window.origin_y;
   } else {
-    const auto &win = ctx->windows[ctx->current_window];
-    clip_h = (win.y + win.h - 4) - ctx->origin_y;
+    const auto &win = ctx->window.windows[ctx->window.current_window];
+    clip_h = (win.y + win.h - 4) - ctx->window.origin_y;
   }
   if (clip_w < 1)
     clip_w = 1;
   if (clip_h < 1)
     clip_h = 1;
-  mdgui_backend_set_clip_rect(1, clip_x, ctx->origin_y, clip_w, clip_h);
+  mdgui_backend_set_clip_rect(1, clip_x, ctx->window.origin_y, clip_w, clip_h);
 }
 
 // Clips a widget drawing region to the current window content area.
 // Returns false when there is no visible intersection.
-static bool set_widget_clip_intersect_content(MDGUI_Context *ctx, int x, int y,
+ bool set_widget_clip_intersect_content(MDGUI_Context *ctx, int x, int y,
                                               int w, int h) {
-  if (!ctx || ctx->current_window < 0 ||
-      ctx->current_window >= (int)ctx->windows.size())
+  if (!ctx || ctx->window.current_window < 0 ||
+      ctx->window.current_window >= (int)ctx->window.windows.size())
     return false;
 
-  const auto &win = ctx->windows[ctx->current_window];
+  const auto &win = ctx->window.windows[ctx->window.current_window];
   const int content_x1 = current_viewport_x(ctx);
-  const int content_y1 = ctx->origin_y;
+  const int content_y1 = ctx->window.origin_y;
   int content_x2 = content_x1 + current_viewport_width(ctx);
   int content_y2 = 0;
   if (const auto *subpass = current_subpass(ctx)) {
-    content_y2 = content_y1 + (subpass->local_h - ctx->origin_y);
+    content_y2 = content_y1 + (subpass->local_h - ctx->window.origin_y);
   } else {
-    content_y2 = content_y1 + ((win.y + win.h - 4) - ctx->origin_y);
+    content_y2 = content_y1 + ((win.y + win.h - 4) - ctx->window.origin_y);
   }
 
   const int widget_x1 = x;
@@ -472,16 +135,16 @@ static bool set_widget_clip_intersect_content(MDGUI_Context *ctx, int x, int y,
   return true;
 }
 
-static int resolve_dynamic_width(MDGUI_Context *ctx, int local_x, int w,
+ int resolve_dynamic_width(MDGUI_Context *ctx, int local_x, int w,
                                  int min_w = 1) {
-  if (!ctx || ctx->current_window < 0)
+  if (!ctx || ctx->window.current_window < 0)
     return (w > 0) ? w : min_w;
-  const int effective_local_x = local_x + ctx->layout_indent;
+  const int effective_local_x = local_x + ctx->layout.indent;
   // Reserve right gutter only when an active scrollbar is visible.
   int right_pad = 2;
-  if (!current_subpass(ctx) && ctx->current_window >= 0 &&
-      ctx->current_window < (int)ctx->windows.size()) {
-    const auto &win = ctx->windows[ctx->current_window];
+  if (!current_subpass(ctx) && ctx->window.current_window >= 0 &&
+      ctx->window.current_window < (int)ctx->window.windows.size()) {
+    const auto &win = ctx->window.windows[ctx->window.current_window];
     if (win.scrollbar_visible && !win.is_message_box &&
         win.scrollbar_overflow_active)
       right_pad = 14;
@@ -489,7 +152,7 @@ static int resolve_dynamic_width(MDGUI_Context *ctx, int local_x, int w,
   const int viewport_x = current_viewport_x(ctx);
   const int viewport_w = current_viewport_width(ctx);
   int avail = (viewport_x + viewport_w - right_pad) -
-              (ctx->origin_x + effective_local_x);
+              (ctx->window.origin_x + effective_local_x);
   if (avail < min_w)
     avail = min_w;
   if (w == 0)
@@ -503,20 +166,20 @@ static int resolve_dynamic_width(MDGUI_Context *ctx, int local_x, int w,
   return w;
 }
 
-static void drawrect_rgb(MDGUI_Context *ctx, uint8_t r, uint8_t g, uint8_t b,
+ void drawrect_rgb(MDGUI_Context *ctx, uint8_t r, uint8_t g, uint8_t b,
                          int x, int y, int w, int h) {
   if (!ctx)
     return;
-  if (!ctx->backend.fill_rect_rgba)
+  if (!ctx->render.backend.fill_rect_rgba)
     return;
-  ctx->backend.fill_rect_rgba(ctx->backend.user_data, r, g, b, 255, x, y, w, h);
+  ctx->render.backend.fill_rect_rgba(ctx->render.backend.user_data, r, g, b, 255, x, y, w, h);
 }
 
-static int point_in_rect(int px, int py, int x, int y, int w, int h) {
+ int point_in_rect(int px, int py, int x, int y, int w, int h) {
   return px >= x && py >= y && px < (x + w) && py < (y + h);
 }
 
-static bool menu_path_prefix_matches(const std::vector<int> &path,
+ bool menu_path_prefix_matches(const std::vector<int> &path,
                                      const std::vector<int> &prefix) {
   if (path.size() < prefix.size())
     return false;
@@ -527,13 +190,13 @@ static bool menu_path_prefix_matches(const std::vector<int> &path,
   return true;
 }
 
-static void clear_window_menu_path(MDGUI_Window &win) {
+ void clear_window_menu_path(MDGUI_Window &win) {
   win.open_menu_index = -1;
   win.open_menu_path.clear();
   win.menu_overlay_defs.clear();
 }
 
-static const char *parse_menu_check_prefix(const char *text, bool *out_has_check,
+ const char *parse_menu_check_prefix(const char *text, bool *out_has_check,
                                            bool *out_checked) {
   if (out_has_check)
     *out_has_check = false;
@@ -555,14 +218,14 @@ static const char *parse_menu_check_prefix(const char *text, bool *out_has_check
   return text;
 }
 
-static int menu_check_indicator_width() {
+ int menu_check_indicator_width() {
   if (!mdgui_fonts[1])
     return 16;
   const int w = mdgui_fonts[1]->measureTextWidth("[ ] ");
   return (w > 0) ? w : 16;
 }
 
-static void draw_menu_check_indicator(int x, int y, bool checked) {
+ void draw_menu_check_indicator(int x, int y, bool checked) {
   if (!mdgui_fonts[1])
     return;
   int left_w = mdgui_fonts[1]->measureTextWidth("[");
@@ -583,7 +246,7 @@ static void draw_menu_check_indicator(int x, int y, bool checked) {
   }
 }
 
-static bool *find_or_create_collapsing_state(MDGUI_Window &win, const char *id,
+ bool *find_or_create_collapsing_state(MDGUI_Window &win, const char *id,
                                              bool default_open) {
   const char *key = (id && id[0]) ? id : "__default";
   for (auto &st : win.collapsing_states) {
@@ -594,7 +257,7 @@ static bool *find_or_create_collapsing_state(MDGUI_Window &win, const char *id,
   return &win.collapsing_states.back().open;
 }
 
-static MDGUI_Window::TabBarState *find_or_create_tab_bar_state(MDGUI_Window &win,
+ MDGUI_Window::TabBarState *find_or_create_tab_bar_state(MDGUI_Window &win,
                                                                const char *id) {
   const char *key = (id && id[0]) ? id : "__default";
   for (auto &st : win.tab_bar_states) {
@@ -605,8 +268,8 @@ static MDGUI_Window::TabBarState *find_or_create_tab_bar_state(MDGUI_Window &win
   return &win.tab_bar_states.back();
 }
 
-static bool
-point_in_menu_popup_chain(const std::vector<MDGUI_Context::MenuDef> &defs,
+ bool
+point_in_menu_popup_chain(const std::vector<MenuDef> &defs,
                           const std::vector<int> &path, int item_h, int px,
                           int py) {
   for (int menu_idx : path) {
@@ -622,8 +285,8 @@ point_in_menu_popup_chain(const std::vector<MDGUI_Context::MenuDef> &defs,
   return false;
 }
 
-static void
-reposition_child_menu_chain(std::vector<MDGUI_Context::MenuDef> &defs,
+ void
+reposition_child_menu_chain(std::vector<MenuDef> &defs,
                             int menu_index, int item_h) {
   if (menu_index < 0 || menu_index >= (int)defs.size() || item_h <= 0)
     return;
@@ -639,24 +302,24 @@ reposition_child_menu_chain(std::vector<MDGUI_Context::MenuDef> &defs,
   }
 }
 
-static bool window_accepts_input(const MDGUI_Window &w);
+ bool window_accepts_input(const MDGUI_Window &w);
 
-static int top_window_at_point(const MDGUI_Context *ctx, int px, int py,
-                               int margin = 0) {
-  if (ctx->combo_capture_active && ctx->combo_capture_window >= 0 &&
-      ctx->combo_capture_window < (int)ctx->windows.size()) {
-    const auto &ow = ctx->windows[ctx->combo_capture_window];
+ int top_window_at_point(const MDGUI_Context *ctx, int px, int py,
+                               int margin) {
+  if (ctx->interaction.combo_capture_active && ctx->interaction.combo_capture_window >= 0 &&
+      ctx->interaction.combo_capture_window < (int)ctx->window.windows.size()) {
+    const auto &ow = ctx->window.windows[ctx->interaction.combo_capture_window];
     if (!ow.closed &&
-        point_in_rect(px, py, ctx->combo_capture_x, ctx->combo_capture_y,
-                      ctx->combo_capture_w, ctx->combo_capture_h)) {
-      return ctx->combo_capture_window;
+        point_in_rect(px, py, ctx->interaction.combo_capture_x, ctx->interaction.combo_capture_y,
+                      ctx->interaction.combo_capture_w, ctx->interaction.combo_capture_h)) {
+      return ctx->interaction.combo_capture_window;
     }
   }
 
   int best = -1;
   int best_z = -2147483647;
-  for (int i = 0; i < (int)ctx->windows.size(); ++i) {
-    const auto &w = ctx->windows[i];
+  for (int i = 0; i < (int)ctx->window.windows.size(); ++i) {
+    const auto &w = ctx->window.windows[i];
     if (w.closed)
       continue;
     if (!window_accepts_input(w))
@@ -673,23 +336,23 @@ static int top_window_at_point(const MDGUI_Context *ctx, int px, int py,
   return best;
 }
 
-static bool is_tiled_file_browser_window(const MDGUI_Context *ctx,
+ bool is_tiled_file_browser_window(const MDGUI_Context *ctx,
                                          const MDGUI_Window &win) {
   if (!ctx)
     return false;
-  return ctx->tile_manager_enabled && !win.tile_excluded &&
+  return ctx->window.tile_manager_enabled && !win.tile_excluded &&
          win.id == "File Browser";
 }
 
-static bool is_occluded_by_higher_maximized_window(const MDGUI_Context *ctx,
+ bool is_occluded_by_higher_maximized_window(const MDGUI_Context *ctx,
                                                    int window_idx) {
-  if (!ctx || window_idx < 0 || window_idx >= (int)ctx->windows.size())
+  if (!ctx || window_idx < 0 || window_idx >= (int)ctx->window.windows.size())
     return false;
-  const auto &target = ctx->windows[window_idx];
-  for (int i = 0; i < (int)ctx->windows.size(); ++i) {
+  const auto &target = ctx->window.windows[window_idx];
+  for (int i = 0; i < (int)ctx->window.windows.size(); ++i) {
     if (i == window_idx)
       continue;
-    const auto &other = ctx->windows[i];
+    const auto &other = ctx->window.windows[i];
     if (other.closed || !other.is_maximized)
       continue;
     if (other.z > target.z)
@@ -698,14 +361,14 @@ static bool is_occluded_by_higher_maximized_window(const MDGUI_Context *ctx,
   return false;
 }
 
-static int get_logical_render_w(MDGUI_Context *ctx);
-static int get_logical_render_h(MDGUI_Context *ctx);
-static int get_status_bar_h(const MDGUI_Context *ctx);
-static int get_work_area_top(MDGUI_Context *ctx);
-static int get_work_area_bottom(MDGUI_Context *ctx);
-static void clamp_window_to_work_area(MDGUI_Context *ctx, MDGUI_Window &win);
+ int get_logical_render_w(MDGUI_Context *ctx);
+ int get_logical_render_h(MDGUI_Context *ctx);
+ int get_status_bar_h(const MDGUI_Context *ctx);
+ int get_work_area_top(MDGUI_Context *ctx);
+ int get_work_area_bottom(MDGUI_Context *ctx);
+ void clamp_window_to_work_area(MDGUI_Context *ctx, MDGUI_Window &win);
 
-static int clampi(int v, int lo, int hi) {
+ int clampi(int v, int lo, int hi) {
   if (v < lo)
     return lo;
   if (v > hi)
@@ -713,7 +376,7 @@ static int clampi(int v, int lo, int hi) {
   return v;
 }
 
-static void sanitize_overlay_state(MDGUI_OverlayState *state) {
+ void sanitize_overlay_state(MDGUI_OverlayState *state) {
   if (!state)
     return;
   if (state->w < 1)
@@ -730,26 +393,26 @@ static void sanitize_overlay_state(MDGUI_OverlayState *state) {
     state->margin_bottom = 0;
 }
 
-static bool window_accepts_input(const MDGUI_Window &w) {
+ bool window_accepts_input(const MDGUI_Window &w) {
   return !w.input_passthrough;
 }
 
-static bool has_pending_tile_excluded_title(const MDGUI_Context *ctx,
+ bool has_pending_tile_excluded_title(const MDGUI_Context *ctx,
                                             const char *title) {
   if (!ctx || !title)
     return false;
-  for (const auto &it : ctx->pending_tile_excluded_titles) {
+  for (const auto &it : ctx->browser.pending_tile_excluded_titles) {
     if (it == title)
       return true;
   }
   return false;
 }
 
-static int normalize_window_min_w(int min_w) { return (min_w < 50) ? 50 : min_w; }
+ int normalize_window_min_w(int min_w) { return (min_w < 50) ? 50 : min_w; }
 
-static int normalize_window_min_h(int min_h) { return (min_h < 30) ? 30 : min_h; }
+ int normalize_window_min_h(int min_h) { return (min_h < 30) ? 30 : min_h; }
 
-static float normalize_window_min_percent(float percent) {
+ float normalize_window_min_percent(float percent) {
   if (percent < 0.0f)
     return 0.0f;
   if (percent > 100.0f)
@@ -757,7 +420,7 @@ static float normalize_window_min_percent(float percent) {
   return percent;
 }
 
-static int min_from_percent(int total, float percent, int floor_px) {
+ int min_from_percent(int total, float percent, int floor_px) {
   if (total < 1)
     total = 1;
   const float p = normalize_window_min_percent(percent);
@@ -765,29 +428,29 @@ static int min_from_percent(int total, float percent, int floor_px) {
   return (px < floor_px) ? floor_px : px;
 }
 
-static void set_pending_tile_excluded_title(MDGUI_Context *ctx,
+ void set_pending_tile_excluded_title(MDGUI_Context *ctx,
                                             const char *title, bool excluded) {
   if (!ctx || !title)
     return;
-  for (size_t i = 0; i < ctx->pending_tile_excluded_titles.size(); ++i) {
-    if (ctx->pending_tile_excluded_titles[i] != title)
+  for (size_t i = 0; i < ctx->browser.pending_tile_excluded_titles.size(); ++i) {
+    if (ctx->browser.pending_tile_excluded_titles[i] != title)
       continue;
     if (!excluded) {
-      ctx->pending_tile_excluded_titles.erase(
-          ctx->pending_tile_excluded_titles.begin() + (int)i);
+      ctx->browser.pending_tile_excluded_titles.erase(
+          ctx->browser.pending_tile_excluded_titles.begin() + (int)i);
     }
     return;
   }
   if (excluded)
-    ctx->pending_tile_excluded_titles.push_back(title);
+    ctx->browser.pending_tile_excluded_titles.push_back(title);
 }
 
-static bool get_pending_window_min_size(const MDGUI_Context *ctx,
+ bool get_pending_window_min_size(const MDGUI_Context *ctx,
                                         const char *title, int *out_min_w,
                                         int *out_min_h) {
   if (!ctx || !title)
     return false;
-  for (const auto &it : ctx->pending_window_min_sizes) {
+  for (const auto &it : ctx->browser.pending_window_min_sizes) {
     if (it.title != title)
       continue;
     if (it.use_percent) {
@@ -808,13 +471,13 @@ static bool get_pending_window_min_size(const MDGUI_Context *ctx,
   return false;
 }
 
-static void set_pending_window_min_size(MDGUI_Context *ctx, const char *title,
+ void set_pending_window_min_size(MDGUI_Context *ctx, const char *title,
                                         int min_w, int min_h) {
   if (!ctx || !title)
     return;
   const int nw = normalize_window_min_w(min_w);
   const int nh = normalize_window_min_h(min_h);
-  for (auto &it : ctx->pending_window_min_sizes) {
+  for (auto &it : ctx->browser.pending_window_min_sizes) {
     if (it.title != title)
       continue;
     it.min_w = nw;
@@ -824,10 +487,10 @@ static void set_pending_window_min_size(MDGUI_Context *ctx, const char *title,
     it.min_h_percent = 0.0f;
     return;
   }
-  ctx->pending_window_min_sizes.push_back({title, nw, nh, false, 0.0f, 0.0f});
+  ctx->browser.pending_window_min_sizes.push_back({title, nw, nh, false, 0.0f, 0.0f});
 }
 
-static void set_pending_window_min_size_percent(MDGUI_Context *ctx,
+ void set_pending_window_min_size_percent(MDGUI_Context *ctx,
                                                 const char *title,
                                                 float min_w_percent,
                                                 float min_h_percent) {
@@ -835,7 +498,7 @@ static void set_pending_window_min_size_percent(MDGUI_Context *ctx,
     return;
   const float wp = normalize_window_min_percent(min_w_percent);
   const float hp = normalize_window_min_percent(min_h_percent);
-  for (auto &it : ctx->pending_window_min_sizes) {
+  for (auto &it : ctx->browser.pending_window_min_sizes) {
     if (it.title != title)
       continue;
     it.use_percent = true;
@@ -845,19 +508,19 @@ static void set_pending_window_min_size_percent(MDGUI_Context *ctx,
     it.min_h = min_from_percent(get_logical_render_h(ctx), hp, 30);
     return;
   }
-  ctx->pending_window_min_sizes.push_back(
+  ctx->browser.pending_window_min_sizes.push_back(
       {title,
        min_from_percent(get_logical_render_w(ctx), wp, 50),
        min_from_percent(get_logical_render_h(ctx), hp, 30), true, wp, hp});
 }
 
-static bool get_pending_window_min_size_percent(const MDGUI_Context *ctx,
+ bool get_pending_window_min_size_percent(const MDGUI_Context *ctx,
                                                 const char *title,
                                                 float *out_min_w_percent,
                                                 float *out_min_h_percent) {
   if (!ctx || !title)
     return false;
-  for (const auto &it : ctx->pending_window_min_sizes) {
+  for (const auto &it : ctx->browser.pending_window_min_sizes) {
     if (it.title != title)
       continue;
     if (!it.use_percent)
@@ -871,12 +534,12 @@ static bool get_pending_window_min_size_percent(const MDGUI_Context *ctx,
   return false;
 }
 
-static bool get_pending_window_scrollbar_visibility(const MDGUI_Context *ctx,
+ bool get_pending_window_scrollbar_visibility(const MDGUI_Context *ctx,
                                                     const char *title,
                                                     bool *out_visible) {
   if (!ctx || !title)
     return false;
-  for (const auto &it : ctx->pending_window_scrollbars) {
+  for (const auto &it : ctx->browser.pending_window_scrollbars) {
     if (it.title != title)
       continue;
     if (out_visible)
@@ -886,33 +549,33 @@ static bool get_pending_window_scrollbar_visibility(const MDGUI_Context *ctx,
   return false;
 }
 
-static void set_pending_window_scrollbar_visibility(MDGUI_Context *ctx,
+ void set_pending_window_scrollbar_visibility(MDGUI_Context *ctx,
                                                     const char *title,
                                                     bool visible) {
   if (!ctx || !title)
     return;
-  for (auto &it : ctx->pending_window_scrollbars) {
+  for (auto &it : ctx->browser.pending_window_scrollbars) {
     if (it.title != title)
       continue;
     it.visible = visible;
     return;
   }
-  ctx->pending_window_scrollbars.push_back({title, visible});
+  ctx->browser.pending_window_scrollbars.push_back({title, visible});
 }
 
-static int normalize_tile_side(int side) {
+ int normalize_tile_side(int side) {
   if (side < MDGUI_TILE_SIDE_AUTO || side > MDGUI_TILE_SIDE_BOTTOM)
     return MDGUI_TILE_SIDE_AUTO;
   return side;
 }
 
-static int normalize_tile_weight(int weight) {
+ int normalize_tile_weight(int weight) {
   return (weight < 1) ? 1 : weight;
 }
 
 // Fit a desired per-tile minimum into the available span so tiles + gaps never
 // exceed the container when the host window is very small.
-static int fit_tile_min_size(int total_size, int count, int gap,
+ int fit_tile_min_size(int total_size, int count, int gap,
                              int desired_min) {
   if (count <= 0)
     return std::max(1, desired_min);
@@ -931,7 +594,7 @@ static int fit_tile_min_size(int total_size, int count, int gap,
   return std::min(desired_min, max_equal);
 }
 
-static void assign_tiled_window_rect(MDGUI_Window &w, int x, int y, int ww,
+ void assign_tiled_window_rect(MDGUI_Window &w, int x, int y, int ww,
                                      int hh) {
   w.x = x;
   w.y = y;
@@ -945,10 +608,10 @@ static void assign_tiled_window_rect(MDGUI_Window &w, int x, int y, int ww,
   w.fixed_rect = true;
 }
 
-static void tile_windows_grid(MDGUI_Context *ctx, const std::vector<int> &order,
+ void tile_windows_grid(MDGUI_Context *ctx, const std::vector<int> &order,
                               int left, int top, int content_w, int content_h,
-                              int gap, int *out_total_min_w = nullptr,
-                              int *out_total_min_h = nullptr) {
+                              int gap, int *out_total_min_w,
+                              int *out_total_min_h) {
   if (!ctx || order.empty() || content_w <= 0 || content_h <= 0)
     return;
 
@@ -976,8 +639,8 @@ static void tile_windows_grid(MDGUI_Context *ctx, const std::vector<int> &order,
 
     int max_row_min_h = 80; // Default minimum height
     for (int i = 0; i < cols_this_row && (idx + i) < count; ++i) {
-      if (ctx->windows[order[idx + i]].min_h > max_row_min_h)
-        max_row_min_h = ctx->windows[order[idx + i]].min_h;
+      if (ctx->window.windows[order[idx + i]].min_h > max_row_min_h)
+        max_row_min_h = ctx->window.windows[order[idx + i]].min_h;
     }
 
     const int span_h = (top + content_h) - y;
@@ -1003,7 +666,7 @@ static void tile_windows_grid(MDGUI_Context *ctx, const std::vector<int> &order,
       const int cols_left = cols_this_row - col;
       const int span_w = (left + content_w) - x;
       const int col_min_w = fit_tile_min_size(span_w, cols_left, gap,
-                                              ctx->windows[order[idx]].min_w);
+                                              ctx->window.windows[order[idx]].min_w);
       const int w_remaining = span_w - (cols_left - 1) * gap;
       int cell_w = std::max(1, w_remaining);
       if (col < cols_this_row - 1) {
@@ -1013,7 +676,7 @@ static void tile_windows_grid(MDGUI_Context *ctx, const std::vector<int> &order,
           max_for_this = col_min_w;
         cell_w = clampi(target, col_min_w, max_for_this);
       }
-      auto &w = ctx->windows[order[idx]];
+      auto &w = ctx->window.windows[order[idx]];
       assign_tiled_window_rect(w, x, y, cell_w, row_h);
 
       current_row_min_w += w.min_w;
@@ -1034,26 +697,26 @@ static void tile_windows_grid(MDGUI_Context *ctx, const std::vector<int> &order,
     *out_total_min_h = total_min_h;
 }
 
-static int sum_tile_weights(MDGUI_Context *ctx,
+ int sum_tile_weights(MDGUI_Context *ctx,
                             const std::vector<int> &indices) {
   if (!ctx)
     return 0;
   int sum = 0;
   for (int idx : indices) {
-    if (idx < 0 || idx >= (int)ctx->windows.size())
+    if (idx < 0 || idx >= (int)ctx->window.windows.size())
       continue;
-    sum += normalize_tile_weight(ctx->windows[idx].tile_weight);
+    sum += normalize_tile_weight(ctx->window.windows[idx].tile_weight);
   }
   return sum;
 }
 
-static void sort_by_weight_then_z(MDGUI_Context *ctx,
+ void sort_by_weight_then_z(MDGUI_Context *ctx,
                                   std::vector<int> &indices) {
   if (!ctx)
     return;
   std::stable_sort(indices.begin(), indices.end(), [ctx](int a, int b) {
-    const auto &wa = ctx->windows[a];
-    const auto &wb = ctx->windows[b];
+    const auto &wa = ctx->window.windows[a];
+    const auto &wb = ctx->window.windows[b];
     const int wgt_a = normalize_tile_weight(wa.tile_weight);
     const int wgt_b = normalize_tile_weight(wb.tile_weight);
     if (wgt_a != wgt_b)
@@ -1062,15 +725,15 @@ static void sort_by_weight_then_z(MDGUI_Context *ctx,
   });
 }
 
-static void tile_windows_vertical_weighted(MDGUI_Context *ctx,
+ void tile_windows_vertical_weighted(MDGUI_Context *ctx,
                                            const std::vector<int> &order, int x,
                                            int y, int w, int h, int gap,
-                                           int *out_total_min_w = nullptr,
-                                           int *out_total_min_h = nullptr) {
+                                           int *out_total_min_w,
+                                           int *out_total_min_h) {
   if (!ctx || order.empty() || w <= 0 || h <= 0)
     return;
   if ((int)order.size() == 1) {
-    auto &win = ctx->windows[order[0]];
+    auto &win = ctx->window.windows[order[0]];
     assign_tiled_window_rect(win, x, y, w, h);
     if (out_total_min_w)
       *out_total_min_w = win.min_w;
@@ -1093,14 +756,14 @@ static void tile_windows_vertical_weighted(MDGUI_Context *ctx,
     const int items_left = (int)order.size() - i;
     const int span_h = (y + h) - cy;
     const int item_min_h =
-        fit_tile_min_size(span_h, items_left, gap, ctx->windows[idx].min_h);
+        fit_tile_min_size(span_h, items_left, gap, ctx->window.windows[idx].min_h);
     int available_h = span_h - (items_left - 1) * gap;
     if (available_h < item_min_h)
       available_h = item_min_h;
 
     int cell_h = available_h;
     if (i < (int)order.size() - 1 && remaining_weight > 0) {
-      const int wgt = normalize_tile_weight(ctx->windows[idx].tile_weight);
+      const int wgt = normalize_tile_weight(ctx->window.windows[idx].tile_weight);
       int proportional =
           (int)((double)available_h * (double)wgt / (double)remaining_weight);
       int max_for_this = available_h - (items_left - 1) * item_min_h;
@@ -1109,16 +772,16 @@ static void tile_windows_vertical_weighted(MDGUI_Context *ctx,
       cell_h = clampi(proportional, item_min_h, max_for_this);
     }
 
-    assign_tiled_window_rect(ctx->windows[idx], x, cy, w, cell_h);
+    assign_tiled_window_rect(ctx->window.windows[idx], x, cy, w, cell_h);
 
-    total_min_h += ctx->windows[idx].min_h;
+    total_min_h += ctx->window.windows[idx].min_h;
     if (i < (int)order.size() - 1)
       total_min_h += gap;
-    if (ctx->windows[idx].min_w > max_min_w)
-      max_min_w = ctx->windows[idx].min_w;
+    if (ctx->window.windows[idx].min_w > max_min_w)
+      max_min_w = ctx->window.windows[idx].min_w;
 
     cy += cell_h + gap;
-    remaining_weight -= normalize_tile_weight(ctx->windows[idx].tile_weight);
+    remaining_weight -= normalize_tile_weight(ctx->window.windows[idx].tile_weight);
     if (remaining_weight < 0)
       remaining_weight = 0;
   }
@@ -1129,16 +792,16 @@ static void tile_windows_vertical_weighted(MDGUI_Context *ctx,
     *out_total_min_h = total_min_h;
 }
 
-static void tile_windows_horizontal_weighted(MDGUI_Context *ctx,
+ void tile_windows_horizontal_weighted(MDGUI_Context *ctx,
                                              const std::vector<int> &order,
                                              int x, int y, int w, int h,
                                              int gap,
-                                             int *out_total_min_w = nullptr,
-                                             int *out_total_min_h = nullptr) {
+                                             int *out_total_min_w,
+                                             int *out_total_min_h) {
   if (!ctx || order.empty() || w <= 0 || h <= 0)
     return;
   if ((int)order.size() == 1) {
-    auto &win = ctx->windows[order[0]];
+    auto &win = ctx->window.windows[order[0]];
     assign_tiled_window_rect(win, x, y, w, h);
     if (out_total_min_w)
       *out_total_min_w = win.min_w;
@@ -1159,14 +822,14 @@ static void tile_windows_horizontal_weighted(MDGUI_Context *ctx,
     const int items_left = (int)order.size() - i;
     const int span_w = (x + w) - cx;
     const int item_min_w =
-        fit_tile_min_size(span_w, items_left, gap, ctx->windows[idx].min_w);
+        fit_tile_min_size(span_w, items_left, gap, ctx->window.windows[idx].min_w);
     int available_w = span_w - (items_left - 1) * gap;
     if (available_w < item_min_w)
       available_w = item_min_w;
 
     int cell_w = available_w;
     if (i < (int)order.size() - 1 && remaining_weight > 0) {
-      const int wgt = normalize_tile_weight(ctx->windows[idx].tile_weight);
+      const int wgt = normalize_tile_weight(ctx->window.windows[idx].tile_weight);
       int proportional =
           (int)((double)available_w * (double)wgt / (double)remaining_weight);
       int max_for_this = available_w - (items_left - 1) * item_min_w;
@@ -1175,16 +838,16 @@ static void tile_windows_horizontal_weighted(MDGUI_Context *ctx,
       cell_w = clampi(proportional, item_min_w, max_for_this);
     }
 
-    assign_tiled_window_rect(ctx->windows[idx], cx, y, cell_w, h);
+    assign_tiled_window_rect(ctx->window.windows[idx], cx, y, cell_w, h);
 
-    total_min_w += ctx->windows[idx].min_w;
+    total_min_w += ctx->window.windows[idx].min_w;
     if (i < (int)order.size() - 1)
       total_min_w += gap;
-    if (ctx->windows[idx].min_h > max_min_h)
-      max_min_h = ctx->windows[idx].min_h;
+    if (ctx->window.windows[idx].min_h > max_min_h)
+      max_min_h = ctx->window.windows[idx].min_h;
 
     cx += cell_w + gap;
-    remaining_weight -= normalize_tile_weight(ctx->windows[idx].tile_weight);
+    remaining_weight -= normalize_tile_weight(ctx->window.windows[idx].tile_weight);
     if (remaining_weight < 0)
       remaining_weight = 0;
   }
@@ -1195,17 +858,17 @@ static void tile_windows_horizontal_weighted(MDGUI_Context *ctx,
     *out_total_min_h = max_min_h;
 }
 
-static void tile_windows_weighted_cluster(MDGUI_Context *ctx,
+ void tile_windows_weighted_cluster(MDGUI_Context *ctx,
                                           const std::vector<int> &order,
                                           int left, int top, int content_w,
                                           int content_h, int gap,
-                                          int *out_total_min_w = nullptr,
-                                          int *out_total_min_h = nullptr) {
+                                          int *out_total_min_w,
+                                          int *out_total_min_h) {
   if (!ctx || order.empty() || content_w <= 0 || content_h <= 0)
     return;
   const int count = (int)order.size();
   if (count == 1) {
-    auto &win = ctx->windows[order[0]];
+    auto &win = ctx->window.windows[order[0]];
     assign_tiled_window_rect(win, left, top, content_w, content_h);
     if (out_total_min_w)
       *out_total_min_w = win.min_w;
@@ -1218,7 +881,7 @@ static void tile_windows_weighted_cluster(MDGUI_Context *ctx,
   int best_weight = 1;
   int best_z = -2147483647;
   for (int i = 0; i < count; ++i) {
-    const auto &w = ctx->windows[order[i]];
+    const auto &w = ctx->window.windows[order[i]];
     const int weight = normalize_tile_weight(w.tile_weight);
     if (primary_pos < 0 || weight > best_weight ||
         (weight == best_weight && w.z > best_z)) {
@@ -1245,7 +908,7 @@ static void tile_windows_weighted_cluster(MDGUI_Context *ctx,
   int secondary_weight_sum = 0;
   for (int idx : secondary) {
     secondary_weight_sum +=
-        normalize_tile_weight(ctx->windows[idx].tile_weight);
+        normalize_tile_weight(ctx->window.windows[idx].tile_weight);
   }
   if (secondary_weight_sum < 1)
     secondary_weight_sum = (int)secondary.size();
@@ -1259,8 +922,8 @@ static void tile_windows_weighted_cluster(MDGUI_Context *ctx,
   int px = left, py = top, pw = content_w, ph = content_h;
   int sx = left, sy = top, sw = content_w, sh = content_h;
 
-  const int min_primary_w = ctx->windows[order[primary_pos]].min_w;
-  const int min_primary_h = ctx->windows[order[primary_pos]].min_h;
+  const int min_primary_w = ctx->window.windows[order[primary_pos]].min_w;
+  const int min_primary_h = ctx->window.windows[order[primary_pos]].min_h;
 
   int min_sec_w = 0, min_sec_h = 0;
   tile_windows_grid(ctx, secondary, left, top, content_w, content_h, gap,
@@ -1312,13 +975,13 @@ static void tile_windows_weighted_cluster(MDGUI_Context *ctx,
       *out_total_min_h = min_primary_h + gap + min_sec_h;
   }
 
-  assign_tiled_window_rect(ctx->windows[order[primary_pos]], px, py, pw, ph);
+  assign_tiled_window_rect(ctx->window.windows[order[primary_pos]], px, py, pw, ph);
   tile_windows_grid(ctx, secondary, sx, sy, sw, sh, gap);
 }
 
-static void tile_windows_internal(MDGUI_Context *ctx,
-                                  int *out_total_min_w = nullptr,
-                                  int *out_total_min_h = nullptr) {
+ void tile_windows_internal(MDGUI_Context *ctx,
+                                  int *out_total_min_w,
+                                  int *out_total_min_h) {
   if (!ctx)
     return;
 
@@ -1337,9 +1000,9 @@ static void tile_windows_internal(MDGUI_Context *ctx,
     return;
 
   std::vector<int> order;
-  order.reserve(ctx->windows.size());
-  for (int i = 0; i < (int)ctx->windows.size(); ++i) {
-    const auto &w = ctx->windows[i];
+  order.reserve(ctx->window.windows.size());
+  for (int i = 0; i < (int)ctx->window.windows.size(); ++i) {
+    const auto &w = ctx->window.windows[i];
     if (w.closed || w.is_maximized || w.disallow_maximize || w.tile_excluded)
       continue;
     order.push_back(i);
@@ -1349,7 +1012,7 @@ static void tile_windows_internal(MDGUI_Context *ctx,
 
   const int count = (int)order.size();
   if (count == 1) {
-    auto &only = ctx->windows[order[0]];
+    auto &only = ctx->window.windows[order[0]];
     assign_tiled_window_rect(only, left, top, content_w, content_h);
     if (out_total_min_w)
       *out_total_min_w = left + only.min_w + right;
@@ -1360,7 +1023,7 @@ static void tile_windows_internal(MDGUI_Context *ctx,
 
   std::vector<int> left_group, right_group, top_group, bottom_group, auto_group;
   for (int idx : order) {
-    const auto &w = ctx->windows[idx];
+    const auto &w = ctx->window.windows[idx];
     const int side = normalize_tile_side(w.tile_side);
     if (side == MDGUI_TILE_SIDE_LEFT)
       left_group.push_back(idx);
@@ -1482,13 +1145,13 @@ static void tile_windows_internal(MDGUI_Context *ctx,
   }
 }
 
-static int find_or_create_window(MDGUI_Context *ctx, const char *title, int x,
+ int find_or_create_window(MDGUI_Context *ctx, const char *title, int x,
                                  int y, int w, int h,
-                                 bool *out_created = nullptr) {
+                                 bool *out_created) {
   const char *key = title ? title : "window";
-  for (int i = 0; i < (int)ctx->windows.size(); ++i) {
-    if (ctx->windows[i].id == key) {
-      ctx->windows[i].title = key;
+  for (int i = 0; i < (int)ctx->window.windows.size(); ++i) {
+    if (ctx->window.windows[i].id == key) {
+      ctx->window.windows[i].title = key;
       if (out_created)
         *out_created = false;
       return i;
@@ -1501,7 +1164,7 @@ static int find_or_create_window(MDGUI_Context *ctx, const char *title, int x,
   nw.y = y;
   nw.w = w;
   nw.h = h;
-  nw.z = ++ctx->z_counter;
+  nw.z = ++ctx->window.z_counter;
   nw.open_menu_index = -1;
   nw.open_menu_path.clear();
   nw.is_maximized = false;
@@ -1552,40 +1215,40 @@ static int find_or_create_window(MDGUI_Context *ctx, const char *title, int x,
                                               &pending_scrollbar_visible)) {
     nw.scrollbar_visible = pending_scrollbar_visible;
   }
-  nw.alpha = ctx->default_window_alpha;
+  nw.alpha = ctx->window.default_window_alpha;
   nw.input_passthrough = false;
-  ctx->windows.push_back(nw);
+  ctx->window.windows.push_back(nw);
   if (out_created)
     *out_created = true;
-  return (int)ctx->windows.size() - 1;
+  return (int)ctx->window.windows.size() - 1;
 }
 
-static int is_current_window_topmost(MDGUI_Context *ctx, int margin = 0) {
-  if (ctx->current_window < 0)
+ int is_current_window_topmost(MDGUI_Context *ctx, int margin) {
+  if (ctx->window.current_window < 0)
     return 0;
   if (current_subpass(ctx))
     return 1;
-  const auto &w = ctx->windows[ctx->current_window];
+  const auto &w = ctx->window.windows[ctx->window.current_window];
   if (!window_accepts_input(w))
     return 0;
-  return top_window_at_point(ctx, ctx->input.mouse_x, ctx->input.mouse_y,
-                             margin) == ctx->current_window ||
-         w.z >= ctx->z_counter;
+  return top_window_at_point(ctx, ctx->render.input.mouse_x, ctx->render.input.mouse_y,
+                             margin) == ctx->window.current_window ||
+         w.z >= ctx->window.z_counter;
 }
 
-static void draw_open_menu_overlay(MDGUI_Context *ctx) {
-  if (!ctx || ctx->current_window < 0)
+ void draw_open_menu_overlay(MDGUI_Context *ctx) {
+  if (!ctx || ctx->window.current_window < 0)
     return;
-  auto &win = ctx->windows[ctx->current_window];
+  auto &win = ctx->window.windows[ctx->window.current_window];
   if (win.open_menu_path.empty())
     return;
 
-  const int item_h = ctx->current_menu_h;
+  const int item_h = ctx->menus.current_menu_h;
   for (int depth = 0; depth < (int)win.open_menu_path.size(); ++depth) {
     const int menu_idx = win.open_menu_path[depth];
-    if (menu_idx < 0 || menu_idx >= (int)ctx->menu_defs.size())
+    if (menu_idx < 0 || menu_idx >= (int)ctx->menus.menu_defs.size())
       continue;
-    auto &def = ctx->menu_defs[menu_idx];
+    auto &def = ctx->menus.menu_defs[menu_idx];
     const int total_h = (int)def.items.size() * item_h;
     if (total_h <= 0)
       continue;
@@ -1610,7 +1273,7 @@ static void draw_open_menu_overlay(MDGUI_Context *ctx) {
                              def.x + def.w - 4);
         continue;
       }
-      const int hovered = point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y,
+      const int hovered = point_in_rect(ctx->render.input.mouse_x, ctx->render.input.mouse_y,
                                         def.x, iy, def.w, item_h);
       if (hovered) {
         mdgui_fill_rect_idx(nullptr, CLR_ACCENT, def.x, iy, def.w, item_h);
@@ -1648,7 +1311,7 @@ static void draw_open_menu_overlay(MDGUI_Context *ctx) {
   }
 }
 
-static void draw_cached_window_menu_overlay(MDGUI_Context *ctx,
+ void draw_cached_window_menu_overlay(MDGUI_Context *ctx,
                                             MDGUI_Window &win) {
   if (!ctx || win.closed || win.open_menu_path.empty() ||
       win.menu_overlay_defs.empty())
@@ -1688,7 +1351,7 @@ static void draw_cached_window_menu_overlay(MDGUI_Context *ctx,
                              def.x + def.w - 4);
         continue;
       }
-      const int hovered = point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y,
+      const int hovered = point_in_rect(ctx->render.input.mouse_x, ctx->render.input.mouse_y,
                                         def.x, iy, def.w, item_h);
       if (hovered)
         mdgui_fill_rect_idx(nullptr, CLR_ACCENT, def.x, iy, def.w, item_h);
@@ -1711,7 +1374,7 @@ static void draw_cached_window_menu_overlay(MDGUI_Context *ctx,
   }
 }
 
-static int get_logical_render_w(MDGUI_Context *ctx) {
+ int get_logical_render_w(MDGUI_Context *ctx) {
   int rw = 320;
   int rh = 240;
   if (ctx)
@@ -1721,7 +1384,7 @@ static int get_logical_render_w(MDGUI_Context *ctx) {
   return rw;
 }
 
-static int get_logical_render_h(MDGUI_Context *ctx) {
+ int get_logical_render_h(MDGUI_Context *ctx) {
   int rw = 320;
   int rh = 240;
   if (ctx)
@@ -1731,26 +1394,26 @@ static int get_logical_render_h(MDGUI_Context *ctx) {
   return rh;
 }
 
-static int get_status_bar_h(const MDGUI_Context *ctx) {
-  if (!ctx || !ctx->status_bar_visible)
+ int get_status_bar_h(const MDGUI_Context *ctx) {
+  if (!ctx || !ctx->menus.status_bar_visible)
     return 0;
-  if (ctx->status_bar_h > 0)
-    return ctx->status_bar_h;
+  if (ctx->menus.status_bar_h > 0)
+    return ctx->menus.status_bar_h;
   return STATUS_BAR_DEFAULT_H;
 }
 
-static int get_work_area_top(MDGUI_Context *ctx) {
-  return ctx ? ctx->main_menu_bar_h : 0;
+ int get_work_area_top(MDGUI_Context *ctx) {
+  return ctx ? ctx->menus.main_menu_bar_h : 0;
 }
 
-static int get_work_area_bottom(MDGUI_Context *ctx) {
+ int get_work_area_bottom(MDGUI_Context *ctx) {
   int bottom = get_logical_render_h(ctx) - get_status_bar_h(ctx);
   if (bottom < 0)
     bottom = 0;
   return bottom;
 }
 
-static void clamp_window_to_work_area(MDGUI_Context *ctx, MDGUI_Window &win) {
+ void clamp_window_to_work_area(MDGUI_Context *ctx, MDGUI_Window &win) {
   const int screen_w = get_logical_render_w(ctx);
   const int top = get_work_area_top(ctx);
   int bottom = get_work_area_bottom(ctx);
@@ -1784,7 +1447,7 @@ static void clamp_window_to_work_area(MDGUI_Context *ctx, MDGUI_Window &win) {
     win.y = max_y;
 }
 
-static void apply_window_user_min_size(MDGUI_Context *ctx, MDGUI_Window &win) {
+ void apply_window_user_min_size(MDGUI_Context *ctx, MDGUI_Window &win) {
   if (!ctx)
     return;
   if (win.user_min_from_percent) {
@@ -1796,8 +1459,8 @@ static void apply_window_user_min_size(MDGUI_Context *ctx, MDGUI_Window &win) {
   apply_window_user_min_size(ctx, win);
 }
 
-static void draw_status_bar(MDGUI_Context *ctx) {
-  if (!ctx || !ctx->status_bar_visible)
+ void draw_status_bar(MDGUI_Context *ctx) {
+  if (!ctx || !ctx->menus.status_bar_visible)
     return;
   const int rh = get_logical_render_h(ctx);
   const int rw = get_logical_render_w(ctx);
@@ -1812,13 +1475,13 @@ static void draw_status_bar(MDGUI_Context *ctx) {
   mdgui_backend_set_alpha_mod(255);
   mdgui_fill_rect_idx(nullptr, CLR_MENU_BG, 0, bar_y, rw, bar_h);
   mdgui_draw_hline_idx(nullptr, CLR_WINDOW_BORDER, 0, bar_y, rw - 1);
-  if (mdgui_fonts[1] && !ctx->status_bar_text.empty()) {
-    mdgui_fonts[1]->drawText(ctx->status_bar_text.c_str(), nullptr, 3,
+  if (mdgui_fonts[1] && !ctx->menus.status_bar_text.empty()) {
+    mdgui_fonts[1]->drawText(ctx->menus.status_bar_text.c_str(), nullptr, 3,
                              bar_y + 2, CLR_MENU_TEXT);
   }
 }
 
-static std::string ellipsize_text_to_width(const std::string &text,
+ std::string ellipsize_text_to_width(const std::string &text,
                                            int max_w) {
   if (max_w <= 0 || !mdgui_fonts[1])
     return {};
@@ -1842,10 +1505,10 @@ static std::string ellipsize_text_to_width(const std::string &text,
   return out + kEllipsis;
 }
 
-static void prune_expired_toasts(MDGUI_Context *ctx, unsigned long long now_ms) {
+ void prune_expired_toasts(MDGUI_Context *ctx, unsigned long long now_ms) {
   if (!ctx)
     return;
-  auto &toasts = ctx->toasts;
+  auto &toasts = ctx->menus.toasts;
   toasts.erase(std::remove_if(toasts.begin(), toasts.end(),
                               [now_ms](const MDGUI_Context::ToastItem &t) {
                                 return now_ms >= t.expires_at_ms;
@@ -1853,8 +1516,8 @@ static void prune_expired_toasts(MDGUI_Context *ctx, unsigned long long now_ms) 
                toasts.end());
 }
 
-static void draw_toasts(MDGUI_Context *ctx) {
-  if (!ctx || ctx->toasts.empty() || !mdgui_fonts[1])
+ void draw_toasts(MDGUI_Context *ctx) {
+  if (!ctx || ctx->menus.toasts.empty() || !mdgui_fonts[1])
     return;
   const int rw = get_logical_render_w(ctx);
   const int bottom = get_work_area_bottom(ctx);
@@ -1874,12 +1537,12 @@ static void draw_toasts(MDGUI_Context *ctx) {
   mdgui_backend_set_alpha_mod(255);
 
   int y = top;
-  const int total = (int)ctx->toasts.size();
+  const int total = (int)ctx->menus.toasts.size();
   const int first = (total > TOAST_MAX_VISIBLE) ? (total - TOAST_MAX_VISIBLE) : 0;
   for (int i = first; i < total; ++i) {
     if (y + toast_h > bottom)
       break;
-    const auto &toast = ctx->toasts[(size_t)i];
+    const auto &toast = ctx->menus.toasts[(size_t)i];
     std::string text = ellipsize_text_to_width(toast.text, text_max_w);
     const int text_w = text.empty() ? 0 : mdgui_fonts[1]->measureTextWidth(text.c_str());
     int toast_w = text_w + (pad_x * 2);
@@ -1900,7 +1563,7 @@ static void draw_toasts(MDGUI_Context *ctx) {
   }
 }
 
-static void center_window_rect_menu_aware(MDGUI_Context *ctx,
+ void center_window_rect_menu_aware(MDGUI_Context *ctx,
                                           MDGUI_Window &win) {
   const int screen_w = get_logical_render_w(ctx);
   const int top = get_work_area_top(ctx);
@@ -1924,7 +1587,7 @@ static void center_window_rect_menu_aware(MDGUI_Context *ctx,
   win.y = y;
 }
 
-static bool ci_less(const std::string &a, const std::string &b) {
+ bool ci_less(const std::string &a, const std::string &b) {
   size_t i = 0;
   const size_t n = std::min(a.size(), b.size());
   while (i < n) {
@@ -1939,7 +1602,7 @@ static bool ci_less(const std::string &a, const std::string &b) {
   return a.size() < b.size();
 }
 
-static std::vector<std::string> enumerate_file_browser_drives() {
+ std::vector<std::string> enumerate_file_browser_drives() {
   std::vector<std::string> roots;
 #ifdef _WIN32
   const DWORD drive_mask = GetLogicalDrives();
@@ -2017,32 +1680,32 @@ static std::vector<std::string> enumerate_file_browser_drives() {
   return roots;
 }
 
-static bool file_browser_path_exists(const std::string &path) {
+ bool file_browser_path_exists(const std::string &path) {
   if (path.empty())
     return false;
   std::error_code ec;
   return std::filesystem::exists(path, ec) && !ec;
 }
 
-static std::string file_browser_default_open_path(const MDGUI_Context *ctx) {
-  if (!ctx || ctx->file_browser_drives.empty())
+ std::string file_browser_default_open_path(const MDGUI_Context *ctx) {
+  if (!ctx || ctx->browser.drives.empty())
     return ".";
-  return ctx->file_browser_drives.front();
+  return ctx->browser.drives.front();
 }
 
-static void file_browser_refresh_drives(MDGUI_Context *ctx, bool force_scan) {
+ void file_browser_refresh_drives(MDGUI_Context *ctx, bool force_scan) {
   if (!ctx)
     return;
   const Uint64 now = mdgui_backend_get_ticks_ms();
-  if (!force_scan && ctx->file_browser_last_drive_scan_ticks > 0 &&
-      (now - ctx->file_browser_last_drive_scan_ticks) < 500) {
+  if (!force_scan && ctx->browser.last_drive_scan_ticks > 0 &&
+      (now - ctx->browser.last_drive_scan_ticks) < 500) {
     return;
   }
-  ctx->file_browser_last_drive_scan_ticks = now;
-  ctx->file_browser_drives = enumerate_file_browser_drives();
+  ctx->browser.last_drive_scan_ticks = now;
+  ctx->browser.drives = enumerate_file_browser_drives();
 }
 
-static std::string normalize_extension_filter(const char *ext) {
+ std::string normalize_extension_filter(const char *ext) {
   if (!ext)
     return {};
   std::string s(ext);
@@ -2057,7 +1720,7 @@ static std::string normalize_extension_filter(const char *ext) {
   return s;
 }
 
-static std::string path_extension_lower(const std::filesystem::path &p) {
+ std::string path_extension_lower(const std::filesystem::path &p) {
   if (!p.has_extension())
     return {};
   std::string ext = p.extension().string();
@@ -2066,31 +1729,31 @@ static std::string path_extension_lower(const std::filesystem::path &p) {
   return ext;
 }
 
-static bool file_matches_filters(const MDGUI_Context *ctx,
+ bool file_matches_filters(const MDGUI_Context *ctx,
                                  const std::filesystem::path &p) {
-  if (!ctx || ctx->file_browser_ext_filters.empty())
+  if (!ctx || ctx->browser.ext_filters.empty())
     return true; // default: show all
                  // regular files
   const std::string ext = path_extension_lower(p);
   if (ext.empty())
     return false;
-  for (const auto &f : ctx->file_browser_ext_filters) {
+  for (const auto &f : ctx->browser.ext_filters) {
     if (ext == f)
       return true;
   }
   return false;
 }
 
-static void file_browser_open_path(MDGUI_Context *ctx, const char *path) {
+ void file_browser_open_path(MDGUI_Context *ctx, const char *path) {
   if (!ctx)
     return;
   namespace fs = std::filesystem;
   std::error_code ec;
   fs::path next(path ? path : ".");
   if (next.is_relative()) {
-    const fs::path base = ctx->file_browser_cwd.empty()
+    const fs::path base = ctx->browser.cwd.empty()
                               ? fs::path(".")
-                              : fs::path(ctx->file_browser_cwd);
+                              : fs::path(ctx->browser.cwd);
     next = base / next;
   }
 
@@ -2101,21 +1764,21 @@ static void file_browser_open_path(MDGUI_Context *ctx, const char *path) {
       norm = next;
   }
 
-  ctx->file_browser_entries.clear();
-  ctx->file_browser_cwd = norm.string();
-  ctx->file_browser_selected = -1;
-  ctx->file_browser_scroll = 0;
-  ctx->file_browser_restore_scroll_pending = false;
-  ctx->file_browser_scroll_dragging = false;
-  ctx->file_browser_scroll_drag_offset = 0;
+  ctx->browser.entries.clear();
+  ctx->browser.cwd = norm.string();
+  ctx->browser.selected = -1;
+  ctx->browser.scroll = 0;
+  ctx->browser.restore_scroll_pending = false;
+  ctx->browser.scroll_dragging = false;
+  ctx->browser.scroll_drag_offset = 0;
 
-  fs::path cwd_path(ctx->file_browser_cwd);
+  fs::path cwd_path(ctx->browser.cwd);
   if (cwd_path.has_parent_path()) {
     FileBrowserEntry up{};
     up.label = "..";
     up.full_path = cwd_path.parent_path().string();
     up.is_dir = true;
-    ctx->file_browser_entries.push_back(up);
+    ctx->browser.entries.push_back(up);
   }
 
   std::vector<FileBrowserEntry> dirs;
@@ -2136,7 +1799,7 @@ static void file_browser_open_path(MDGUI_Context *ctx, const char *path) {
     if (is_dir) {
       row.label = std::string("[DIR] ") + name;
       dirs.push_back(row);
-    } else if (!ctx->file_browser_select_folders &&
+    } else if (!ctx->browser.select_folders &&
                entry.is_regular_file(st_ec) && !st_ec &&
                file_matches_filters(ctx, entry.path())) {
       row.label = name;
@@ -2153,34 +1816,34 @@ static void file_browser_open_path(MDGUI_Context *ctx, const char *path) {
               return ci_less(a.label, b.label);
             });
 
-  ctx->file_browser_entries.insert(ctx->file_browser_entries.end(),
+  ctx->browser.entries.insert(ctx->browser.entries.end(),
                                    dirs.begin(), dirs.end());
-  if (!ctx->file_browser_select_folders) {
-    ctx->file_browser_entries.insert(ctx->file_browser_entries.end(),
+  if (!ctx->browser.select_folders) {
+    ctx->browser.entries.insert(ctx->browser.entries.end(),
                                      files.begin(), files.end());
   }
-  if (!ctx->file_browser_entries.empty()) {
+  if (!ctx->browser.entries.empty()) {
     int restore_idx = -1;
-    if (!ctx->file_browser_last_selected_path.empty()) {
-      for (int i = 0; i < (int)ctx->file_browser_entries.size(); ++i) {
-        if (!ctx->file_browser_select_folders &&
-            !ctx->file_browser_entries[(size_t)i].is_dir &&
-            ctx->file_browser_entries[(size_t)i].full_path ==
-                ctx->file_browser_last_selected_path) {
+    if (!ctx->browser.last_selected_path.empty()) {
+      for (int i = 0; i < (int)ctx->browser.entries.size(); ++i) {
+        if (!ctx->browser.select_folders &&
+            !ctx->browser.entries[(size_t)i].is_dir &&
+            ctx->browser.entries[(size_t)i].full_path ==
+                ctx->browser.last_selected_path) {
           restore_idx = i;
           break;
         }
       }
     }
-    ctx->file_browser_selected = (restore_idx >= 0) ? restore_idx : 0;
-    ctx->file_browser_restore_scroll_pending = (restore_idx >= 0);
+    ctx->browser.selected = (restore_idx >= 0) ? restore_idx : 0;
+    ctx->browser.restore_scroll_pending = (restore_idx >= 0);
   }
 }
 
-static void draw_open_main_menu_overlay(MDGUI_Context *ctx) {
+ void draw_open_main_menu_overlay(MDGUI_Context *ctx) {
   if (!ctx)
     return;
-  if (ctx->open_main_menu_path.empty())
+  if (ctx->menus.open_main_menu_path.empty())
     return;
 
   // Main-menu popups are an overlay and should not inherit clip or alpha
@@ -2189,11 +1852,11 @@ static void draw_open_main_menu_overlay(MDGUI_Context *ctx) {
   mdgui_backend_set_alpha_mod(255);
 
   const int item_h = MAIN_MENU_ITEM_H;
-  for (int depth = 0; depth < (int)ctx->open_main_menu_path.size(); ++depth) {
-    const int menu_idx = ctx->open_main_menu_path[depth];
-    if (menu_idx < 0 || menu_idx >= (int)ctx->main_menu_defs.size())
+  for (int depth = 0; depth < (int)ctx->menus.open_main_menu_path.size(); ++depth) {
+    const int menu_idx = ctx->menus.open_main_menu_path[depth];
+    if (menu_idx < 0 || menu_idx >= (int)ctx->menus.main_menu_defs.size())
       continue;
-    auto &def = ctx->main_menu_defs[menu_idx];
+    auto &def = ctx->menus.main_menu_defs[menu_idx];
     const int total_h = (int)def.items.size() * item_h;
     if (total_h <= 0)
       continue;
@@ -2218,32 +1881,32 @@ static void draw_open_main_menu_overlay(MDGUI_Context *ctx) {
                              def.x + def.w - 4);
         continue;
       }
-      const int hovered = point_in_rect(ctx->input.mouse_x, ctx->input.mouse_y,
+      const int hovered = point_in_rect(ctx->render.input.mouse_x, ctx->render.input.mouse_y,
                                         def.x, iy, def.w, item_h);
       if (hovered) {
         mdgui_fill_rect_idx(nullptr, CLR_ACCENT, def.x, iy, def.w, item_h);
         if (def.items[i].child_menu_index >= 0) {
           const int child_idx = def.items[i].child_menu_index;
           const int want_size = depth + 2;
-          if ((int)ctx->open_main_menu_path.size() < want_size) {
-            ctx->open_main_menu_path.resize((size_t)want_size);
+          if ((int)ctx->menus.open_main_menu_path.size() < want_size) {
+            ctx->menus.open_main_menu_path.resize((size_t)want_size);
           }
-          if ((int)ctx->open_main_menu_item_path.size() < want_size) {
-            ctx->open_main_menu_item_path.resize((size_t)want_size, -1);
+          if ((int)ctx->menus.open_main_menu_item_path.size() < want_size) {
+            ctx->menus.open_main_menu_item_path.resize((size_t)want_size, -1);
           }
-          ctx->open_main_menu_path[depth + 1] = child_idx;
-          ctx->open_main_menu_item_path[depth + 1] = i;
-          ctx->open_main_menu_index = ctx->open_main_menu_path.empty()
+          ctx->menus.open_main_menu_path[depth + 1] = child_idx;
+          ctx->menus.open_main_menu_item_path[depth + 1] = i;
+          ctx->menus.open_main_menu_index = ctx->menus.open_main_menu_path.empty()
                                           ? -1
-                                          : ctx->open_main_menu_path[0];
-        } else if ((int)ctx->open_main_menu_path.size() > depth + 1) {
-          ctx->open_main_menu_path.resize((size_t)depth + 1);
-          if ((int)ctx->open_main_menu_item_path.size() > depth + 1) {
-            ctx->open_main_menu_item_path.resize((size_t)depth + 1);
+                                          : ctx->menus.open_main_menu_path[0];
+        } else if ((int)ctx->menus.open_main_menu_path.size() > depth + 1) {
+          ctx->menus.open_main_menu_path.resize((size_t)depth + 1);
+          if ((int)ctx->menus.open_main_menu_item_path.size() > depth + 1) {
+            ctx->menus.open_main_menu_item_path.resize((size_t)depth + 1);
           }
-          ctx->open_main_menu_index = ctx->open_main_menu_path.empty()
+          ctx->menus.open_main_menu_index = ctx->menus.open_main_menu_path.empty()
                                           ? -1
-                                          : ctx->open_main_menu_path[0];
+                                          : ctx->menus.open_main_menu_path[0];
         }
       }
       if (mdgui_fonts[1]) {
@@ -2265,4 +1928,6 @@ static void draw_open_main_menu_overlay(MDGUI_Context *ctx) {
   }
 }
 
-extern "C" {
+
+
+

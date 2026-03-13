@@ -1,7 +1,16 @@
 const std = @import("std");
 
 const mdgui_c_sources = &.{
-    "src/mdgui_c.cpp",
+    "mdgui_impl/core/impl_core.cpp",
+    "mdgui_impl/core/layout_helpers.cpp",
+    "mdgui_impl/core/context.cpp",
+    "mdgui_impl/widgets/basic.cpp",
+    "mdgui_impl/widgets/input.cpp",
+    "mdgui_impl/widgets/menu.cpp",
+    "mdgui_impl/core/windowing.cpp",
+    "mdgui_impl/core/overlay.cpp",
+    "mdgui_impl/features/file_browser.cpp",
+    "mdgui_impl/features/demo.cpp",
     "mdgui_impl/glue/mdgui_glue.cpp",
     "mdgui_impl/backends/mdgui_backend_sdl.cpp",
     "mdgui_impl/backends/mdgui_backend_opengl.cpp",

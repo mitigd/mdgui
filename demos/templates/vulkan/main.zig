@@ -904,6 +904,7 @@ fn drawMainWindow(
     demo_text: *[128]u8,
     demo_text_multiline: *[1024]u8,
 ) void {
+    _ = overlay_state;
     if (c.mdgui_begin_window(ctx, "MDGUI", 10, 10, 220, 170) != 0) {
         c.mdgui_begin_menu_bar(ctx);
         if (c.mdgui_begin_menu(ctx, "FILE") != 0) {
