@@ -236,6 +236,10 @@ void mdgui_open_file_browser(MDGUI_Context *ctx);
 // Opens centered when x/y are negative; otherwise positions at x/y.
 void mdgui_open_file_browser_at(MDGUI_Context *ctx, int x, int y);
 const char *mdgui_show_file_browser(MDGUI_Context *ctx);
+void mdgui_open_folder_browser(MDGUI_Context *ctx);
+// Opens centered when x/y are negative; otherwise positions at x/y.
+void mdgui_open_folder_browser_at(MDGUI_Context *ctx, int x, int y);
+const char *mdgui_show_folder_browser(MDGUI_Context *ctx);
 void mdgui_set_file_browser_filters(MDGUI_Context *ctx, const char **extensions,
                                     int extension_count);
 void mdgui_set_file_browser_path(MDGUI_Context *ctx, const char *path);

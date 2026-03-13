@@ -325,6 +325,7 @@ struct MDGUI_Context {
   int active_text_input_scroll_y;
 
   bool file_browser_open;
+  bool file_browser_select_folders;
   std::string file_browser_cwd;
   std::vector<FileBrowserEntry> file_browser_entries;
   int file_browser_selected;
@@ -2118,7 +2119,8 @@ static void file_browser_open_path(MDGUI_Context *ctx, const char *path) {
     if (is_dir) {
       row.label = std::string("[DIR] ") + name;
       dirs.push_back(row);
-    } else if (entry.is_regular_file(st_ec) && !st_ec &&
+    } else if (!ctx->file_browser_select_folders &&
+               entry.is_regular_file(st_ec) && !st_ec &&
                file_matches_filters(ctx, entry.path())) {
       row.label = name;
       files.push_back(row);
@@ -2136,13 +2138,16 @@ static void file_browser_open_path(MDGUI_Context *ctx, const char *path) {
 
   ctx->file_browser_entries.insert(ctx->file_browser_entries.end(),
                                    dirs.begin(), dirs.end());
-  ctx->file_browser_entries.insert(ctx->file_browser_entries.end(),
-                                   files.begin(), files.end());
+  if (!ctx->file_browser_select_folders) {
+    ctx->file_browser_entries.insert(ctx->file_browser_entries.end(),
+                                     files.begin(), files.end());
+  }
   if (!ctx->file_browser_entries.empty()) {
     int restore_idx = -1;
     if (!ctx->file_browser_last_selected_path.empty()) {
       for (int i = 0; i < (int)ctx->file_browser_entries.size(); ++i) {
-        if (!ctx->file_browser_entries[(size_t)i].is_dir &&
+        if (!ctx->file_browser_select_folders &&
+            !ctx->file_browser_entries[(size_t)i].is_dir &&
             ctx->file_browser_entries[(size_t)i].full_path ==
                 ctx->file_browser_last_selected_path) {
           restore_idx = i;
@@ -2380,6 +2385,7 @@ MDGUI_Context *mdgui_create_with_backend(const MDGUI_RenderBackend *backend) {
   ctx->active_text_input_multiline = false;
   ctx->active_text_input_scroll_y = 0;
   ctx->file_browser_open = false;
+  ctx->file_browser_select_folders = false;
   ctx->file_browser_cwd = ".";
   ctx->file_browser_selected = -1;
   ctx->file_browser_scroll = 0;
@@ -6738,13 +6744,21 @@ void mdgui_run_window_pass(MDGUI_Context *ctx,
   }
 }
 
-void mdgui_open_file_browser_at(MDGUI_Context *ctx, int x, int y) {
+static void open_browser_at_mode(MDGUI_Context *ctx, int x, int y,
+                                 bool select_folders) {
   if (!ctx)
     return;
+  const char *browser_title = select_folders ? "Folder Browser" : "File Browser";
+  const char *other_title = select_folders ? "File Browser" : "Folder Browser";
+  for (auto &w : ctx->windows) {
+    if (w.id == other_title) {
+      w.closed = true;
+    }
+  }
   // Prevent same-frame click-through
   // from the opener button/menu item.
   ctx->input.mouse_pressed = 0;
-  const int idx = find_or_create_window(ctx, "File Browser", 28, 20, 280, 240);
+  const int idx = find_or_create_window(ctx, browser_title, 28, 20, 280, 240);
   if (idx >= 0 && idx < (int)ctx->windows.size()) {
     auto &win = ctx->windows[idx];
     win.closed = false;
@@ -6771,6 +6785,7 @@ void mdgui_open_file_browser_at(MDGUI_Context *ctx, int x, int y) {
   ctx->dragging_window = -1;
   ctx->resizing_window = -1;
   ctx->file_browser_open = true;
+  ctx->file_browser_select_folders = select_folders;
   ctx->file_browser_open_x = x;
   ctx->file_browser_open_y = y;
   ctx->file_browser_center_pending = (x < 0 && y < 0);
@@ -6783,8 +6798,20 @@ void mdgui_open_file_browser_at(MDGUI_Context *ctx, int x, int y) {
   file_browser_open_path(ctx, ctx->file_browser_cwd.c_str());
 }
 
+void mdgui_open_file_browser_at(MDGUI_Context *ctx, int x, int y) {
+  open_browser_at_mode(ctx, x, y, false);
+}
+
 void mdgui_open_file_browser(MDGUI_Context *ctx) {
   mdgui_open_file_browser_at(ctx, -1, -1);
+}
+
+void mdgui_open_folder_browser_at(MDGUI_Context *ctx, int x, int y) {
+  open_browser_at_mode(ctx, x, y, true);
+}
+
+void mdgui_open_folder_browser(MDGUI_Context *ctx) {
+  mdgui_open_folder_browser_at(ctx, -1, -1);
 }
 
 void mdgui_set_file_browser_filters(MDGUI_Context *ctx, const char **extensions,
@@ -6811,16 +6838,18 @@ void mdgui_set_file_browser_filters(MDGUI_Context *ctx, const char **extensions,
   }
 }
 
-const char *mdgui_show_file_browser(MDGUI_Context *ctx) {
-  if (!ctx || !ctx->file_browser_open)
+static const char *show_browser_mode(MDGUI_Context *ctx, bool select_folders) {
+  if (!ctx || !ctx->file_browser_open ||
+      ctx->file_browser_select_folders != select_folders)
     return nullptr;
+  const char *browser_title = select_folders ? "Folder Browser" : "File Browser";
   ctx->file_browser_result.clear();
 
   const int open_x = (ctx->file_browser_open_x >= 0) ? ctx->file_browser_open_x : 28;
   const int open_y = (ctx->file_browser_open_y >= 0) ? ctx->file_browser_open_y : 20;
-  if (!mdgui_begin_window(ctx, "File Browser", open_x, open_y, 280, 240)) {
+  if (!mdgui_begin_window(ctx, browser_title, open_x, open_y, 280, 240)) {
     for (int i = 0; i < (int)ctx->windows.size(); ++i) {
-      if (ctx->windows[i].id == "File Browser" && !ctx->windows[i].closed) {
+      if (ctx->windows[i].id == browser_title && !ctx->windows[i].closed) {
         // Hidden behind a higher z fullscreen window; keep browser state open.
         return nullptr;
       }
@@ -7032,6 +7061,7 @@ const char *mdgui_show_file_browser(MDGUI_Context *ctx) {
   ctx->content_y += 4 + list_h + 4;
 
   bool trigger_open = false;
+  bool trigger_select = false;
   if (clicked && ctx->file_browser_selected >= 0 &&
       ctx->file_browser_selected < (int)ctx->file_browser_entries.size()) {
     const int idx = ctx->file_browser_selected;
@@ -7061,8 +7091,12 @@ const char *mdgui_show_file_browser(MDGUI_Context *ctx) {
   ctx->layout_indent = 60;
   ctx->layout_has_last_item = false;
   ctx->layout_same_line = false;
-  if (mdgui_button(ctx, "Open", 60, button_h)) {
-    trigger_open = true;
+  if (mdgui_button(ctx, select_folders ? "Select" : "Open", 60, button_h)) {
+    if (select_folders) {
+      trigger_select = true;
+    } else {
+      trigger_open = true;
+    }
   }
   ctx->content_y = button_logical_y;
   ctx->layout_indent = 124;
@@ -7080,12 +7114,28 @@ const char *mdgui_show_file_browser(MDGUI_Context *ctx) {
   ctx->layout_has_last_item = saved_has_last;
   ctx->layout_same_line = saved_same_line;
 
+  if (trigger_select) {
+    std::string selected_path = ctx->file_browser_cwd;
+    if (ctx->file_browser_selected >= 0 &&
+        ctx->file_browser_selected < (int)ctx->file_browser_entries.size()) {
+      const auto &entry = ctx->file_browser_entries[ctx->file_browser_selected];
+      if (entry.is_dir && entry.label != "..")
+        selected_path = entry.full_path;
+    }
+    ctx->file_browser_result = selected_path;
+    ctx->file_browser_open = false;
+    if (ctx->current_window >= 0 &&
+        ctx->current_window < (int)ctx->windows.size()) {
+      ctx->windows[ctx->current_window].closed = true;
+    }
+  }
+
   if (trigger_open && ctx->file_browser_selected >= 0 &&
       ctx->file_browser_selected < (int)ctx->file_browser_entries.size()) {
     const auto &entry = ctx->file_browser_entries[ctx->file_browser_selected];
     if (entry.is_dir) {
       file_browser_open_path(ctx, entry.full_path.c_str());
-    } else {
+    } else if (!select_folders) {
       ctx->file_browser_last_selected_path = entry.full_path;
       ctx->file_browser_result = entry.full_path;
       ctx->file_browser_open = false;
@@ -7100,6 +7150,14 @@ const char *mdgui_show_file_browser(MDGUI_Context *ctx) {
   if (!ctx->file_browser_result.empty())
     return ctx->file_browser_result.c_str();
   return nullptr;
+}
+
+const char *mdgui_show_file_browser(MDGUI_Context *ctx) {
+  return show_browser_mode(ctx, false);
+}
+
+const char *mdgui_show_folder_browser(MDGUI_Context *ctx) {
+  return show_browser_mode(ctx, true);
 }
 
 void mdgui_show_demo_window(MDGUI_Context *ctx) {
