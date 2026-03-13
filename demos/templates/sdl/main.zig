@@ -549,6 +549,75 @@ fn drawPerfGraphWindow(ctx: ?*c.MDGUI_Context, analytics: *const Analytics) void
     c.mdgui_end_window(ctx);
 }
 
+fn drawPerfHudContent(ctx: ?*c.MDGUI_Context, analytics: *const Analytics) void {
+    const stats = analyticsStats(analytics);
+    var line: [96]u8 = undefined;
+    const txt = std.fmt.bufPrintZ(
+        &line,
+        "FPS {d:.1} | {d:.2} ms | min/max {d:.1}/{d:.1}",
+        .{ stats.current_fps, stats.current_ms, stats.min_fps, stats.max_fps },
+    ) catch "stats";
+    c.mdgui_label(ctx, txt.ptr);
+
+    var ordered: [Analytics.history_len]f32 = [_]f32{16.67} ** Analytics.history_len;
+    var i: usize = 0;
+    while (i < analytics.count) : (i += 1) {
+        ordered[i] = analyticsSampleFrameMs(analytics, i);
+    }
+    c.mdgui_frame_time_graph(
+        ctx,
+        &ordered[0],
+        @as(c_int, @intCast(analytics.count)),
+        analytics.target_fps,
+        analytics.graph_max_ms,
+        0,
+        50,
+    );
+}
+
+fn drawPerfHud(ctx: ?*c.MDGUI_Context, analytics: *const Analytics, use_subpass: bool) void {
+    c.mdgui_set_window_rect(ctx, "Perf HUD", 6, 13, 240, 78);
+    c.mdgui_set_window_open(ctx, "Perf HUD", 1);
+    c.mdgui_set_window_alpha(ctx, "Perf HUD", 214);
+
+    var view_x: c_int = 0;
+    var view_y: c_int = 0;
+    var view_w: c_int = 0;
+    var view_h: c_int = 0;
+    const flags = c.MDGUI_WINDOW_FLAG_NO_CHROME | c.MDGUI_WINDOW_FLAG_EXCLUDE_FROM_TILING;
+    if (c.mdgui_begin_render_window_ex(
+        ctx,
+        "Perf HUD",
+        6,
+        13,
+        240,
+        78,
+        0,
+        flags,
+        &view_x,
+        &view_y,
+        &view_w,
+        &view_h,
+    ) == 0) return;
+
+    if (use_subpass) {
+        var sx: c_int = 0;
+        var sy: c_int = 0;
+        var sw: c_int = 0;
+        var sh: c_int = 0;
+        if (c.mdgui_begin_subpass(ctx, "perf_hud_subpass", 0, 0, 0, 0, 1.0, &sx, &sy, &sw, &sh) != 0) {
+            drawPerfHudContent(ctx, analytics);
+            c.mdgui_end_subpass(ctx);
+        } else {
+            drawPerfHudContent(ctx, analytics);
+        }
+    } else {
+        drawPerfHudContent(ctx, analytics);
+    }
+
+    c.mdgui_end_window(ctx);
+}
+
 fn getLogicalRenderSize(renderer: ?*c.SDL_Renderer, out_w: *c_int, out_h: *c_int) void {
     var rw: c_int = 640;
     var rh: c_int = 360;
@@ -690,6 +759,8 @@ pub fn main() !void {
     var show_about = false;
     var show_demo = true;
     var show_nested_test_area = false;
+    var show_perf_hud = false;
+    var perf_hud_use_subpass = true;
     var show_window_api_menu = false;
     var emu_view_fullscreen = false;
     var selected_rom_buf: [512]u8 = [_]u8{0} ** 512;
@@ -969,6 +1040,25 @@ pub fn main() !void {
                         request_open_perf_graph = true;
                     }
                 }
+                if (show_perf_hud) {
+                    if (c.mdgui_main_menu_item(ctx, "[x] Perf HUD") != 0) {
+                        show_perf_hud = false;
+                        c.mdgui_set_window_open(ctx, "Perf HUD", 0);
+                    }
+                } else {
+                    if (c.mdgui_main_menu_item(ctx, "[ ] Perf HUD") != 0) {
+                        show_perf_hud = true;
+                    }
+                }
+                if (perf_hud_use_subpass) {
+                    if (c.mdgui_main_menu_item(ctx, "[x] Perf HUD Subpass (1x)") != 0) {
+                        perf_hud_use_subpass = false;
+                    }
+                } else {
+                    if (c.mdgui_main_menu_item(ctx, "[ ] Perf HUD Subpass (1x)") != 0) {
+                        perf_hud_use_subpass = true;
+                    }
+                }
                 if (c.mdgui_main_menu_item(ctx, "Window API") != 0) {
                     const is_open = c.mdgui_is_window_open(ctx, render_api_window_title) != 0;
                     if (is_open) {
@@ -1088,6 +1178,12 @@ pub fn main() !void {
                 .emu_view => drawWindowApiDemo(ctx, renderer, show_window_api_menu),
                 .perf_graph => drawPerfGraphWindow(ctx, &analytics),
             }
+        }
+
+        if (show_perf_hud) {
+            drawPerfHud(ctx, &analytics, perf_hud_use_subpass);
+        } else {
+            c.mdgui_set_window_open(ctx, "Perf HUD", 0);
         }
 
         if (request_open_main_ui) {
