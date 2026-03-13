@@ -519,7 +519,7 @@ fn updateNestedOverlayClip(overlay: *DeferredOverlayState, draw_data: *const c.M
     if (draw_data.commands == null or draw_data.command_count == 0) return;
 
     const commands = draw_data.commands.?;
-    var best_area: i64 = std.math.maxInt(i64);
+    var best_area: i64 = 0;
     var best_clip = rectIntersection(
         overlay.nested_test_area_x,
         overlay.nested_test_area_y,
@@ -548,7 +548,7 @@ fn updateNestedOverlayClip(overlay: *DeferredOverlayState, draw_data: *const c.M
         ) orelse continue;
 
         const area = @as(i64, overlap.w) * @as(i64, overlap.h);
-        if (area < best_area) {
+        if (area > best_area) {
             best_area = area;
             best_clip = overlap;
         }
