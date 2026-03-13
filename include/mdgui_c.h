@@ -152,6 +152,7 @@ typedef struct MDGUI_OverlayState {
   int visible;
   int use_subpass;
   int allow_mouse_drag;
+  int click_through;
   int dragging;
   int drag_offset_x;
   int drag_offset_y;

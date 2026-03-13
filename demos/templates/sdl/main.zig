@@ -348,7 +348,7 @@ fn drawAnalyticsWindow(ctx: ?*c.MDGUI_Context, renderer: ?*c.SDL_Renderer, analy
 
     c.mdgui_separator(ctx, 0);
     if (c.mdgui_begin_collapsing_header_group(ctx, "perf.overlay", "Overlay Agnosticism", -16, 1, 6) != 0) {
-        c.mdgui_label_wrapped(ctx, "Transparent overlays are configurable content surfaces. Adjust screen position, size, alpha, inner margins, or swap in custom drawing.", -16);
+        c.mdgui_label_wrapped(ctx, "Transparent overlays are configurable content surfaces. Adjust screen position, size, alpha, inner margins, click-through, or swap in custom drawing.", -16);
 
         var overlay_visible = overlay.visible != 0;
         _ = c.mdgui_checkbox(ctx, "Show perf overlay", &overlay_visible);
@@ -361,6 +361,11 @@ fn drawAnalyticsWindow(ctx: ?*c.MDGUI_Context, renderer: ?*c.SDL_Renderer, analy
         var allow_mouse_drag = overlay.allow_mouse_drag != 0;
         _ = c.mdgui_checkbox(ctx, "Allow mouse move overlay", &allow_mouse_drag);
         overlay.allow_mouse_drag = if (allow_mouse_drag) 1 else 0;
+
+        var click_through = overlay.click_through != 0;
+        _ = c.mdgui_checkbox(ctx, "Click-through overlay", &click_through);
+        overlay.click_through = if (click_through) 1 else 0;
+        if (overlay.click_through != 0) overlay.allow_mouse_drag = 0;
 
         const max_x = @max(0, rw - overlay.w);
         var xf = @as(f32, @floatFromInt(overlay.x));
